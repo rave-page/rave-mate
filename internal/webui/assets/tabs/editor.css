@@ -322,9 +322,22 @@
 .edv-player {
   margin: 0.6rem 0;
 }
-/* Viewer pane: the player video is THE preview - let it breathe. */
+/* Viewer pane: the player video is THE preview - let it breathe. The box height is
+   drag-resizable (mp-vgrip → inline height); the video fills whatever height it gets,
+   so the 300px .mp-video cap must not apply here. */
 .edv-pane-view .mp-videobox {
   max-height: 52vh;
+}
+.edv-pane-view .mp-video {
+  max-height: none;
+  height: 100%;
+  object-fit: contain;
+}
+/* aspect-locked modes: with an explicit box height the width follows the ratio */
+.edv-pane-view .edv-reframe .mp-videobox,
+.edv-pane-view .edv-reframe-fit .mp-videobox {
+  width: fit-content;
+  max-width: 100%;
 }
 /* Live reframe preview: the player <video> shows the selected aspect/zoom/pan
    slice (crop layout) or the original inside the target frame (fit layout).

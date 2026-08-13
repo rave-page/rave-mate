@@ -91,6 +91,55 @@ const runtimeJS = `(function(){
     e.preventDefault();
     send({act: el.getAttribute('data-act'), val: el.getAttribute('data-val')||'', id: __elId(el), mods: mods(e)});
   });
+  // ── instant video transport ────────────────────────────────────────────────────
+  // The <video> element is toggled HERE, in the same frame as the click/keypress, and
+  // the interpolated playhead is frozen/launched with it - a busy act worker can no
+  // longer make transport feel laggy or leave the playhead drifting after a pause.
+  // Go gets mp-vplay/mp-vpause carrying the RESULTING state (never a toggle it could
+  // race), and does the bookkeeping: mirror, stream pipeline, transport re-render.
+  function __vidOf(host){ var v=document.getElementById('mp-vid-'+host); return (v&&v.isConnected)?v:null; }
+  // __vrate bakes the interpolator's progress so far, then flips its rate. Without this
+  // the rAF clock keeps running past a pause and snaps back on the next Go push.
+  function __vrate(host, playing){
+    var el=__rtM['mp-'+host]; if(!el) return;
+    var dt=el.rate>0?(performance.now()-el.t0)/1000:0;
+    el.pos=el.pos+el.rate*dt; el.x0=el.x0+el.vx*dt;
+    if(playing){ el.vx=el.vx||el.vx0||0; el.rate=el.rate||1; }
+    else { el.vx0=el.vx||el.vx0||0; el.rate=0; el.vx=0; }
+    el.t0=performance.now(); __rtStep(el);
+    if(el.rate>0 && !__rtRAF) __rtRAF=requestAnimationFrame(__rtLoop);
+  }
+  function __vplay(host){
+    var v=__vidOf(host); if(!v) return false;
+    v.dataset.pstart=v.currentTime;              // space-pause rewinds here
+    var p=v.play(); if(p&&p.catch) p.catch(function(){ v.muted=true; v.play().catch(function(){}); });
+    __vrate(host,true); send({act:'mp-vplay:'+host, val:''+v.currentTime}); return true;
+  }
+  function __vpause(host, rewind){
+    var v=__vidOf(host); if(!v) return false;
+    v.pause();
+    if(rewind){ var s=parseFloat(v.dataset.pstart||'x'); if(s===s){ try{ v.currentTime=s; }catch(e){} } }
+    __vrate(host,false); send({act:'mp-vpause:'+host, val:''+v.currentTime}); return true;
+  }
+  document.addEventListener('click', function(e){
+    var el=e.target.closest && e.target.closest('[data-act^="mp-play:"]'); if(!el) return;
+    var host=el.getAttribute('data-act').slice(8);
+    var v=__vidOf(host); if(!v) return;           // audio host: Go owns the engine
+    e.preventDefault(); e.stopPropagation();
+    if(v.paused) __vplay(host); else __vpause(host, false);
+  }, true);
+  // Space = play / pause-and-return-to-where-play-started. Enter = pause here.
+  document.addEventListener('keydown', function(e){
+    if(e.ctrlKey||e.metaKey||e.altKey) return;
+    if(e.key!==' ' && e.key!=='Enter') return;
+    if(!document.hasFocus()) return;
+    var a=document.activeElement;
+    if(a&&a.matches&&a.matches('input,textarea,select,button,a,[contenteditable]')) return;
+    var v=__vidOf('editor'); if(!v) return;       // only while the editor preview is mounted
+    e.preventDefault(); if(e.repeat) return;
+    if(e.key==='Enter'){ __vpause('editor', false); return; }
+    if(v.paused) __vplay('editor'); else __vpause('editor', true);
+  }, true);
   document.addEventListener('change', function(e){
     var el = e.target;
     if(!el || !el.getAttribute || !el.getAttribute('data-act')) return;
@@ -461,8 +510,10 @@ const runtimeJS = `(function(){
   });
   document.addEventListener('pointermove', function(e){
     if(!__szBox) return;
-    __szH=Math.round(Math.min(Math.max(140, __szBase+(e.clientY-__szY)), window.innerHeight*0.94));
-    __szBox.style.maxHeight=__szH+'px';
+    // ceiling is generous on purpose (fullscreen = lots of room); the pane scrolls if
+    // the box outgrows it. max-height must go with it or the stylesheet cap wins.
+    __szH=Math.round(Math.min(Math.max(140, __szBase+(e.clientY-__szY)), Math.max(2000, window.innerHeight*2)));
+    __szBox.style.height=__szH+'px'; __szBox.style.maxHeight='none';
   });
   document.addEventListener('pointerup', function(){
     if(!__szBox) return; __szBox=null;

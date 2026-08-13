@@ -88,7 +88,7 @@ type mpVidSt struct {
 	StreamMi string `json:"streamMi"` // MSE mime for the feed
 	StreamAu bool   `json:"streamAu"` // autoplay the fresh feed
 	Grip     string `json:"grip"`     // "" = none; else the act a bottom-edge resize drag reports to
-	MaxH     string `json:"maxH"`     // "" = CSS default; else px cap for the video box (drag-set)
+	BoxH     string `json:"boxH"`     // "" = CSS default; else the drag-set box height in px
 }
 
 // mpWaveSt is the #mp-<host>-wave inner: the RAW Go-computed SVG plus the chip overlay
@@ -323,7 +323,7 @@ func (u *UI) mpVidState(t mpSt) mpVidSt {
 	}
 	st.Kind, st.URL = "video", url
 	if mpVidGrip != nil { // host opt-in: resizable preview box (editor)
-		st.Grip, st.MaxH = mpVidGrip(u, t.host)
+		st.Grip, st.BoxH = mpVidGrip(u, t.host)
 	}
 	// element events → Go transport mirror (throttled to 1 Hz / state flips). The OUT-marker
 	// stop runs element-side first (sub-frame latency; the pause flip then rides the send).
@@ -955,8 +955,8 @@ func mpVidHTMLOf(st mpVidSt) string {
 		trim += ` data-out=` + attrQ(st.DataOut)
 	}
 	box := `<div class=mp-videobox`
-	if st.MaxH != "" { // drag-set height cap: inline so it outranks the per-view CSS max-heights
-		box += ` style=` + attrQ("max-height:"+st.MaxH+"px")
+	if st.BoxH != "" { // drag-set height: inline so it outranks the per-view CSS caps
+		box += ` style=` + attrQ("height:"+st.BoxH+"px;max-height:none")
 	}
 	grip := ""
 	if st.Grip != "" { // bottom-edge resize handle (shell.go [data-actsize] drag)

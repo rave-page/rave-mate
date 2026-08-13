@@ -74,7 +74,7 @@ pub const Vid = struct {
     streamMi: []const u8 = "",
     streamAu: bool = false,
     grip: []const u8 = "", // "" = none; else the bottom-edge resize drag act
-    maxH: []const u8 = "", // "" = CSS default; else px height cap for the box
+    boxH: []const u8 = "", // "" = CSS default; else the drag-set box height in px
 };
 
 /// Wave is the #mp-<host>-wave inner.
@@ -358,10 +358,10 @@ pub fn renderVid(h: *Html, s: Vid) !void {
     if (!std.mem.eql(u8, s.kind, "video")) return;
 
     try h.raw("<div class=mp-videobox");
-    if (s.maxH.len != 0) {
-        try h.raw(" style=\"max-height:");
-        try h.esc(s.maxH);
-        try h.raw("px\"");
+    if (s.boxH.len != 0) {
+        try h.raw(" style=\"height:");
+        try h.esc(s.boxH);
+        try h.raw("px;max-height:none\"");
     }
     try h.raw("><video id=");
     try attrComposite(h, "mp-vid-", s.host);
@@ -718,8 +718,8 @@ test "video element: MSE variant replaces plain src" {
     try renderVid(&h, .{ .host = "e", .kind = "video", .url = "u", .stream = "http://s/ms/t", .streamMi = "video/mp4", .streamAu = true });
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, " data-msestream=\"http://s/ms/t\" data-msestream-mime=\"video/mp4\" autoplay preload=none") != null);
     h.b.clearRetainingCapacity();
-    try renderVid(&h, .{ .host = "editor", .kind = "video", .url = "u", .grip = "edv-vsize", .maxH = "620" });
-    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "<div class=mp-videobox style=\"max-height:620px\">") != null);
+    try renderVid(&h, .{ .host = "editor", .kind = "video", .url = "u", .grip = "edv-vsize", .boxH = "620" });
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "<div class=mp-videobox style=\"height:620px;max-height:none\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, "</video><div class=mp-vgrip data-actsize=\"edv-vsize\"></div></div>") != null);
     h.b.clearRetainingCapacity();
     try renderVid(&h, .{ .kind = "" });

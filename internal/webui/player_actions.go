@@ -1761,6 +1761,11 @@ func init() {
 		u.mpPatchTransport(u.mpSnap(host))
 	})
 	onPrefix("mp-play:", func(u *UI, m actMsg) { u.mpPlayToggle(m.arg("mp-play:")) })
+	// client-asserted video transport (shell.go __vplay/__vpause): the element already
+	// flipped and the playhead already froze/launched - Go mirrors the RESULT and runs
+	// the side effects. Never toggles: a toggle here would race the click.
+	onPrefix("mp-vplay:", func(u *UI, m actMsg) { u.mpVidAssert(m.arg("mp-vplay:"), m.Val, false) })
+	onPrefix("mp-vpause:", func(u *UI, m actMsg) { u.mpVidAssert(m.arg("mp-vpause:"), m.Val, true) })
 	onPrefix("mp-stop:", func(u *UI, m actMsg) { u.mpStop(m.arg("mp-stop:")) })
 	onPrefix("mp-preview:", func(u *UI, m actMsg) { u.mpPreview(m.arg("mp-preview:")) })
 	onPrefix("mp-seek:", func(u *UI, m actMsg) {
@@ -2508,6 +2513,32 @@ func (u *UI) mpVidTick(host, val string) {
 			u.mpPushRealtime(t)
 		}
 	}
+}
+
+// mpVidAssert mirrors a client-side transport flip: elemCur is the element's own clock
+// (stream feeds are strT0-relative). Runs the stream-pipeline side effects a bare
+// element play/pause can't: respawn a reaped feed, loop from IN past OUT, idle-reap.
+func (u *UI) mpVidAssert(host, val string, paused bool) {
+	cur, err := strconv.ParseFloat(strings.TrimSpace(val), 64)
+	if err != nil {
+		return
+	}
+	t := u.mpSnap(host)
+	if t.vid.strURL != "" {
+		cur += t.vid.strT0
+	}
+	t = u.mpMut(host, func(v *mpSt) { v.vid.cur, v.vid.paused, v.vid.started = cur, paused, true })
+	if mpStreamCtl != nil && t.vid.strURL != "" {
+		verb := "play"
+		if paused {
+			verb = "pause"
+		}
+		mpStreamCtl(u, host, verb, cur)
+		t = u.mpSnap(host)
+	}
+	u.mpPatchTransport(t)
+	u.mpPushRealtime(t)
+	u.mpPatchWave(t)
 }
 
 // mpTrackStep jumps to the previous/next tracklist marker relative to the playhead.
