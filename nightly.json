@@ -1,13 +1,13 @@
 {
-  "version": "nightly-c75c65e",
-  "build": 267,
-  "commit": "c75c65e",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-267-20260813-c75c65e.exe",
-  "sha256": "910924638d53c0176c33a22241becfdb519aa3cbfd1b8f886c0a25cdbf5e477b",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-267-20260813-c75c65e.exe",
-  "installer_sha256": "f8b82079dafc62cb8d9f55087eb876d63725a9c8161cb1e3be83afe61e31c831",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-267-20260813-c75c65e",
-  "linux_sha256": "8d628eb859cff915960da4d010c8fd572e8c7a4740352786f41acd58ec461a43",
+  "version": "nightly-d7734a6",
+  "build": 268,
+  "commit": "d7734a6",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-268-20260813-d7734a6.exe",
+  "sha256": "4c9140f2cfe7f3edbf2a61b4773c167af8d7e6744433992092fa0ae3775b5c7f",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-268-20260813-d7734a6.exe",
+  "installer_sha256": "24bbddb4de3d69c477aa8140adfface9af9d5307421e45269686dc21405c0da6",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-268-20260813-d7734a6",
+  "linux_sha256": "5d35ae0def7d8a8d4cdd1455bec108e01b4d8b8e6f89253d7c3cf8fec38c1c8c",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-08-13T14:02:54Z",
-  "notes": "fix(player): waveform click seeks on the FIRST click, in every host"
+  "released": "2026-08-13T14:28:44Z",
+  "notes": "feat(shell): P2 - surface manager in the Zig child + ctl can finally drive pointers"
 }
