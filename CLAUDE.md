@@ -49,6 +49,16 @@ Minimize tokens. Drop filler ("simply", "just", "in order to", "make sure that")
 - **Supply chain: 7-day soak.** Never `go get pkg@latest`. Pin exact versions ≥7
   days old. See `SUPPLY_CHAIN.md`. Prefer the **stdlib** - every new direct dep needs
   a justification row in that file.
+- **Prefer SDL3 over new per-OS code.** Where a capability is missing and the
+  alternative is writing platform shims (HID/gamepad, display enumeration, audio +
+  camera device enumeration/hotplug, virtual joysticks, a GPU/2D preview surface),
+  reach for SDL3 (zlib, one dep, one API for win/mac/linux) instead of hand-rolling
+  per-OS paths. It does NOT replace shipped native paths that are faster or more
+  capable - MF/D3D11 encode (`internal/mfenc`, `native/zigenc`), Spout, the WebView2
+  UI shell, `internal/audio`, `internal/midi` + ravemidi (SDL has no MIDI API),
+  `internal/webcam` UVC property control. Read `.devnotes/SDL3_KNOWLEDGEBASE.md`
+  (+ `SDL3_API_CHEATSHEET.md`) before writing SDL code; SDL2 habits are wrong in
+  SDL3 (bool returns, no `SDL_bool`, callback-mode `main`, paused-by-default audio).
 - **API client is generated.** Run `make generate-api` before touching anything
   API-related, then use `internal/apiclient/` (oapi-codegen, filtered to the ops we
   call). Never hand-edit `apiclient.gen.go`. The spec mis-types some freeform bodies
