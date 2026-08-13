@@ -1,13 +1,13 @@
 {
-  "version": "nightly-b1577d1",
-  "build": 266,
-  "commit": "b1577d1",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-266-20260813-b1577d1.exe",
-  "sha256": "49748e770196a38cdd888e8dba32d2b852606ee105f952f081920bdf8e91f5f9",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-266-20260813-b1577d1.exe",
-  "installer_sha256": "665ca7f865f5b028b524db302e304634415711de169021fb6002ec6d6b51c793",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-266-20260813-b1577d1",
-  "linux_sha256": "2b9f460fef1a5438e3198724d39cfb9004e4df5dee5a4876a62bc155cf472674",
+  "version": "nightly-c75c65e",
+  "build": 267,
+  "commit": "c75c65e",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-267-20260813-c75c65e.exe",
+  "sha256": "910924638d53c0176c33a22241becfdb519aa3cbfd1b8f886c0a25cdbf5e477b",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-267-20260813-c75c65e.exe",
+  "installer_sha256": "f8b82079dafc62cb8d9f55087eb876d63725a9c8161cb1e3be83afe61e31c831",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-267-20260813-c75c65e",
+  "linux_sha256": "8d628eb859cff915960da4d010c8fd572e8c7a4740352786f41acd58ec461a43",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-08-13T13:31:46Z",
-  "notes": "feat(shell): visual hosting is the DEFAULT, and it fails loud instead of falling back"
+  "released": "2026-08-13T14:02:54Z",
+  "notes": "fix(player): waveform click seeks on the FIRST click, in every host"
 }
