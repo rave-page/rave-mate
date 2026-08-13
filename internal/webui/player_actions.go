@@ -187,6 +187,11 @@ type mpVid struct {
 	strT0   float64
 	strAuto bool // element autoplays when the fresh feed opens
 	strLoop bool // feed is the whole bounded IN→OUT span: element loops it natively
+	// strPend: a pipeline respawn is in flight, so the element is STILL playing the old feed and
+	// its clock is a lie. Ticks must not overwrite cur while this is set, or the seek the user just
+	// asked for gets stomped back to the pre-seek position ~1s later (click did nothing; the NEXT
+	// click appeared to apply the previous one).
+	strPend bool
 }
 
 // mpStreamCtl is the host hook driving a realtime preview pipeline ("seek"/"play"/
@@ -2266,6 +2271,11 @@ func (u *UI) mpSurf(host, val string) {
 	if phase == "up" {
 		if !math.IsInf(seekSec, -1) {
 			u.mpSeekAxis(host, seekSec)
+			// The seek moved the playhead; `t` is the snapshot from BEFORE it. Repainting from
+			// that stale copy re-rendered the wave at the old position AND re-anchored the rAF
+			// interpolator there, so a click looked like it did nothing and the NEXT click
+			// appeared to apply the previous one. Always repaint from post-seek state.
+			t = u.mpSnap(host)
 		}
 		u.mpPatchWave(t)
 	}
@@ -2504,9 +2514,12 @@ func (u *UI) mpVidTick(host, val string) {
 			cur += str.strT0 // live feed clock → absolute source seconds
 			dur = 0          // a growing feed's duration is meaningless for the axis
 		}
+		if str.strPend {
+			cur = str.cur // respawn in flight: hold the REQUESTED position, not the old feed's clock
+		}
 		v.vid = mpVid{cur: cur, dur: dur, paused: paused, started: true,
 			strURL: str.strURL, strMime: str.strMime, strT0: str.strT0, strAuto: str.strAuto,
-			strLoop: str.strLoop}
+			strLoop: str.strLoop, strPend: str.strPend}
 		// late-bind the video duration from the element when peaks couldn't provide one
 		for i := range v.media {
 			if v.media[i].kind == "video" && dur > v.media[i].dur+1 {
@@ -2537,7 +2550,12 @@ func (u *UI) mpVidAssert(host, val string, paused bool) {
 	if t.vid.strURL != "" {
 		cur += t.vid.strT0
 	}
-	t = u.mpMut(host, func(v *mpSt) { v.vid.cur, v.vid.paused, v.vid.started = cur, paused, true })
+	t = u.mpMut(host, func(v *mpSt) {
+		if !v.vid.strPend { // a respawn owns the position until its feed lands
+			v.vid.cur = cur
+		}
+		v.vid.paused, v.vid.started = paused, true
+	})
 	if mpStreamCtl != nil && t.vid.strURL != "" {
 		verb := "play"
 		if paused {

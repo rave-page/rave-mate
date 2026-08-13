@@ -251,6 +251,9 @@ func (u *UI) edvPrevStart(t float64, autoplay bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	v.prevCancel = cancel
 	editor.mu.Unlock()
+	// The old feed keeps playing until the new one is live (make-before-break), so its ticks are
+	// stale from here on: hold the requested position until the fresh feed binds.
+	u.mpMut("editor", func(m *mpSt) { m.vid.strPend = true })
 
 	var retireOnce sync.Once
 	retire := func() { // exactly-once teardown of the superseded feed
@@ -265,10 +268,14 @@ func (u *UI) edvPrevStart(t float64, autoplay bool) {
 	}
 	unstart := func() { // this start is settled; a newer gen owns the flag past us
 		editor.mu.Lock()
-		if editor.video.prevGen == gen {
+		mine := editor.video.prevGen == gen
+		if mine {
 			editor.video.prevStarting = false
 		}
 		editor.mu.Unlock()
+		if mine { // settled either way - never leave the playhead frozen on a dead start
+			u.mpMut("editor", func(m *mpSt) { m.vid.strPend = false })
+		}
 	}
 
 	// Loop segment: starting AT the IN marker with a short enough cut renders exactly
@@ -325,6 +332,7 @@ func (u *UI) edvPrevStart(t float64, autoplay bool) {
 		st := u.mpMut("editor", func(v *mpSt) {
 			v.vid.strURL, v.vid.strMime, v.vid.strT0, v.vid.strAuto = url, transcode.StreamMime, t, autoplay
 			v.vid.strLoop = span > 0
+			v.vid.strPend = false // fresh feed IS the clock now
 			v.vid.cur, v.vid.paused, v.vid.started = t, !autoplay, true
 		})
 		u.mpPatchVideo(st)
@@ -370,7 +378,7 @@ func (u *UI) edvPrevStop() {
 	mp := u.mpMut("editor", func(v *mpSt) {
 		wasStream = v.vid.strURL != ""
 		cur := v.vid.cur
-		v.vid = mpVid{cur: cur, paused: true, started: v.vid.started}
+		v.vid = mpVid{cur: cur, paused: true, started: v.vid.started} // strPend clears with it
 	})
 	if wasStream {
 		u.mpPatchVideo(mp)
