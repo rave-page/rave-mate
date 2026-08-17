@@ -14,7 +14,12 @@ import (
 //     change_log stays append-only; this is the mutable "already linked" marker the brief asks
 //     for, kept out-of-band rather than overloading change_log.reverted.
 //   - set_uploads: recorder Recording.ID → backend stream_id, once an offline/recorded set has
-//     been uploaded (Gap 2). Skips re-upload of an already-published set.
+//     been uploaded (Gap 2). Skips re-upload of an already-published set. DEPRECATED path -
+//     the backdated stream-ingest fallback; new publishes use set_publishes.
+//   - set_publishes: recorder Recording.ID → rave.page recording id, for the dedicated
+//     "Publish to rave.page" path (internal/setpublish). Carries the media_upload_id and the
+//     audio file_hash so a re-publish can PUT tracklist/waveform/loudness again WITHOUT
+//     re-uploading identical audio.
 //   - library_sync: per-track payload-hash ledger for the library metadata uploader - a re-run
 //     skips every track whose uploaded payload is unchanged. library_track_id (lib_…, added by
 //     migration) is the server library row id the media uploads PUT against.
@@ -36,6 +41,15 @@ CREATE TABLE IF NOT EXISTS set_uploads (
   stream_id    TEXT NOT NULL,                -- backend stream id the set was published as
   track_count  INTEGER NOT NULL DEFAULT 0,
   uploaded_at  TEXT NOT NULL                 -- RFC3339 UTC
+);
+
+CREATE TABLE IF NOT EXISTS set_publishes (
+  recording_id     TEXT PRIMARY KEY,          -- recorder Recording.ID
+  api_recording_id TEXT NOT NULL,             -- rave.page recording id
+  media_upload_id  TEXT,                      -- chunked upload backing the audio
+  file_hash        TEXT,                      -- sha256 of the published audio (re-publish detection)
+  tracklist_items  INTEGER NOT NULL DEFAULT 0,
+  uploaded_at      TEXT NOT NULL              -- RFC3339 UTC
 );
 
 CREATE TABLE IF NOT EXISTS library_sync (
@@ -152,6 +166,71 @@ func (d *DB) SaveSetUpload(s SetUpload) error {
 		ON CONFLICT(recording_id) DO UPDATE SET
 		  stream_id=excluded.stream_id, track_count=excluded.track_count, uploaded_at=excluded.uploaded_at`,
 		s.RecordingID, s.StreamID, s.TrackCount, at.UTC().Format(time.RFC3339))
+	return err
+}
+
+// SetPublish records a set published to rave.page as a first-class recording (audio +
+// tracklist + waveform + loudness) - the dedicated path, not the stream-ingest fallback.
+type SetPublish struct {
+	RecordingID    string
+	APIRecordingID string
+	MediaUploadID  string
+	FileHash       string // sha256 hex of the uploaded audio; "" = audio not uploaded yet
+	TracklistItems int
+	UploadedAt     time.Time
+}
+
+// GetSetPublish returns the publish record for a recording, ok=false if never published.
+func (d *DB) GetSetPublish(recordingID string) (SetPublish, bool, error) {
+	if d == nil || d.db == nil || recordingID == "" {
+		return SetPublish{}, false, nil
+	}
+	var s SetPublish
+	var at string
+	err := d.db.QueryRow(`
+		SELECT recording_id, api_recording_id, COALESCE(media_upload_id,''), COALESCE(file_hash,''),
+		       tracklist_items, uploaded_at
+		  FROM set_publishes WHERE recording_id=?`, recordingID).
+		Scan(&s.RecordingID, &s.APIRecordingID, &s.MediaUploadID, &s.FileHash, &s.TracklistItems, &at)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return SetPublish{}, false, nil
+		}
+		return SetPublish{}, false, err
+	}
+	s.UploadedAt, _ = time.Parse(time.RFC3339, at)
+	return s, true, nil
+}
+
+// SaveSetPublish upserts a publish record (nil-safe). Empty MediaUploadID/FileHash preserve the
+// stored values, so a metadata-only re-publish never forgets which audio is already up there.
+func (d *DB) SaveSetPublish(s SetPublish) error {
+	if d == nil || d.db == nil || s.RecordingID == "" || s.APIRecordingID == "" {
+		return nil
+	}
+	at := s.UploadedAt
+	if at.IsZero() {
+		at = time.Now()
+	}
+	_, err := d.db.Exec(`
+		INSERT INTO set_publishes (recording_id, api_recording_id, media_upload_id, file_hash, tracklist_items, uploaded_at)
+		VALUES (?,?,?,?,?,?)
+		ON CONFLICT(recording_id) DO UPDATE SET
+		  api_recording_id=excluded.api_recording_id,
+		  media_upload_id=COALESCE(NULLIF(excluded.media_upload_id,''), media_upload_id),
+		  file_hash=COALESCE(NULLIF(excluded.file_hash,''), file_hash),
+		  tracklist_items=excluded.tracklist_items, uploaded_at=excluded.uploaded_at`,
+		s.RecordingID, s.APIRecordingID, nullIfEmpty(s.MediaUploadID), nullIfEmpty(s.FileHash),
+		s.TracklistItems, at.UTC().Format(time.RFC3339))
+	return err
+}
+
+// DeleteSetPublish drops a publish record (re-publish from scratch after a server-side delete).
+func (d *DB) DeleteSetPublish(recordingID string) error {
+	if d == nil || d.db == nil || recordingID == "" {
+		return nil
+	}
+	_, err := d.db.Exec(`DELETE FROM set_publishes WHERE recording_id=?`, recordingID)
 	return err
 }
 
