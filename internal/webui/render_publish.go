@@ -411,7 +411,7 @@ func (u *UI) pubDetailState(sel *recorder.Recording, caps map[string][]libdb.Set
 	r := *sel
 	st.Sel = true
 	st.Name, st.Meta = orSetName(r.Name), pubSetMeta(r, caps[r.ID])
-	st.Actions = u.pubActionsState(r)
+	st.Actions = u.pubActionsState(r, len(caps[r.ID]) > 0)
 
 	sets := caps[r.ID]
 	st.Active = u.pubSubtab()
@@ -430,8 +430,14 @@ func (u *UI) pubDetailState(sel *recorder.Recording, caps map[string][]libdb.Set
 	return st
 }
 
-func (u *UI) pubActionsState(r recorder.Recording) []uiBtn {
+// pubActionsState builds the set's action row. hasCaps = a capture file is linked, which is
+// what makes the set publishable (no audio, nothing to upload).
+func (u *UI) pubActionsState(r recorder.Recording, hasCaps bool) []uiBtn {
 	btns := []uiBtn{{Label: i18n.T("publish.export"), Variant: "outline", Act: "pub-export:" + r.ID}}
+	if !r.EndedAt.IsZero() && hasCaps && len(r.Tracks) > 0 {
+		btns = append(btns, uiBtn{Label: i18n.T("publish.upload.action"), Variant: "primary",
+			Act: "pub-publish:" + r.ID})
+	}
 	if !r.EndedAt.IsZero() {
 		btns = append(btns,
 			uiBtn{Label: i18n.T("publish.matchHistory"), Variant: "secondary", Act: "pub-match:" + r.ID},

@@ -178,7 +178,12 @@ func (m *Manager) goSafe(fn func()) {
 // websiteBase derives the public website base from the API base (api host → web host),
 // mirroring the web repo's getWebsiteBaseUrl (e.g. development.api.rave.page →
 // development.rave.page, api.rave.page → rave.page).
-func websiteBase(apiBase string) string {
+func websiteBase(apiBase string) string { return WebsiteBase(apiBase) }
+
+// WebsiteBase maps an API base onto its website origin (api.rave.page → rave.page,
+// {branch}.api.rave.page → {branch}.rave.page). Exported so UI surfaces can link to the
+// site (terms, a published recording) without re-deriving the mapping.
+func WebsiteBase(apiBase string) string {
 	s := apiBase
 	s = strings.Replace(s, "://api.rave.page", "://rave.page", 1)
 	s = strings.Replace(s, ".api.rave.page", ".rave.page", 1)
