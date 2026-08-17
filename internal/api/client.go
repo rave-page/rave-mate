@@ -32,8 +32,9 @@ type Client struct {
 	gen           *apiclient.Client
 	doer          *loggingDoer
 	bulkDoer      *loggingDoer // longer timeout for bulk endpoints (library upload)
+	uploadDoer    *loggingDoer // per-chunk media upload (a 10MiB PUT on a thin uplink)
 	log           *logbus.Bus
-	netIn, netOut atomic.Uint64 // HTTP body bytes across both doers (dashboard NETWORK graph)
+	netIn, netOut atomic.Uint64 // HTTP body bytes across all doers (dashboard NETWORK graph)
 }
 
 // New returns a client for base (trailing slash trimmed).
@@ -42,6 +43,8 @@ func New(base string, log *logbus.Bus) *Client {
 	c := &Client{base: base, log: log}
 	c.doer = &loggingDoer{inner: &http.Client{Timeout: 15 * time.Second}, log: log, in: &c.netIn, out: &c.netOut}
 	c.bulkDoer = &loggingDoer{inner: &http.Client{Timeout: 60 * time.Second}, log: log, in: &c.netIn, out: &c.netOut}
+	// One chunk is up to 10MiB; 10min covers a ~140kbit/s uplink before the ctx deadline wins.
+	c.uploadDoer = &loggingDoer{inner: &http.Client{Timeout: 10 * time.Minute}, log: log, in: &c.netIn, out: &c.netOut}
 	c.gen, _ = apiclient.NewClient(base, apiclient.WithHTTPClient(c.doer))
 	return c
 }
