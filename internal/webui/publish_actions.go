@@ -119,6 +119,11 @@ func init() {
 	onExact("pub-rename-do", func(u *UI, m actMsg) { u.pubRename(parseForm(m.Form)) })
 	onPrefix("pub-export:", func(u *UI, m actMsg) { u.pubExportOpen(m.arg("pub-export:")) })
 	onPrefix("pub-exportfmt:", func(u *UI, m actMsg) { u.pubExportFmt(m.arg("pub-exportfmt:")) })
+	onPrefix("pub-export-save:", func(u *UI, m actMsg) { // pick-save target: val = chosen path
+		if m.Val != "" {
+			u.pubExportSave(m.arg("pub-export-save:"), m.Val)
+		}
+	})
 	onPrefix("pub-match:", func(u *UI, m actMsg) {
 		if u.libRemoteTarget() != "" {
 			u.pubRemoteMatch(m.arg("pub-match:"))
@@ -225,16 +230,49 @@ func (u *UI) pubCapDel(arg string) {
 // ── set ops: export / match / delete ──────────────────────────────────────────────
 
 func (u *UI) pubExportOpen(id string) {
+	// Two ways out per format: preview (select/copy) or straight to a file through the native
+	// save picker (pick-save re-dispatches pub-export-save with the chosen path as its value).
+	btns := []uiBtn{
+		{Label: "Text (.txt)", Variant: "primary", Act: "pub-exportfmt:" + id + "\x1ftxt"},
+		{Label: "CSV (.csv)", Variant: "outline", Act: "pub-exportfmt:" + id + "\x1fcsv"},
+		{Label: "JSON (.json)", Variant: "outline", Act: "pub-exportfmt:" + id + "\x1fjson"},
+	}
+	if !u.virtual() { // a native dialog would open on the CONTROLLED box in remote mode
+		for _, f := range []string{recorder.FormatText, recorder.FormatCSV, recorder.FormatJSON} {
+			btns = append(btns, uiBtn{
+				Label:   i18n.T("publish.saveAs", i18n.A{"ext": "." + f}),
+				Variant: "ghost",
+				Act:     "pick-save:" + f + ":pub-export-save:" + id + "\x1f" + f,
+			})
+		}
+	}
 	u.openModal(dlgChoiceHTML(dlgChoiceSt{
 		Title:  "Export tracklist",
 		HasMsg: true, MsgRaw: true, Msg: "Choose a format for the tracklist export.",
 		InBody: true, // buttons live in the body; the footer stays Go's default Close
-		Btns: []uiBtn{
-			{Label: "Text (.txt)", Variant: "primary", Act: "pub-exportfmt:" + id + "\x1ftxt"},
-			{Label: "CSV (.csv)", Variant: "outline", Act: "pub-exportfmt:" + id + "\x1fcsv"},
-			{Label: "JSON (.json)", Variant: "outline", Act: "pub-exportfmt:" + id + "\x1fjson"},
-		},
+		Btns:   btns,
 	}))
+}
+
+// pubExportSave writes the tracklist straight to the picked path. arg = "<id>\x1f<format>".
+func (u *UI) pubExportSave(arg, out string) {
+	id, fmtKey, _ := strings.Cut(arg, "\x1f")
+	if u.svc.Recorder == nil || id == "" || out == "" {
+		return
+	}
+	content, err := u.svc.Recorder.Export(id, fmtKey)
+	if err != nil {
+		u.toast(i18n.T("publish.saveFailed", i18n.A{"error": err.Error()}))
+		return
+	}
+	u.closeModal()
+	u.bg(func() { // a network/slow volume must not stall the act lane
+		if werr := os.WriteFile(out, []byte(content), 0o644); werr != nil {
+			u.toast(i18n.T("publish.saveFailed", i18n.A{"error": werr.Error()}))
+			return
+		}
+		u.toast(i18n.T("publish.saveDone", i18n.A{"name": filepath.Base(out)}))
+	})
 }
 
 // pubExportFmt renders the exported tracklist in the modal (preview + copy). Text gets the

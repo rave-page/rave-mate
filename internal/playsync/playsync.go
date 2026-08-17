@@ -10,7 +10,9 @@
 //   - Gap 2 (offline/recorded sets): a set captured while the DJ app was closed (or any
 //     recorder Recording that never went live) is published as a backend stream by replaying
 //     its played tracks through Create/Ingest/End with backdated timestamps + a recorded flag.
-//     Idempotent via libdb.set_uploads.
+//     Idempotent via libdb.set_uploads. SUPERSEDED by internal/setpublish (audio + tracklist +
+//     waveform + loudness against the dedicated /recordings endpoints); UploadRecordedSet is
+//     kept as the no-/recordings-endpoint fallback.
 //
 // All backend writes are owner-scoped → they need the DJ's access token (brokered by rave-app
 // over the ctl ADOPT-TOKEN handoff, or rave-mate's own browser-deeplink session). Unauthed,
@@ -248,11 +250,17 @@ type RecordedSet struct {
 // through Create/Ingest/End with backdated timestamps + metadata.recorded=true (Gap 2).
 // Idempotent: a set already in set_uploads returns its existing stream id.
 //
-// NOTE: the recorded-set ingest contract is the brief's fallback (reuse the live Create/Ingest/
-// End path backdated) pending a dedicated backend endpoint - open decision #2. Each track is
-// replayed as a backdated "deck.loaded" event mirroring the live publisher's wire shape, so the
-// backend's now-playing derivation produces the set-log. If the API dev ships a recorded-set
-// endpoint, only this method changes.
+// Deprecated: this is the backdated stream-ingest FALLBACK. The dedicated endpoints shipped -
+// use internal/setpublish, which uploads the audio itself plus tracklist offsets, waveform and
+// loudness, and records its own libdb.set_publishes ledger. This path publishes a tracklist and
+// nothing else: no audio, no waveform, no loudness, and the set shows up as a backdated live
+// stream rather than a recording.
+//
+// Kept wired because it is the only publish path that works against a backend without the
+// /recordings endpoints, and because set_uploads rows written by it are still the idempotency
+// record for sets published the old way. The webui "Publish to rave.page" action routes through
+// setpublish; nothing in the UI calls this any more (the ctl UPLOAD-RECORDED-SET verb still
+// does). Remove once the /recordings endpoints are live everywhere.
 func (s *Syncer) UploadRecordedSet(ctx context.Context, set RecordedSet) (string, error) {
 	if s == nil || s.lib == nil {
 		return "", fmt.Errorf("playsync: no library")
