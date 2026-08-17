@@ -1,6 +1,6 @@
 module rave.page/mate/tools/genapi
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/getkin/kin-openapi v0.144.0
