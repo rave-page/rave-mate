@@ -184,6 +184,7 @@ func jobLabel(method string, params any) string {
 		"probe.envelope":      "Analyzing audio for alignment",
 		"fingerprint.compute": "Fingerprinting",
 		"render.motionvideo":  "Rendering motion video",
+		"publish.upload":      "Uploading set to rave.page",
 	}[method]
 	if verb == "" {
 		verb = method

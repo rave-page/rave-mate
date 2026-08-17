@@ -16,6 +16,7 @@ var registry = map[string]map[string]Handler{
 	"transcode":   transcodeHandlers(),
 	"render":      renderHandlers(),
 	"vfx":         vfxHandlers(),
+	"publish":     publishHandlers(),
 	"surface":     surfaceHandlers(),
 }
 
