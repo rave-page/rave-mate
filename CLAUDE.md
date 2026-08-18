@@ -9,6 +9,16 @@ control, Twitch tooling, and VR/VRChat integration. It integrates with rave.page
 stream bridge, notifications and publishing. Lightweight, native, minimal deps.
 Self-contained Go module (builds standalone with `GOWORK=off`).
 
+## Operating model (hard rule)
+
+Session lead = **overseeing architect**: plans, writes detailed briefs, reviews results,
+verifies outcomes - subagents execute. **Opus subagents** (`model: opus`; forks exempt - they
+inherit the lead's model) do the work: information gathering, file edits, feature
+implementation. A brief carries goal, constraints, exact files, acceptance criteria,
+verification steps. Lead direct-edits only typo-class changes where a brief would cost more
+than the edit. Subagents execute their brief directly - no recursive delegation. Every agent
+obeys the CLAUDE.md + rules of the repository it works in.
+
 ## Token-economy style (all code, comments, .md)
 
 Minimize tokens. Drop filler ("simply", "just", "in order to", "make sure that").
