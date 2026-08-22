@@ -1,13 +1,5 @@
-# AGENTS.md
+# Agent instructions
 
-Canonical guidance for humans **and AI agents** working in this repo lives in
-**[`CLAUDE.md`](./CLAUDE.md)** - read it before writing code. It defines the design
-philosophy, architecture, non-negotiable rules, and security posture every contribution
-(and every AI agent) must follow.
+Read [`CLAUDE.md`](CLAUDE.md) before working in this repository.
 
-Also read:
-- [`CONTRIBUTING.md`](./CONTRIBUTING.md) - workflow, build gates, PR expectations
-- [`SUPPLY_CHAIN.md`](./SUPPLY_CHAIN.md) - dependency policy (7-day soak, stdlib-first)
-- [`SECURITY.md`](./SECURITY.md) - reporting vulnerabilities + security posture
-
-These rules override any default assistant behavior; follow them exactly.
+`CLAUDE.md` is the sole authoritative source for repository rules, permissions, architecture, workflow, and verification requirements. This file is only a compatibility pointer.
