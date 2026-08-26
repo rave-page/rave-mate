@@ -1,9 +1,9 @@
 ; rave-mate Windows installer - per-user (no admin), user-selectable dir.
 ; Built on Linux CI via makensis. Defines from CI (all optional, defaulted below):
 ;   APP_VERSION APP_BUILD VERSION_4 SRC_EXE OUT_FILE [APP_ICON] [SPOUT_DLL] [OPENVR_DLL]
-;   [ENC_EXE] [SHELL_EXE]: sidecar exes bundled beside the main exe - the MF encoder child and the
-;   Zig window child. SHELL_EXE is the DEFAULT window host; omitting it ships an install that
-;   silently uses the in-process Go window instead.
+;   [ENC_EXE] [SHELL_EXE] [VFX_EXE]: sidecar exes bundled beside the main exe - the MF encoder,
+;   Zig window, and video-effects children. SHELL_EXE is the DEFAULT window host; omitting it
+;   ships an install that silently uses the in-process Go window instead.
 ; SPOUT_DLL / OPENVR_DLL (optional): paths to SpoutLibrary.dll / openvr_api.dll - bundled beside
 ; the exe. Both are runtime-loaded (LoadLibrary), so a missing DLL only disables that feature;
 ; we ship them so the feature works out of the box. Omit either to skip bundling it.
@@ -94,6 +94,9 @@ Section "Install"
     ; where webui.resolveZigShellExe looks; absent, the app degrades to the in-process Go window.
     File "/oname=rave-shell.exe" "${SHELL_EXE}"
   !endif
+  !ifdef VFX_EXE
+    File "/oname=rave-mate-vfx.exe" "${VFX_EXE}" ; isolated video-editor effects child (zigvfx)
+  !endif
   !ifdef FREI0R_DIR
     ; bundled frei0r plugin DLLs (GPL-2+, built from pinned source - scripts/build-frei0r.sh;
     ; COPYING + SOURCE.txt ride along). vfx.PluginDirs scans $INSTDIR\frei0r at runtime.
@@ -126,6 +129,7 @@ Section "Uninstall"
   Delete "$INSTDIR\openvr_api.dll"
   Delete "$INSTDIR\rave-mate-enc.exe"
   Delete "$INSTDIR\rave-shell.exe"
+  Delete "$INSTDIR\rave-mate-vfx.exe"
   RMDir /r "$INSTDIR\frei0r"
   Delete "$INSTDIR\uninstall.exe"
   Delete "$SMPROGRAMS\${APP_NAME}.lnk"

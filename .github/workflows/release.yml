@@ -7,6 +7,9 @@
 # self-update feed at releases/download/<channel>/latest.json - installed builds poll the
 # channel, not a version. Manifest mirrored to the `feeds` branch as <channel>.json for
 # browsers (release assets send no CORS headers). See docs/dev/RELEASING.md.
+# Windows uses the same full-feature recipe as nightly: spout, VR, Ableton Link, all Zig
+# natives, embedded encoder + Zig window children, and the updater-managed video-effects
+# child. The Zig shell is the default UI host.
 name: Release
 
 on:
@@ -127,10 +130,12 @@ jobs:
             -X rave.page/mate/internal/version.FeedURL=${FEED} \
             ${EXTRA_LDFLAGS}"
           GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ CGO_ENABLED=1 \
-            go build -tags "spout vr abletonlink zigdsp zigui zigvr encembed" -ldflags "$LDFLAGS" -o dist/rave-mate.exe ./cmd/rave-mate
+            go build -tags "spout vr abletonlink zigdsp zigui zigvr encembed shellembed" -ldflags "$LDFLAGS" -o dist/rave-mate.exe ./cmd/rave-mate
           cp third_party/spout/bin/SpoutLibrary.dll dist/
           cp internal/vroverlay/sdk/openvr_api.dll dist/
           cp native/zigenc/zig-out/bin/rave-mate-enc.exe dist/ # per-adapter MF encoder child
+          cp native/zigui/zig-out/bin/rave-shell.exe dist/     # Zig window child - the DEFAULT UI host
+          cp native/zigvfx/zig-out/bin/rave-mate-vfx.exe dist/ # isolated video-editor effects child
           cp -r third_party/frei0r/bin dist/frei0r             # bundled frei0r plugins (+COPYING/SOURCE)
       - name: Authenticode-sign exe
         env:
@@ -165,6 +170,8 @@ jobs:
             -DSPOUT_DLL="$PWD/dist/SpoutLibrary.dll" \
             -DOPENVR_DLL="$PWD/dist/openvr_api.dll" \
             -DENC_EXE="$PWD/dist/rave-mate-enc.exe" \
+            -DSHELL_EXE="$PWD/dist/rave-shell.exe" \
+            -DVFX_EXE="$PWD/dist/rave-mate-vfx.exe" \
             -DFREI0R_DIR="$PWD/dist/frei0r" \
             $ICONDEF \
             installer/rave-mate.nsi
@@ -188,6 +195,7 @@ jobs:
             dist/rave-mate-setup.exe
             dist/SpoutLibrary.dll
             dist/openvr_api.dll
+            dist/rave-mate-vfx.exe
 
   build-linux:
     runs-on: ubuntu-latest
@@ -272,11 +280,13 @@ jobs:
           cp dist/rave-mate-linux      dist/mate/rave-mate-linux
           cp dist/SpoutLibrary.dll     dist/mate/SpoutLibrary.dll
           cp dist/openvr_api.dll       dist/mate/openvr_api.dll
+          cp dist/rave-mate-vfx.exe    dist/mate/rave-mate-vfx.exe
           SHA=$(sha256sum "dist/mate/${EXE}" | awk '{print $1}')
           ISHA=$(sha256sum "dist/mate/${INST}" | awk '{print $1}')
           LSHA=$(sha256sum "dist/mate/${LINBIN}" | awk '{print $1}')
           OSHA=$(sha256sum dist/mate/openvr_api.dll | awk '{print $1}')
           SSHA=$(sha256sum dist/mate/SpoutLibrary.dll | awk '{print $1}')
+          VSHA=$(sha256sum dist/mate/rave-mate-vfx.exe | awk '{print $1}')
           jq -n \
             --arg v "$VERSION" --argjson b "$BUILD" --arg c "$COMMIT" \
             --arg u "${FEED}${EXE}" --arg s "$SHA" \
@@ -284,8 +294,9 @@ jobs:
             --arg lu "${FEED}${LINBIN}" --arg ls "$LSHA" \
             --arg ou "${FEED}openvr_api.dll" --arg osha "$OSHA" \
             --arg su "${FEED}SpoutLibrary.dll" --arg ssha "$SSHA" \
+            --arg vu "${FEED}rave-mate-vfx.exe" --arg vsha "$VSHA" \
             --arg r "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg n "rave-mate ${VERSION} (${CHANNEL})" \
-            '{version:$v,build:$b,commit:$c,url:$u,sha256:$s,installer_url:$iu,installer_sha256:$is,linux_url:$lu,linux_sha256:$ls,assets:[{name:"openvr_api.dll",url:$ou,sha256:$osha},{name:"SpoutLibrary.dll",url:$su,sha256:$ssha}],released:$r,notes:$n}' \
+            '{version:$v,build:$b,commit:$c,url:$u,sha256:$s,installer_url:$iu,installer_sha256:$is,linux_url:$lu,linux_sha256:$ls,assets:[{name:"openvr_api.dll",url:$ou,sha256:$osha},{name:"SpoutLibrary.dll",url:$su,sha256:$ssha},{name:"rave-mate-vfx.exe",url:$vu,sha256:$vsha}],released:$r,notes:$n}' \
             > dist/mate/latest.json
           cat dist/mate/latest.json
           # CONDITIONAL signing: without the key the feed publishes unsigned and the matching

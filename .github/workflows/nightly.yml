@@ -1,7 +1,8 @@
 # Nightly / dev-channel builds. Every push to `development` (plus a daily schedule and
 # manual dispatch) cross-builds the full-feature Windows exe (-tags spout vr abletonlink
 # zigdsp zigui zigvr encembed shellembed, mingw + pinned Zig - same recipe as the internal deploy
-# pipeline; the two embeds carry the encoder + window child inside the exe for self-update),
+# pipeline; the two embeds carry the encoder + window child inside the exe for self-update;
+# the video-effects child ships as an updater-managed sidecar),
 # the Linux binary (zig tags too), and the NSIS installer, then rolls the single "nightly" prerelease with the complete self-update feed:
 # versioned + stable binaries, runtime DLLs, and latest.json (Ed25519-signed when the
 # signing key secret is provisioned). The binary's updater polls
@@ -133,6 +134,7 @@ jobs:
           cp internal/vroverlay/sdk/openvr_api.dll dist/   # runtime-loaded by the vr backend (vendored)
           cp native/zigenc/zig-out/bin/rave-mate-enc.exe dist/ # per-adapter MF encoder child
           cp native/zigui/zig-out/bin/rave-shell.exe dist/ # Zig window child - the DEFAULT UI host
+          cp native/zigvfx/zig-out/bin/rave-mate-vfx.exe dist/ # isolated video-editor effects child
           cp -r third_party/frei0r/bin dist/frei0r         # bundled frei0r plugins (+COPYING/SOURCE)
           ls -la dist/
       - name: Authenticode-sign exe
@@ -172,6 +174,7 @@ jobs:
             -DOPENVR_DLL="$PWD/dist/openvr_api.dll" \
             -DENC_EXE="$PWD/dist/rave-mate-enc.exe" \
             -DSHELL_EXE="$PWD/dist/rave-shell.exe" \
+            -DVFX_EXE="$PWD/dist/rave-mate-vfx.exe" \
             -DFREI0R_DIR="$PWD/dist/frei0r" \
             $ICONDEF \
             installer/rave-mate.nsi
@@ -197,6 +200,7 @@ jobs:
             dist/rave-mate-setup.exe
             dist/SpoutLibrary.dll
             dist/openvr_api.dll
+            dist/rave-mate-vfx.exe
 
   build-linux:
     runs-on: ubuntu-latest
@@ -277,11 +281,13 @@ jobs:
           cp dist/rave-mate-linux      dist/mate/rave-mate-linux
           cp dist/SpoutLibrary.dll     dist/mate/SpoutLibrary.dll
           cp dist/openvr_api.dll       dist/mate/openvr_api.dll
+          cp dist/rave-mate-vfx.exe    dist/mate/rave-mate-vfx.exe
           SHA=$(sha256sum "dist/mate/${EXE}" | awk '{print $1}')
           ISHA=$(sha256sum "dist/mate/${INST}" | awk '{print $1}')
           LSHA=$(sha256sum "dist/mate/${LINBIN}" | awk '{print $1}')
           OSHA=$(sha256sum dist/mate/openvr_api.dll | awk '{print $1}')
           SSHA=$(sha256sum dist/mate/SpoutLibrary.dll | awk '{print $1}')
+          VSHA=$(sha256sum dist/mate/rave-mate-vfx.exe | awk '{print $1}')
           NOTES=$(git log -1 --pretty=%s)
           jq -n \
             --arg v "$VERSION" --argjson b "$BUILD" --arg c "$COMMIT" \
@@ -290,8 +296,9 @@ jobs:
             --arg lu "${FEED}${LINBIN}" --arg ls "$LSHA" \
             --arg ou "${FEED}openvr_api.dll" --arg osha "$OSHA" \
             --arg su "${FEED}SpoutLibrary.dll" --arg ssha "$SSHA" \
+            --arg vu "${FEED}rave-mate-vfx.exe" --arg vsha "$VSHA" \
             --arg r "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg n "$NOTES" \
-            '{version:$v,build:$b,commit:$c,url:$u,sha256:$s,installer_url:$iu,installer_sha256:$is,linux_url:$lu,linux_sha256:$ls,assets:[{name:"openvr_api.dll",url:$ou,sha256:$osha},{name:"SpoutLibrary.dll",url:$su,sha256:$ssha}],released:$r,notes:$n}' \
+            '{version:$v,build:$b,commit:$c,url:$u,sha256:$s,installer_url:$iu,installer_sha256:$is,linux_url:$lu,linux_sha256:$ls,assets:[{name:"openvr_api.dll",url:$ou,sha256:$osha},{name:"SpoutLibrary.dll",url:$su,sha256:$ssha},{name:"rave-mate-vfx.exe",url:$vu,sha256:$vsha}],released:$r,notes:$n}' \
             > dist/mate/latest.json
           cat dist/mate/latest.json
           # Detached Ed25519 signature over the EXACT manifest bytes. CONDITIONAL: without
