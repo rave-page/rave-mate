@@ -78,7 +78,10 @@ func TestLibPlCanSendTraktor(t *testing.T) {
 	if !mk("manual", `C:\music\incoming`) {
 		t.Error("manual folder-bound playlist must offer Send to Traktor")
 	}
-	if mk("manual", "") || mk("smart", `C:\x`) || mk("imported", `C:\x`) {
-		t.Error("non-folder / smart / imported playlists must not offer it")
+	if !mk("manual", "") {
+		t.Error("hand-curated manual playlist must offer Send to Traktor")
+	}
+	if mk("smart", `C:\x`) || mk("imported", `C:\x`) {
+		t.Error("smart / imported playlists must not offer it")
 	}
 }

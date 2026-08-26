@@ -4,7 +4,7 @@ package webui
 // the folder for audio files, read tags via the out-of-process probe worker (filename
 // fallback), persist them as a synthetic "folder" source + a folder-bound playlist, and
 // optionally beatgrid the new tracks right away (results saved straight into libdb, so
-// waveform/cue editor work without Traktor). "Send to Traktor" exports a folder playlist
+// waveform/cue editor work without Traktor). "Send to Traktor" exports any manual playlist
 // back into collection.nml (new ENTRYs incl. TEMPO/grid) when the user wants it there.
 
 import (
@@ -425,7 +425,7 @@ func (u *UI) fiPersistLoose(dir string, paths []string) int {
 	return n
 }
 
-// ── send a folder playlist to Traktor ──
+// ── send a playlist to Traktor ──
 
 // libPlSendTraktor exports a playlist into collection.nml: backup → merge tracks as new
 // ENTRYs (incl. TEMPO + grid/cues from libdb) → upsert the NML playlist. Guarded against
@@ -504,10 +504,11 @@ func (u *UI) libPlSendTraktor(id int64) {
 	})
 }
 
-// libPlCanSendTraktor: manual folder-bound playlists (the folder-import / mark gesture) -
-// the tracks that may not exist in Traktor yet.
+// libPlCanSendTraktor: any manual playlist - folder-bound (the folder-import / mark gesture)
+// or hand-curated. Imported ones already live in their source app; smart ones have no
+// playlist_tracks rows to send.
 func libPlCanSendTraktor(p libdb.PlaylistRow) bool {
-	return p.Kind == libdb.PlaylistManual && p.Folder != ""
+	return p.Kind == libdb.PlaylistManual
 }
 
 // ── actions ──
