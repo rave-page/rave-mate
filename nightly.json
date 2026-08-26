@@ -1,13 +1,13 @@
 {
-  "version": "nightly-c125bc6",
-  "build": 286,
-  "commit": "c125bc6",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-286-20260826-c125bc6.exe",
-  "sha256": "c2ad0932918ee8156fdd1baf6f0cce5f1b6082d83c63771bf3c57824abc5c6d6",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-286-20260826-c125bc6.exe",
-  "installer_sha256": "747e5cfb040389433b1b8096e5f61664e90ffcd3c719c1cf0dd2a1f39737d0c1",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-286-20260826-c125bc6",
-  "linux_sha256": "04ad24498abf9f177b79c440f06a1cc7303046d4c65632b1a912135e4f76308a",
+  "version": "nightly-e5c364c",
+  "build": 287,
+  "commit": "e5c364c",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-287-20260826-e5c364c.exe",
+  "sha256": "781b781c17fdb8d0342a69204a096b654fb070b4bab1f068f3f846e1eb1561eb",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-287-20260826-e5c364c.exe",
+  "installer_sha256": "98dabc847e850fea70fafcff0bd30412173816b831df7d7b132eddf683025cab",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-287-20260826-e5c364c",
+  "linux_sha256": "ba0df8ac3a932141501c0f9a649041ca05ac4d7ec458ae4271489bf1aeae24b3",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -18,8 +18,13 @@
       "name": "SpoutLibrary.dll",
       "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/SpoutLibrary.dll",
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
+    },
+    {
+      "name": "rave-mate-vfx.exe",
+      "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-vfx.exe",
+      "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-08-26T05:34:17Z",
-  "notes": "Merge development into feature/set-publish-upload"
+  "released": "2026-08-26T19:14:29Z",
+  "notes": "fix(release): ship Zig UI and video editor helpers"
 }
