@@ -1,13 +1,13 @@
 {
   "version": "nightly-e5c364c",
-  "build": 288,
+  "build": 289,
   "commit": "e5c364c",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-288-20260827-e5c364c.exe",
-  "sha256": "af443bd4a36db2dcc2a69b3dabadbba40be54f2fe0522ef2082da13685090c27",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-288-20260827-e5c364c.exe",
-  "installer_sha256": "19746812afa0ee33f883e0a5651338dd65e6afb54b0485e6c0ef06c24adb14e7",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-288-20260827-e5c364c",
-  "linux_sha256": "b9a498ac4f7766752f295731346e78d366fd9c903196dff45179b7b1a7b240ad",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-289-20260828-e5c364c.exe",
+  "sha256": "145c851028b700bd10bb7d371d761f7f0cce467d51e25ed6f1db428642ce960a",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-289-20260828-e5c364c.exe",
+  "installer_sha256": "316e4a2b1301418f5e53bb70ee43c9b32587f4ae5269a320b265965c7dce09e2",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-289-20260828-e5c364c",
+  "linux_sha256": "ace64b9f152930f289a8144f283ed4160f0e347c5fc7ff590dacf9f1b91fbdf7",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-08-27T16:10:05Z",
+  "released": "2026-08-28T17:10:07Z",
   "notes": "fix(release): ship Zig UI and video editor helpers"
 }
