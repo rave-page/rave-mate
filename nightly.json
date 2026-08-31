@@ -1,13 +1,13 @@
 {
   "version": "nightly-12b25a7",
-  "build": 292,
+  "build": 293,
   "commit": "12b25a7",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-292-20260831-12b25a7.exe",
-  "sha256": "e3c20d2d09f88fa79d6e0c9af156a3767cde06f9782fe143db4cfbaa5845f624",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-292-20260831-12b25a7.exe",
-  "installer_sha256": "b947b64bee9ec8b162a1b67a5dd23660f2b21bfa2af161fdf4d675bf31b5c327",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-292-20260831-12b25a7",
-  "linux_sha256": "d524817a701f6cc39f38bd6b915f83c8661ba8fb8a5094dae04bcb0fc31939f0",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-293-20260831-12b25a7.exe",
+  "sha256": "da384fde530ae2fe77767dbf87a9d766e09d544621a463b879a7f1a9e997c623",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-293-20260831-12b25a7.exe",
+  "installer_sha256": "9f2d60d0d9b2356f79589ed278bcfe210ed77dde041732023e497e414c5e1b7e",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-293-20260831-12b25a7",
+  "linux_sha256": "b2edc8dc94450e5da4119a1857682c4e039ce0dff11403be3e6c09faab0184b6",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-08-31T10:47:40Z",
+  "released": "2026-08-31T11:24:23Z",
   "notes": "fix(videoshare): keep deck senders alive across off-air - sender churn leaked driver interop VRAM and killed Resolume mid-set"
 }
