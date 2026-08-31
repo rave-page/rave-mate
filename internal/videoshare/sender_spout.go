@@ -32,6 +32,18 @@ import (
 
 const backendName = "Spout"
 
+// interopErrName decodes the two known GL/DX interop Win32 error codes into a terse operator hint
+// (log field errName). ok=false → omit the field.
+func interopErrName(win uint32) (string, bool) {
+	switch win {
+	case 0x8876017C: // D3DERR_OUTOFVIDEOMEMORY
+		return "D3DERR_OUTOFVIDEOMEMORY (GPU memory exhausted - a leaking GPU app or interop churn; freeing VRAM / restarting the biggest GPU app clears it)", true
+	case 50: // ERROR_NOT_SUPPORTED
+		return "ERROR_NOT_SUPPORTED (driver refuses interop; reboot usually clears)", true
+	}
+	return "", false
+}
+
 // openSenderWait bounds the eager sender create (GL context + one zeroed frame + GetHandle). A
 // wedged driver must not hang a route open; the caller falls back to the frame path.
 const openSenderWait = 5 * time.Second
@@ -160,8 +172,11 @@ func (s *spoutSender) run(deck string, w *deckWorker) {
 	h := C.rave_spout_create()
 	if h == nil {
 		if ierr := uint32(C.rave_spout_last_interop_error()); ierr != 0 {
-			s.log.Warn(source, "spout: GPU driver refused OpenGL/DirectX interop - deck sender idle (entering SpoutLibrary would be fatal; it retries on the next track cycle, a reboot usually clears the driver state)",
-				map[string]any{"deck": deck, "sender": name, "winErr": ierr})
+			fields := map[string]any{"deck": deck, "sender": name, "winErr": fmt.Sprintf("%#x", ierr)}
+			if hint, ok := interopErrName(ierr); ok {
+				fields["errName"] = hint
+			}
+			s.log.Warn(source, "spout: GPU driver refused OpenGL/DirectX interop - deck sender idle (entering SpoutLibrary would be fatal; it retries on the next track cycle, a reboot usually clears the driver state)", fields)
 		} else {
 			s.log.Warn(source, "spout: OpenGL context unavailable; deck idle",
 				map[string]any{"deck": deck, "sender": name})
@@ -344,9 +359,12 @@ func (f *frameSender) run(name string) {
 	h := C.rave_spout_create()
 	if h == nil {
 		if ierr := uint32(C.rave_spout_last_interop_error()); ierr != 0 {
-			f.log.Warn(source, "spout: GPU driver refused OpenGL/DirectX interop - frame sender idle (entering SpoutLibrary would be fatal)",
-				map[string]any{"sender": name, "winErr": ierr})
-			f.openErr = fmt.Sprintf("GL/DX interop unavailable (Win32 error %d)", ierr)
+			fields := map[string]any{"sender": name, "winErr": fmt.Sprintf("%#x", ierr)}
+			if hint, ok := interopErrName(ierr); ok {
+				fields["errName"] = hint
+			}
+			f.log.Warn(source, "spout: GPU driver refused OpenGL/DirectX interop - frame sender idle (entering SpoutLibrary would be fatal)", fields)
+			f.openErr = fmt.Sprintf("GL/DX interop unavailable (Win32 error %#x)", ierr)
 		} else {
 			f.log.Warn(source, "spout: OpenGL context unavailable; frame sender idle", map[string]any{"sender": name})
 			f.openErr = "no OpenGL context"

@@ -7,6 +7,11 @@
 // deck it wants by sender name. Frames are the same card the PNG + browser overlays draw
 // (internal/deckcard), with the same cued-not-played gate (a deck appears only once on-air).
 //
+// Senders are kept alive across off-air: a gated-out deck gets ONE fully transparent frame, not a
+// Remove. Sender destroy/create churn leaks driver GL/DX interop resources system-wide - after ~25
+// track cycles it exhausted VRAM (E_OUTOFVIDEOMEMORY) and killed Resolume mid-set. Alpha-aware
+// receivers show nothing, so this is visually identical. See .devnotes/SPOUT_INTEROP_VRAM_CHURN.md.
+//
 // The transport is platform-specific and selected at build time:
 //
 //	-tags spout     → Windows, Spout2 (DirectX 11 shared texture)
@@ -51,7 +56,10 @@ type Sender interface {
 	// implementation must not retain img.Pix past Send - a backend uploading on its own thread
 	// waits for that read (internal/videoshare/handoff.go).
 	Send(deck string, img *image.NRGBA) error
-	// Remove tears down a deck's sender (track unloaded / gated out). No-op if absent.
+	// Remove tears down a deck's sender. publish no longer calls this mid-session: senders are kept
+	// alive across off-air (a transparent frame is sent instead) because destroy/create churn leaks
+	// driver interop VRAM system-wide. Teardown now happens only via Close at Start exit; backends
+	// still implement Remove (interface contract). No-op if absent.
 	Remove(deck string) error
 	// Close tears down every sender. The Sink calls this once on shutdown.
 	Close()
@@ -76,8 +84,15 @@ type Sink struct {
 	scale  int // resolved render scale for this Start lifetime
 	gate   map[string]*gateEntry
 	sigs   map[string]string           // deck → last sent signature
-	sent   map[string]bool             // deck → currently has a live sender
+	sent   map[string]bool             // deck → sender exists (kept alive across off-air)
+	blank  map[string]bool             // deck → sender currently showing the transparent off-air frame
 	clocks map[string]*deckclock.Clock // deck → velocity-PLL playback clock (smooth scroll)
+
+	// blankImg is the cached fully-transparent off-air frame, sized from the last rendered card
+	// (lastBounds). It MUST match the card dimensions exactly - a size mismatch makes Spout re-link
+	// interop, the churn this keep-alive removes. Allocated lazily, never written after allocation.
+	blankImg   *image.NRGBA
+	lastBounds image.Rectangle
 }
 
 // New builds the video-share sink. art resolves cover thumbnails (may be nil). wave resolves
@@ -95,6 +110,7 @@ func New(log *logbus.Bus, art *overlayart.Resolver, wave *waveform.Resolver, wav
 		gate:    map[string]*gateEntry{},
 		sigs:    map[string]string{},
 		sent:    map[string]bool{},
+		blank:   map[string]bool{},
 		clocks:  map[string]*deckclock.Clock{},
 	}
 }
@@ -170,12 +186,18 @@ func (s *Sink) publish(ctx context.Context, sender Sender, f *deckcard.Faces, st
 	for _, letter := range []string{"A", "B", "C", "D"} {
 		d, ok := byDeck[letter]
 		if !ok {
-			if s.sent[letter] {
-				if err := sender.Remove(letter); err != nil {
-					s.log.Debug(source, "remove sender failed", map[string]any{"deck": letter, "error": err.Error()})
+			// Gate-out: keep the sender alive, publish one transparent frame instead of Remove.
+			// Deleting the sig guarantees a deck returning with an UNCHANGED signature still gets a
+			// real frame (the throttle would otherwise leave the blank up forever). sent stays true.
+			if s.sent[letter] && !s.blank[letter] {
+				if blank := s.blankFrame(); blank != nil {
+					if err := sender.Send(letter, blank); err != nil {
+						s.log.Debug(source, "send blank frame failed", map[string]any{"deck": letter, "error": err.Error()})
+					} else {
+						s.blank[letter] = true
+						delete(s.sigs, letter)
+					}
 				}
-				s.sent[letter] = false
-				delete(s.sigs, letter)
 			}
 			continue
 		}
@@ -204,7 +226,22 @@ func (s *Sink) publish(ctx context.Context, sender Sender, f *deckcard.Faces, st
 		}
 		s.sigs[letter] = sig
 		s.sent[letter] = true
+		s.blank[letter] = false
+		s.lastBounds = img.Bounds() // size source for the transparent off-air frame (all cards share it)
 	}
+}
+
+// blankFrame returns the cached fully-transparent off-air frame, sized to the last rendered card.
+// nil until a real card has been sent. Reallocated only if the card size changed (e.g. waveform
+// panel toggled) so it always matches - a size mismatch would re-link Spout interop.
+func (s *Sink) blankFrame() *image.NRGBA {
+	if s.lastBounds.Empty() {
+		return nil
+	}
+	if s.blankImg == nil || s.blankImg.Bounds() != s.lastBounds {
+		s.blankImg = image.NewNRGBA(s.lastBounds) // all-zero NRGBA = transparent black
+	}
+	return s.blankImg
 }
 
 // waveOpts builds the combined waveform-panel options for a deck (zero value when disabled).
