@@ -67,8 +67,14 @@ func run(initConn, respConn Conn, initID, respID *identity.Identity, initTrust, 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	ic, rc := make(chan hsOut, 1), make(chan hsOut, 1)
-	go func() { r, e := doHandshake(ctx, initConn, roleInitiator, initID, initTrust); ic <- hsOut{r, e} }()
-	go func() { r, e := doHandshake(ctx, respConn, roleResponder, respID, respTrust); rc <- hsOut{r, e} }()
+	go func() {
+		r, e := doHandshake(ctx, initConn, roleInitiator, initID, initTrust, "", nil)
+		ic <- hsOut{r, e}
+	}()
+	go func() {
+		r, e := doHandshake(ctx, respConn, roleResponder, respID, respTrust, "", nil)
+		rc <- hsOut{r, e}
+	}()
 	return <-ic, <-rc
 }
 

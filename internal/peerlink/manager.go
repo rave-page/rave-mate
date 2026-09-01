@@ -46,13 +46,14 @@ const (
 
 // ConnInfo is a UI-facing snapshot of one peer connection.
 type ConnInfo struct {
-	NodeID   string
-	Nickname string
-	Address  string
-	Status   Status
-	SAS      string // populated while StatusAwaitSAS
-	Trusted  bool
-	Inbound  bool
+	NodeID    string
+	Nickname  string
+	Address   string
+	Status    Status
+	SAS       string // populated while StatusAwaitSAS
+	Trusted   bool
+	Inbound   bool
+	EncStatus LinkEnc // control-plane wire state (encrypted / authenticated-only reason)
 }
 
 // SASRequest is raised to the UI when a pairing needs the user to compare the 6-digit code.
@@ -263,7 +264,7 @@ func (m *Manager) ConnectAddr(addr string) {
 			return
 		}
 		m.dialGate("addr:" + addr).Reset()
-		m.runHandshake(newWSConn(ws), roleInitiator, "", addr)
+		m.runHandshake(newWSConn(ws), roleInitiator, "", addr, "") // seed dial: peer id unknown
 	})
 }
 
@@ -278,7 +279,7 @@ func (m *Manager) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	debuglog.Go(m.log, logTag, func() { m.runHandshake(newWSConn(c), roleResponder, "", hostOf(r.RemoteAddr)) })
+	debuglog.Go(m.log, logTag, func() { m.runHandshake(newWSConn(c), roleResponder, "", hostOf(r.RemoteAddr), "") })
 }
 
 // ── outbound ─────────────────────────────────────────────────────────────────
@@ -312,7 +313,7 @@ func (m *Manager) Connect(p discovery.Peer) {
 			return
 		}
 		m.dialGate(p.NodeID).Reset()
-		m.runHandshake(newWSConn(ws), roleInitiator, p.Name, addr)
+		m.runHandshake(newWSConn(ws), roleInitiator, p.Name, addr, p.NodeID) // known target → apply its opt-out
 	})
 }
 
@@ -336,9 +337,9 @@ func (m *Manager) dialGate(nodeID string) *logbus.Gate {
 //
 // Shared by runHandshake (which then builds a peerlink Link on top) and Authenticate (which
 // hands the tunnel to a different protocol - the studio channel over the bridge).
-func (m *Manager) secureTunnel(ctx context.Context, conn Conn, r role, nickname, addr string) (*Result, error) {
+func (m *Manager) secureTunnel(ctx context.Context, conn Conn, r role, nickname, addr, expectPeerID string) (*Result, error) {
 	hctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	res, err := doHandshake(hctx, conn, r, m.id, m.trustLookup)
+	res, err := doHandshake(hctx, conn, r, m.id, m.trustLookup, expectPeerID, m.controlPref)
 	cancel()
 	if err != nil {
 		m.log.Warn(logTag, "handshake failed", map[string]any{"error": err.Error(), "addr": addr})
@@ -384,8 +385,8 @@ func (m *Manager) secureTunnel(ctx context.Context, conn Conn, r role, nickname,
 	return res, nil
 }
 
-func (m *Manager) runHandshake(conn Conn, r role, nickname, addr string) {
-	res, err := m.secureTunnel(m.ctx, conn, r, nickname, addr)
+func (m *Manager) runHandshake(conn Conn, r role, nickname, addr, expectPeerID string) {
+	res, err := m.secureTunnel(m.ctx, conn, r, nickname, addr, expectPeerID)
 	if err != nil {
 		return // secureTunnel logged + closed
 	}
@@ -393,7 +394,8 @@ func (m *Manager) runHandshake(conn Conn, r role, nickname, addr string) {
 	cctx, ccancel := context.WithCancel(m.ctx)
 	cs := &connState{
 		link: newLink(conn, res), res: res, ctx: cctx, cancel: ccancel,
-		info: ConnInfo{NodeID: res.PeerNodeID, Nickname: nickname, Address: addr, Trusted: res.Trusted, Inbound: r == roleResponder},
+		info: ConnInfo{NodeID: res.PeerNodeID, Nickname: nickname, Address: addr, Trusted: res.Trusted,
+			Inbound: r == roleResponder, EncStatus: res.LinkEncState()},
 	}
 	if known, ok := m.store.Get(res.PeerNodeID); ok && cs.info.Nickname == "" {
 		cs.info.Nickname = known.Nickname
@@ -575,6 +577,26 @@ func (m *Manager) OnDiscovered(found []discovery.Peer) {
 
 func (m *Manager) trustLookup(nodeID string) (ed25519.PublicKey, bool) {
 	return m.store.TrustedKey(nodeID)
+}
+
+// controlPref yields this node's LAN control-plane encryption preference for a peer: encOff only
+// when the peer is remembered AND its control-plane opt-out is set; encOn (default) otherwise.
+func (m *Manager) controlPref(peerID string) string {
+	if m.store.EncOff(peerID, peers.PlaneControl) {
+		return encOff
+	}
+	return encOn
+}
+
+// EncOff reports a remembered peer's encryption opt-out for one transfer-type plane
+// (peers.PlaneControl/PlaneFiles/PlaneMedia). Default false = encrypted. Feeds the medialink /
+// filexfer data-plane negotiation and the Peers-tab toggles.
+func (m *Manager) EncOff(nodeID, plane string) bool { return m.store.EncOff(nodeID, plane) }
+
+// SetEncOff records a remembered peer's opt-out for one plane (UI action). Control-plane changes
+// take effect on the next (re)connect; files/media on the next transfer.
+func (m *Manager) SetEncOff(nodeID, plane string, off bool) error {
+	return m.store.SetEncOff(nodeID, plane, off)
 }
 
 // Remembered returns all trusted/paired peers (for the UI's offline list).

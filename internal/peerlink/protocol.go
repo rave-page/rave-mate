@@ -15,6 +15,16 @@
 //     both signatures verify. A relay MITM runs two sessions → two SAS → humans reject.
 //  5. On a known peer, the signature verifies against the stored key → no SAS. A changed
 //     key for a known node id is rejected loudly.
+//
+// Encryption (default ON): after the AKE the LAN transport upgrades to AES-256-GCM
+// (transport.go), so every control frame and data channel is sealed, not just MAC'd. The
+// decision is negotiated in the signed hello (encPref) and holds unless BOTH peers opted the
+// control plane out - a lone or wire-injected "off" cannot force a downgrade (see gate.go).
+// The opt-out granularity is PER-PLANE, not per-channel: there is deliberately no mixed-mode
+// framing that would leave MIDI plaintext inside an otherwise-sealed tunnel. AES-GCM on a
+// sub-KB control frame costs microseconds; the latency escape hatch that actually matters is
+// the A/V plane (medialink), where a 4K route's per-frame budget lives, and that plane has its
+// own per-peer opt-out (peers.PlaneMedia).
 package peerlink
 
 import "rave.page/mate/internal/wirecrypto"
@@ -35,6 +45,13 @@ const (
 	fileSecretInfo = "rave-peer-file-v1"
 
 	sasDigits = 6
+
+	// encOn/encOff are the control-plane encryption preferences carried (signed, transcript-
+	// covered) in the hello. Default ON: a new build always sends one, so a wire attacker who
+	// strips the field to force a downgrade breaks the transcript signature. An OLD build sends
+	// no encPref at all (absent) → the peer is treated as unable to encrypt the LAN plane.
+	encOn  = "on"
+	encOff = "off"
 
 	frameHello   = "peer-hello"
 	frameAuth    = "peer-auth"
@@ -74,6 +91,9 @@ type helloFrame struct {
 	Nonce     string         `json:"nonce"` // b64url 32B
 	IDPub     string         `json:"idPub"` // b64url Ed25519 public key
 	NodeID    string         `json:"nodeId"`
+	// EncPref is this side's LAN-plane encryption preference (encOn/encOff). Signed via the
+	// transcript. Absent on the wire = an older peer that predates LAN encryption; see gate.go.
+	EncPref string `json:"encPref,omitempty"`
 }
 
 // authFrame proves possession of the long-term identity key over the transcript.

@@ -11,6 +11,13 @@ import (
 	"rave.page/mate/internal/store"
 )
 
+// Transfer-type planes an encryption opt-out can target (keys of Peer.EncOff).
+const (
+	PlaneControl = "control" // the peerlink control plane (now-playing, MIDI, remote control, bus)
+	PlaneFiles   = "files"   // the filexfer data plane
+	PlaneMedia   = "media"   // the medialink A/V data plane
+)
+
 // Peer is a remembered peer.
 type Peer struct {
 	NodeID      string            `json:"nodeId"`
@@ -20,6 +27,10 @@ type Peer struct {
 	LastSeen    time.Time         `json:"lastSeen"`
 	PairedAt    time.Time         `json:"pairedAt"`
 	Trusted     bool              `json:"trusted"`
+	// EncOff is the per-transfer-type encryption opt-out (keys: PlaneControl/PlaneFiles/
+	// PlaneMedia). Encryption is DEFAULT ON: a plane absent (or false) means encrypted. A wire
+	// opt-out takes effect only when BOTH ends set it, so a lone true here never downgrades.
+	EncOff map[string]bool `json:"encOff,omitempty"`
 }
 
 // Store is the remembered-peers persistence facade over the bbolt store.
@@ -77,6 +88,43 @@ func (s *Store) Save(p Peer) error {
 		return nil
 	}
 	return s.st.PutJSON(store.BucketPeers, p.NodeID, p)
+}
+
+// EncOff reports the per-plane encryption opt-out for a remembered peer. Default (unknown peer,
+// no map, or absent plane) is false = encrypted.
+func (s *Store) EncOff(nodeID, plane string) bool {
+	p, ok := s.Get(nodeID)
+	if !ok {
+		return false
+	}
+	return p.EncOff[plane]
+}
+
+// SetEncOff records a peer's opt-out for one plane (read-modify-write). No-op on an unknown peer
+// (opt-outs are offered only for remembered peers), so it never creates a bare entry.
+func (s *Store) SetEncOff(nodeID, plane string, off bool) error {
+	if s == nil || s.st == nil {
+		return nil
+	}
+	p, ok := s.Get(nodeID)
+	if !ok {
+		return nil
+	}
+	if p.EncOff == nil {
+		if !off {
+			return nil // nothing to clear
+		}
+		p.EncOff = map[string]bool{}
+	}
+	if off {
+		p.EncOff[plane] = true
+	} else {
+		delete(p.EncOff, plane)
+	}
+	if len(p.EncOff) == 0 {
+		p.EncOff = nil
+	}
+	return s.Save(p)
 }
 
 // Forget removes a remembered peer.

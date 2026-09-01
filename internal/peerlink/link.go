@@ -15,8 +15,9 @@ import (
 // Link is an established, authenticated peer connection. Post-handshake control frames
 // (confirm/reject/ping/pong) are integrity-protected with a per-frame HMAC keyed by the
 // handshake-derived bind key + a monotonic sequence number - same scheme as the studio
-// channel. (The LAN transport is plaintext ws://; Phase 3 will add AEAD for the library
-// payloads. Control frames need authenticity, which the MAC provides.)
+// channel. The LAN transport itself is AEAD-sealed by DEFAULT (transport.go Upgrade, unless
+// BOTH peers opted the control plane out); the MAC + seq stay inside that tunnel as defense in
+// depth (and remain the sole protection on an authenticated-only link).
 type Link struct {
 	conn       Conn
 	bindKey    []byte
@@ -78,8 +79,8 @@ func (l *Link) send(ctx context.Context, t string, extra map[string]any) error {
 
 // SendData sends an app-level data frame on the named sub-channel. payload is opaque JSON
 // (the caller marshals it); it rides as a string field so the per-frame MAC canonicalization
-// is lossless. Authenticity is the same HMAC as control frames; confidentiality (AEAD) lands
-// with the library-sync payloads - now-playing/MIDI are ephemeral, low-sensitivity LAN data.
+// is lossless. Authenticity is the same HMAC as control frames; confidentiality is the
+// transport's default AEAD seal (transport.go) - every data channel rides inside it.
 func (l *Link) SendData(ctx context.Context, channel string, payload []byte) error {
 	return l.send(ctx, frameData, map[string]any{"ch": channel, "data": string(payload)})
 }

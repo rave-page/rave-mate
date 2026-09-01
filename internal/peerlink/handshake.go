@@ -33,6 +33,13 @@ type Result struct {
 	Transcript      []byte
 	SAS             string
 	Trusted         bool // peer's key already matched a stored trusted peer → no SAS needed
+
+	// LAN control-plane encryption negotiation (see gate.go). LocalEncPref/PeerEncPref are the
+	// two signed hello preferences; PeerEncPref is "" for an older peer that sent no encPref.
+	// LinkEncrypted is set true by upgradeTransport when the LAN AEAD upgrade actually ran.
+	LocalEncPref  string
+	PeerEncPref   string
+	LinkEncrypted bool
 }
 
 var (
@@ -46,29 +53,68 @@ var (
 // doHandshake runs the AKE as the given role over c, authenticating with id and consulting
 // trust (may be nil). On success it returns a Result; for an untrusted peer SAS must still
 // be confirmed by the user before the link is used (see Manager).
-func doHandshake(ctx context.Context, c Conn, r role, id *identity.Identity, trust TrustLookup) (*Result, error) {
+//
+// expectPeerID is the peer node id known a priori (an outbound reconnect to a remembered peer);
+// "" when unknown (a seed dial or an inbound connection). resolvePref (may be nil → encOn)
+// yields this side's per-peer LAN-plane preference by peer id; the responder learns the peer id
+// from the received hello before it signs its own, so its opt-out is applied symmetrically.
+func doHandshake(ctx context.Context, c Conn, r role, id *identity.Identity, trust TrustLookup, expectPeerID string, resolvePref func(peerID string) string) (*Result, error) {
 	eph, ephJwk, err := wirecrypto.GenerateEcdh()
 	if err != nil {
 		return nil, err
 	}
 	nonce := wirecrypto.RandomBytes(32)
-	hello := helloFrame{
-		T: frameHello, PV: protocolVersion, Role: string(r), EphPubJwk: ephJwk,
-		Nonce: wirecrypto.EncB64url(nonce), IDPub: wirecrypto.EncB64url(id.Pub), NodeID: id.NodeID,
+	prefOf := func(peerID string) string {
+		if resolvePref == nil {
+			return encOn
+		}
+		if resolvePref(peerID) == encOff {
+			return encOff
+		}
+		return encOn
 	}
-	myRaw, err := wirecrypto.MarshalNoHTMLEscape(hello)
-	if err != nil {
-		return nil, err
+	buildHello := func(pref string) ([]byte, error) {
+		return wirecrypto.MarshalNoHTMLEscape(helloFrame{
+			T: frameHello, PV: protocolVersion, Role: string(r), EphPubJwk: ephJwk,
+			Nonce: wirecrypto.EncB64url(nonce), IDPub: wirecrypto.EncB64url(id.Pub), NodeID: id.NodeID,
+			EncPref: pref,
+		})
 	}
 
-	// Exchange hellos (initiator sends first to avoid a deadlock).
-	peerRaw, err := exchange(ctx, c, r, myRaw)
-	if err != nil {
-		return nil, err
-	}
+	// Exchange hellos. The initiator sends first (it applies the a-priori peer preference); the
+	// responder receives first, so it can look up its own per-peer preference for the now-known
+	// peer id before signing its reply. Either way the transcript covers both encPref values.
+	var myRaw, peerRaw []byte
+	var myPref string
 	var ph helloFrame
-	if json.Unmarshal(peerRaw, &ph) != nil || ph.T != frameHello || ph.PV != protocolVersion {
-		return nil, errProtocol
+	if r == roleInitiator {
+		myPref = prefOf(expectPeerID)
+		if myRaw, err = buildHello(myPref); err != nil {
+			return nil, err
+		}
+		if err = c.Send(ctx, myRaw); err != nil {
+			return nil, err
+		}
+		if peerRaw, err = c.Recv(ctx); err != nil {
+			return nil, err
+		}
+		if json.Unmarshal(peerRaw, &ph) != nil || ph.T != frameHello || ph.PV != protocolVersion {
+			return nil, errProtocol
+		}
+	} else {
+		if peerRaw, err = c.Recv(ctx); err != nil {
+			return nil, err
+		}
+		if json.Unmarshal(peerRaw, &ph) != nil || ph.T != frameHello || ph.PV != protocolVersion {
+			return nil, errProtocol
+		}
+		myPref = prefOf(ph.NodeID) // claimed id only picks OUR pref; a spoof still fails the sig below
+		if myRaw, err = buildHello(myPref); err != nil {
+			return nil, err
+		}
+		if err = c.Send(ctx, myRaw); err != nil {
+			return nil, err
+		}
 	}
 	if !oppositeRole(r, ph.Role) {
 		return nil, fmt.Errorf("%w: role conflict", errProtocol)
@@ -137,6 +183,7 @@ func doHandshake(ctx context.Context, c Conn, r role, id *identity.Identity, tru
 	res := &Result{
 		Role: r, PeerNodeID: ph.NodeID, PeerIdentityPub: peerIDPub,
 		SessionKey: sessionKey, BindKey: bindKey, Transcript: transcript, SAS: sas,
+		LocalEncPref: myPref, PeerEncPref: ph.EncPref,
 	}
 	if trust != nil {
 		if stored, ok := trust(ph.NodeID); ok {
