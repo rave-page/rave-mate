@@ -134,9 +134,9 @@ func (u *UI) pickApply(idTx, path string) {
 }
 
 // redispatch re-enters the action pipeline exactly as a page event would (covers the set:/toggle:
-// built-ins and every registry handler). It routes through the page's bound rave() so the act is
-// queued on the shell's acts chan and executes serialized on actWorker - never calls onAction from
-// this background goroutine (concurrent handlers would race unsynchronized state, e.g. *config.Config).
+// built-ins and every registry handler). It routes through the page's bound rave() so the act comes
+// back as a page act and executes serialized on the act worker - never calls onActMsg from this
+// background goroutine (concurrent handlers would race unsynchronized state, e.g. *config.Config).
 func (u *UI) redispatch(act, val string) {
 	b, err := json.Marshal(actMsg{Act: act, Val: val})
 	if err != nil {

@@ -90,10 +90,12 @@ func (s *virtualShell) hwnd() uintptr                  { return 0 }
 func newHeadlessUI(svc ui.Services, emitHTML, emitEval func(string)) *UI {
 	u := &UI{svc: svc, log: svc.Log, active: "library", pinnedTab: "library",
 		started: time.Now(), stop: make(chan struct{}),
-		logBus: "app", logLevel: "all", logAutoscroll: true, evalKick: make(chan struct{}, 1)}
+		logBus: "app", logLevel: "all", logAutoscroll: true, evalKick: make(chan struct{}, 1),
+		actQ: make(chan actMsg, maxActQueue)}
 	vs := newVirtualShell(u.onAction, emitHTML, emitEval)
 	u.shell = vs
 	go u.evalFlusher()
+	go u.actWorker()  // acts from the virtual shell run here, not on its input pump
 	u.libWatchStart() // mirrors track peer/local cue edits too (Stop() unsubscribes)
 	return u
 }

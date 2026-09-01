@@ -35,8 +35,12 @@ type Options struct {
 	// Init returns the feature's init params; re-evaluated on every (re)spawn so config
 	// edits take effect on restart.
 	Init func() any
-	// OnEvent routes child events by name (e.g. "obs", "state", "capture"). Called on the
-	// host's reader goroutine - keep handlers fast/non-blocking. "log" is built-in.
+	// OnEvent routes child events by name (e.g. "obs", "state", "capture"). Each handler runs
+	// INLINE on the host's single reader goroutine, so a handler that blocks stalls the whole event
+	// pump - including this child's heartbeat frames (EventHeartbeat), which monitorHeartbeat then
+	// reads as a hang and force-restarts an otherwise healthy child (2026-09-01: a page act ran a DB
+	// query inline here behind a long VACUUM and got the webview child killed). Handlers MUST be
+	// fast and non-blocking: hand slow work to a queue/goroutine and return. "log" is built-in.
 	OnEvent map[string]func(data json.RawMessage)
 	// OnDown fires when the child leaves ready state (crash or stop) - proxies use it to
 	// reset mirrored state / broadcast a "down" status. Optional.

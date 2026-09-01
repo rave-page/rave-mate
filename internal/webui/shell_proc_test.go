@@ -68,7 +68,8 @@ func procTestUIWith(t *testing.T, cmd func() *exec.Cmd) (*UI, *procShell) {
 	t.Cleanup(func() { procVirtualChild, procChildCmd, shellLog = false, nil, nil })
 
 	u := &UI{svc: ui.Services{Cfg: &config.Config{}, Log: log}, log: log, active: "live",
-		started: time.Now(), stop: make(chan struct{}), evalKick: make(chan struct{}, 1)}
+		started: time.Now(), stop: make(chan struct{}), evalKick: make(chan struct{}, 1),
+		actQ: make(chan actMsg, maxActQueue)}
 	sh, ok := newProcShell("rave-mate test", 800, 600, u.onAction, nil)
 	if !ok {
 		t.Fatal("newProcShell failed")
@@ -78,6 +79,7 @@ func procTestUIWith(t *testing.T, cmd func() *exec.Cmd) (*UI, *procShell) {
 	ps.onReattach = u.reattach
 	ps.onDrop = u.dropFragCache
 	go u.evalFlusher()
+	go u.actWorker() // acts replayed by the child run on the serial worker, not the featurehost reader
 
 	ready := make(chan struct{})
 	ps.onReady = func() { close(ready) }

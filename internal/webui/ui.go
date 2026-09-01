@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"rave.page/mate/internal/cuepattern"
+	"rave.page/mate/internal/debuglog"
 	"rave.page/mate/internal/governor"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/logbus"
@@ -128,6 +129,8 @@ type UI struct {
 	evalBase int            // seq of evalQ[0] (advances on overflow drop)
 	evalKick chan struct{}  // cap-1 flusher wakeup
 
+	actQ chan actMsg // page-originated acts → the single serial actWorker (maxActQueue, drop-newest)
+
 	setMu       sync.Mutex      // guards the Settings-tab view state below
 	setSec      string          // active settings sub-tab (section id); "" = first
 	setQuery    string          // live settings-search text
@@ -149,7 +152,8 @@ type UI struct {
 // window is not created until Run (it must own a locked OS thread).
 func New(svc ui.Services) *UI {
 	u := &UI{svc: svc, log: svc.Log, active: "live", started: time.Now(), stop: make(chan struct{}),
-		logBus: "app", logLevel: "all", logAutoscroll: true, evalKick: make(chan struct{}, 1)}
+		logBus: "app", logLevel: "all", logAutoscroll: true, evalKick: make(chan struct{}, 1),
+		actQ: make(chan actMsg, maxActQueue)}
 	if svc.Cfg != nil {
 		webviewAllowGPU = svc.Cfg.Features.UI.AllowWebviewGPU()
 		webviewShellHosting = "windowed"
@@ -166,6 +170,7 @@ func New(svc ui.Services) *UI {
 			ps.onDrop = u.dropFragCache // ordered-lane overflow must not leave stale fragments
 		}
 		go u.evalFlusher()
+		go u.actWorker()    // serial act lane: page acts run here, never inline on the shell's reader
 		u.registerUIBinds() // MIDI-mapped desktop-UI actions (primary window only)
 	}
 	u.ruiInit() // remote Library sessions over the peer link (no-op without peers)
@@ -310,18 +315,23 @@ func (u *UI) RefreshRecordings() {
 
 // ── action dispatch (page → Go) ──
 
-// onAction decodes one page act. Unexported actMsg fields (tok) are not decodable, so nothing the
-// page says can forge a modal session - see onActMsg.
+// onAction decodes one page act and hands it to the serial act worker (enqueue + return). It MUST
+// NOT run the handler inline: for the procShell the caller is featurehost's reader goroutine, and a
+// blocked reader stops draining the window child's heartbeats → the Host kills the healthy child (see
+// actWorker). Unexported actMsg fields (tok) are not decodable, so nothing the page says can forge a
+// modal session - see onActMsg.
 func (u *UI) onAction(payload string) {
 	var m actMsg
 	if json.Unmarshal([]byte(payload), &m) != nil {
 		return
 	}
-	u.onActMsg(m)
+	u.enqueueAct(m)
 }
 
-// onActMsg routes one act on the act worker. pickApply re-enters here with the same message plus
-// the modal session a returning native dialog's path must be applied under (pick_actions.go).
+// onActMsg is the act executor. It runs ON the serial act worker (enqueued by onAction), or is
+// re-entered directly by code ALREADY on that worker: smartselect.ssPick (core set:/toggle: acts)
+// and pick_actions.pickApply, which passes the modal session a returning native dialog's path must
+// be applied under. Never call it from another goroutine - enqueue via onAction instead.
 func (u *UI) onActMsg(m actMsg) {
 	if u.log != nil { // every incoming act at debug - the first thing to check when a control is dead
 		u.log.Debug("webui", "act", map[string]any{"act": m.Act, "val": m.Val, "form": len(m.Form) > 0})
@@ -419,6 +429,54 @@ func (u *UI) onActMsg(m actMsg) {
 		}
 		u.toast("Not wired yet: " + m.Act)
 	}
+}
+
+// ── serial act worker ──
+//
+// One goroutine drains page-originated acts in arrival order and runs onActMsg. Before this the
+// procShell path had NO daemon-side act lane: featurehost's reader goroutine decoded a page act and
+// ran the handler INLINE (host.go). A handler that blocked on the DB (a libdb read queued behind a
+// 39 s VACUUM INTO) then froze the reader - and the reader is also the lane that reads the window
+// child's heartbeats, so the Host saw no beat and killed the healthy child as "hung" (2026-09-01
+// incident). onAction now enqueues and returns; the reader keeps beating. Mirrors the cgo/virtual
+// shells, which already serialized acts off their own callback thread - this unifies the three.
+
+// maxActQueue bounds page-originated acts awaiting the worker. Policy: drop-NEWEST (the incoming
+// act) + a Warn naming it. Losing an interactive click under overload is acceptable; blocking the
+// featurehost reader (and getting the healthy window child killed) is not.
+const maxActQueue = 256
+
+// enqueueAct queues one page act for the serial worker and returns immediately - the caller may be
+// the featurehost reader goroutine (procShell) or an off-thread act pump (cgo/virtual shell), none
+// of which may block. Full queue: drop-newest + Warn. After Stop() acts are dropped silently.
+func (u *UI) enqueueAct(m actMsg) {
+	select {
+	case u.actQ <- m:
+	case <-u.stop:
+	default:
+		if u.log != nil {
+			u.log.Warn("webui", "act queue full - dropping act", map[string]any{"act": m.Act})
+		}
+	}
+}
+
+// actWorker is the single serial executor of page acts: FIFO, one act at a time, exits on Stop()
+// (mirrors evalFlusher's lifecycle). Per-act panic guard so a crashing handler is contained instead
+// of taking the lane - and every act queued behind it - down.
+func (u *UI) actWorker() {
+	for {
+		select {
+		case <-u.stop:
+			return
+		case m := <-u.actQ:
+			u.runAct(m)
+		}
+	}
+}
+
+func (u *UI) runAct(m actMsg) {
+	defer debuglog.Recover(u.log, "webui:act", false)
+	u.onActMsg(m)
 }
 
 func (u *UI) activeTab() string {
