@@ -396,3 +396,41 @@ func (d *DB) FingerprintForTrack(trackHash string) (string, bool, error) {
 	}
 	return "", false, nil
 }
+
+// FingerprintedHashes returns the set of track_hashes that already have a usable Chromaprint
+// print in the change_log (latest non-reverted fingerprint event carries a non-empty track_fp).
+// It is the bulk companion to FingerprintForTrack: a paced library-coverage sweep loads this
+// once per pass to skip already-fingerprinted tracks without a per-track query. Empty set when
+// none. A hash whose newest fingerprint event was reverted (or blanked) is excluded, matching
+// what FingerprintForTrack would return for it.
+func (d *DB) FingerprintedHashes() (map[string]bool, error) {
+	out := map[string]bool{}
+	if d == nil || d.db == nil {
+		return out, nil
+	}
+	// Newest non-reverted fingerprint event per hash (mirrors LatestChange's ORDER BY id DESC),
+	// kept only when its track_fp is non-empty (FingerprintForTrack's ok condition).
+	rows, err := d.db.Query(`
+		SELECT c.track_hash, COALESCE(c.track_fp,'')
+		FROM change_log c
+		JOIN (
+		  SELECT track_hash, MAX(id) AS max_id
+		  FROM change_log
+		  WHERE field='fingerprint' AND reverted=0
+		  GROUP BY track_hash
+		) latest ON latest.track_hash=c.track_hash AND latest.max_id=c.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var h, fp string
+		if err := rows.Scan(&h, &fp); err != nil {
+			return nil, err
+		}
+		if fp != "" {
+			out[h] = true
+		}
+	}
+	return out, rows.Err()
+}

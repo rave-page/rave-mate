@@ -165,7 +165,7 @@ type Features struct {
 	MediaEditor   Toggle              `json:"mediaEditor"`   // poster/thumbnail composer
 	Editor        EditorFeature       `json:"editor"`        // editor-tab view prefs (preview size + realtime render quality)
 	Player        PlayerFeature       `json:"player"`        // in-app video player (mpv engine; window-embed)
-	Fingerprint   Toggle              `json:"fingerprint"`   // Chromaprint fingerprinting (needs fpcalc)
+	Fingerprint   FingerprintFeature  `json:"fingerprint"`   // Chromaprint fingerprinting (needs fpcalc) + paced library coverage sweep
 	VRChat        VRChatFeature       `json:"vrchat"`        // client-side VRChat API bridge
 	VRCTools      VRCToolsFeature     `json:"vrcTools"`      // VRChat screenshot organizer + camera-path manager
 	VR            Toggle              `json:"vr"`            // VR runtime support (OpenVR/OpenXR)
@@ -1833,6 +1833,25 @@ type Toggle struct {
 	Enabled bool `json:"enabled"`
 }
 
+// FingerprintFeature gates Chromaprint fingerprinting (needs fpcalc) and paces the
+// background library-coverage sweep that proactively fingerprints local tracks so their
+// prints ride along on library sync + grow the public corpus. ALL computation is gated by
+// Enabled - off means no fpcalc runs at all. The sweep is on by default when the feature is
+// enabled (opt-out via SweepDisabled) and only runs while the app is otherwise idle.
+type FingerprintFeature struct {
+	Enabled bool `json:"enabled"`
+	// SweepDisabled turns OFF only the proactive whole-library coverage sweep; per-capture
+	// set fingerprinting (internal/setfp) still runs. Opt-out (zero value = sweep on) so that
+	// simply enabling the feature starts building coverage.
+	SweepDisabled bool `json:"sweepDisabled,omitempty"`
+	// SweepBatch caps how many tracks are fingerprinted per sweep tick (<=0 => built-in
+	// default). Kept small on purpose: a full ~17k library takes days by design, spread thin
+	// so fpcalc never competes with live use.
+	SweepBatch int `json:"sweepBatch,omitempty"`
+	// SweepIntervalSeconds is the delay between sweep ticks (<=0 => built-in default).
+	SweepIntervalSeconds int `json:"sweepIntervalSeconds,omitempty"`
+}
+
 // EditorFeature holds editor-tab view preferences (no on/off - the tab is always
 // available). Zero values fall back to the renderer defaults.
 type EditorFeature struct {
@@ -2481,7 +2500,7 @@ func Default() Config {
 			Library:       Toggle{Enabled: true},
 			MediaEditor:   Toggle{Enabled: true},
 			Player:        PlayerFeature{Embed: true, VO: "gpu", HWDec: "auto-safe"}, // embed mpv in-window (Windows); gpu present path
-			Fingerprint:   Toggle{Enabled: false},                                    // opt-in; needs fpcalc on PATH
+			Fingerprint:   FingerprintFeature{Enabled: false},                       // opt-in; needs fpcalc on PATH
 			VRChat:        VRChatFeature{Enabled: false, RememberSession: true},
 			VRCTools:      VRCToolsFeature{OrganizeByEvent: true, AutoBackupCamPaths: true, AutoRestoreCamPaths: true}, // event-match is the primary photo organize key; cam-path backup/restore default on for live-set crash-recovery
 			VR:            Toggle{Enabled: false},

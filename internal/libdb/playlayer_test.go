@@ -129,3 +129,40 @@ func TestFingerprintForTrack(t *testing.T) {
 		t.Fatalf("fingerprint = %q ok=%v err=%v", fp, ok, err)
 	}
 }
+
+func TestFingerprintedHashes(t *testing.T) {
+	d := openTmp(t)
+	if got, err := d.FingerprintedHashes(); err != nil || len(got) != 0 {
+		t.Fatalf("initially empty: got %v err=%v", got, err)
+	}
+	hA := TrackHash("A", "T1", 0)
+	hB := TrackHash("B", "T2", 0)
+	// A gets a real print; B's fingerprint event carries an EMPTY track_fp (must be excluded,
+	// matching FingerprintForTrack which returns ok only for a non-empty print).
+	if err := d.AppendChanges([]ChangeEvent{
+		{TrackHash: hA, TrackFP: "FPA", Field: "fingerprint", Op: "set", Origin: "fingerprint", NewValue: `"FPA"`},
+		{TrackHash: hB, TrackFP: "", Field: "fingerprint", Op: "set", Origin: "fingerprint", NewValue: `""`},
+	}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	got, err := d.FingerprintedHashes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got[hA] || got[hB] || len(got) != 1 {
+		t.Fatalf("want {A} only, got %v", got)
+	}
+	// Newest event wins: blank A's print → it drops out, staying consistent with FingerprintForTrack.
+	if err := d.AppendChanges([]ChangeEvent{
+		{TrackHash: hA, TrackFP: "", Field: "fingerprint", Op: "set", Origin: "fingerprint", NewValue: `""`},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = d.FingerprintedHashes()
+	if got[hA] {
+		t.Fatalf("A's newest print is empty, must be excluded: %v", got)
+	}
+	if _, ok, _ := d.FingerprintForTrack(hA); ok {
+		t.Fatalf("FingerprintForTrack disagrees with FingerprintedHashes for A")
+	}
+}

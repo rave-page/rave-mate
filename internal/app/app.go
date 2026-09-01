@@ -600,6 +600,14 @@ func run(parent context.Context, serviceMode bool) error {
 		setFp = setfp.New(workers, lib)
 	}
 	fpEnabled := func() bool { return cfg.Features.Fingerprint.Enabled }
+	// Paced library-coverage fingerprint sweep: fpcalc local tracks that lack a print so library
+	// sync carries them (fingerprint_b64) and the corpus grows beyond captured-set audio. Idle-
+	// and feature-gated; a full library takes days by design. Off (SweepDisabled) still starts a
+	// harmless parked ticker so a runtime toggle takes effect without a restart.
+	startLibraryFingerprintSweep(ctx, workers, lib, log,
+		func() bool { f := cfg.Features.Fingerprint; return f.Enabled && !f.SweepDisabled },
+		cfg.Features.Fingerprint.SweepBatch,
+		time.Duration(cfg.Features.Fingerprint.SweepIntervalSeconds)*time.Second)
 	// Persist + time-link captured set files (Icecast audio + finished OBS recordings) to
 	// the tracklist recorded over the same span; re-links orphans when recordings finalize.
 	// On set finish: fingerprint linked audio + sync the set-log to the play layer.
