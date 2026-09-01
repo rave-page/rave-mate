@@ -1,13 +1,13 @@
 {
-  "version": "nightly-fdadd51",
-  "build": 295,
-  "commit": "fdadd51",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-295-20260901-fdadd51.exe",
-  "sha256": "7ad8039e972f5fecb05658f7a6c03b5cb084f3aed4c0577f08e4499433fae0cd",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-295-20260901-fdadd51.exe",
-  "installer_sha256": "4c5a811995d850d98def270dc14e0b7b9652e461e0b69a7343d885eda8fd97a4",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-295-20260901-fdadd51",
-  "linux_sha256": "f5366731d49aa5707453df08a59aac6cf7f1643075796f89b508a3aa98bc58fb",
+  "version": "nightly-eabb7e8",
+  "build": 296,
+  "commit": "eabb7e8",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-296-20260901-eabb7e8.exe",
+  "sha256": "69b105726bde13e93165a7c961af182f6bd27d429b1a7dddb153ea5faa55a70b",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-296-20260901-eabb7e8.exe",
+  "installer_sha256": "a0a819d4f39a9990a88aa597745288b1a22a9e47b7d06ac666d6584537879f4b",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-296-20260901-eabb7e8",
+  "linux_sha256": "79eb434b9c15a2974f11394ec159a5a519ca5e1bf108ba290991d8810e84c754",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-09-01T11:26:29Z",
-  "notes": "stream: refresh publish token in place (fix set fragmentation)"
+  "released": "2026-09-01T15:30:50Z",
+  "notes": "libdb: run BackupTo VACUUM INTO on a dedicated connection"
 }
