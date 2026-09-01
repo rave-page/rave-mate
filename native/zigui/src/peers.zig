@@ -17,12 +17,22 @@ pub const Deck = struct {
     line: []const u8 = "",
 };
 
+// Enc is a paired peer's encryption sub-card (Go peerEncSt): live control-plane wire state, the
+// three default-ON per-transfer-type toggles, and a warning naming what a disabled plane exposes.
+pub const Enc = struct {
+    status: []const u8 = "", // control-plane wire-state line ("" = not connected → no line)
+    statusVar: []const u8 = "", // status tone (raw class suffix; "" → "muted")
+    toggles: []const c.Toggle = &.{},
+    warn: []const u8 = "", // "" = every plane encrypted
+};
+
 pub const Row = struct {
     dot: []const u8 = "", // "" = no dot prefix
     name: []const u8 = "",
     sub: []const u8 = "",
     btns: []const c.Btn = &.{},
     decks: []const Deck = &.{},
+    enc: ?Enc = null, // null = no encryption sub-card (discovered rows)
 };
 
 pub const List = struct {
@@ -259,6 +269,23 @@ fn renderRow(h: *Html, r: Row) !void {
         try h.esc(d.line);
         try h.raw("</div>");
     }
+    if (r.enc) |e| try renderEnc(h, e);
+}
+
+/// renderEnc mirrors Go peerEncHTML: wire-state line, the three toggles, and (when a plane is
+/// opted out) the exposure warning. The status tone is a trusted class suffix, emitted raw.
+fn renderEnc(h: *Html, s: Enc) !void {
+    try h.raw("<div class=peer-enc>");
+    if (s.status.len != 0) {
+        try h.raw("<div class=\"peer-enc-status ");
+        try h.raw(if (s.statusVar.len == 0) "muted" else s.statusVar);
+        try h.raw("\">");
+        try h.esc(s.status);
+        try h.raw("</div>");
+    }
+    for (s.toggles) |t| try c.toggleOf(h, t);
+    if (s.warn.len != 0) try c.hint(h, "warning", s.warn);
+    try h.raw("</div>");
 }
 
 // renderMedia wraps the media plane in its own patch target (#peers-media): the route counters
@@ -493,6 +520,33 @@ test "row with dot + decks" {
         "<div class=btn-row><button class=\"rp-btn rp-btn--ghost\" data-act=\"peer-forget:n1\">Forget</button></div></div>" ++
         "<div class=\"peer-np\">▶ Deck A · X - Y</div>" ++
         "<div class=\"peer-np peer-np--quiet\">▷ Deck B · Q</div>", h.b.items);
+}
+
+test "enc sub-card: status, toggles, warn" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    const toggles = [_]c.Toggle{
+        .{ .label = "Control", .dl = "control", .act = "peer-enc:n1\x1fcontrol", .on = true },
+        .{ .label = "Files", .dl = "files", .act = "peer-enc:n1\x1ffiles", .on = false },
+    };
+    try renderEnc(&h, .{ .status = "Encrypted", .statusVar = "success", .toggles = &toggles, .warn = "readable on your LAN" });
+    try std.testing.expectEqualStrings("<div class=peer-enc><div class=\"peer-enc-status success\">Encrypted</div>" ++
+        "<label class=row data-label=\"control\"><span class=row-label>Control</span><span class=switch><input type=checkbox checked data-act=\"peer-enc:n1\x1fcontrol\" data-value=\"true\"><span class=switch-track></span></span></label>" ++
+        "<label class=row data-label=\"files\"><span class=row-label>Files</span><span class=switch><input type=checkbox data-act=\"peer-enc:n1\x1ffiles\" data-value=\"false\"><span class=switch-track></span></span></label>" ++
+        "<span class=\"hint hint--warning\">readable on your LAN</span></div>", h.b.items);
+}
+
+test "enc sub-card: empty statusVar defaults to muted; discovered row omits the card" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    const toggles = [_]c.Toggle{.{ .label = "Media", .dl = "media", .act = "peer-enc:n1\x1fmedia", .on = true }};
+    try renderEnc(&h, .{ .status = "Encrypted", .toggles = &toggles }); // no statusVar, no warn
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "<div class=\"peer-enc-status muted\">Encrypted</div>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "hint--warning") == null);
+    h.b.clearRetainingCapacity();
+    // A discovered row (enc = null) emits no sub-card at all.
+    try renderRow(&h, .{ .name = "Booth", .sub = "1.2.3.4" });
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "peer-enc") == null);
 }
 
 test "empty list renders the empty state" {

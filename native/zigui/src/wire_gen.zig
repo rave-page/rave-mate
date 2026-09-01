@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0x7c48a87e;
+pub const schema_hash: u32 = 0x1400e6b3;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -2237,6 +2237,16 @@ pub fn decodePeerDeck(r: *wire.Reader, out: *peers.Deck) wire.Error!void {
     };
 }
 
+pub fn decodePeerEnc(r: *wire.Reader, out: *peers.Enc) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.status = try r.str(t),
+        2 => out.statusVar = try r.str(t),
+        3 => out.toggles = try r.list(c.Toggle, decodeUiToggle, t),
+        4 => out.warn = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
 pub fn decodePeerRow(r: *wire.Reader, out: *peers.Row) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.dot = try r.str(t),
@@ -2244,6 +2254,7 @@ pub fn decodePeerRow(r: *wire.Reader, out: *peers.Row) wire.Error!void {
         3 => out.sub = try r.str(t),
         4 => out.btns = try r.list(c.Btn, decodeUiBtn, t),
         5 => out.decks = try r.list(peers.Deck, decodePeerDeck, t),
+        6 => out.enc = try r.sub(peers.Enc, decodePeerEnc, t),
         else => try r.skip(t),
     };
 }

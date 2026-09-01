@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash         uint32 = 0x7c48a87e
+	wireSchemaHash         uint32 = 0x1400e6b3
 	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -1797,12 +1797,22 @@ func (v peerDeckSt) encodeWire(w *zigui.WireWriter) {
 	w.Str(2, v.Line)
 }
 
+func (v peerEncSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Status)
+	w.Str(2, v.StatusVar)
+	w.List(3, len(v.Toggles), func(i int) { v.Toggles[i].encodeWire(w) })
+	w.Str(4, v.Warn)
+}
+
 func (v peerRowSt) encodeWire(w *zigui.WireWriter) {
 	w.Str(1, v.Dot)
 	w.Str(2, v.Name)
 	w.Str(3, v.Sub)
 	w.List(4, len(v.Btns), func(i int) { v.Btns[i].encodeWire(w) })
 	w.List(5, len(v.Decks), func(i int) { v.Decks[i].encodeWire(w) })
+	if v.Enc != nil {
+		w.OptStruct(6, func() { v.Enc.encodeWire(w) })
+	}
 }
 
 func (v peerListSt) encodeWire(w *zigui.WireWriter) {

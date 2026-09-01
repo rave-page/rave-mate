@@ -795,8 +795,12 @@ var schema = []msg{
 		fs: []field{b(1, "Audible", "audible"), s(2, "Line", "line")},
 	},
 	{
+		name: "PeerEnc", goT: "peerEncSt", zigT: "peers.Enc",
+		fs: []field{s(1, "Status", "status"), s(2, "StatusVar", "statusVar"), li(3, "Toggles", "toggles", "UiToggle"), s(4, "Warn", "warn")},
+	},
+	{
 		name: "PeerRow", goT: "peerRowSt", zigT: "peers.Row",
-		fs: []field{s(1, "Dot", "dot"), s(2, "Name", "name"), s(3, "Sub", "sub"), li(4, "Btns", "btns", "UiBtn"), li(5, "Decks", "decks", "PeerDeck")},
+		fs: []field{s(1, "Dot", "dot"), s(2, "Name", "name"), s(3, "Sub", "sub"), li(4, "Btns", "btns", "UiBtn"), li(5, "Decks", "decks", "PeerDeck"), op(6, "Enc", "enc", "PeerEnc")},
 	},
 	{
 		name: "PeerList", goT: "peerListSt", zigT: "peers.List",

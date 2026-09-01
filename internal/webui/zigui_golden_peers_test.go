@@ -86,6 +86,14 @@ func peersFixtures() map[string]peersSt {
 				Decks: []peerDeckSt{
 					{Audible: true, Line: "Deck A · Artist - Title  (128 BPM)"},
 					{Line: "Deck B · Other - Track"},
+				},
+				Enc: &peerEncSt{
+					Status: "Encrypted", StatusVar: "success",
+					Toggles: []uiToggle{
+						newToggle("Control (now-playing, MIDI, remote control)", "peer-enc:node-1\x1fcontrol", true),
+						newToggle("File transfers", "peer-enc:node-1\x1ffiles", true),
+						newToggle("Media (A/V routes)", "peer-enc:node-1\x1fmedia", true),
+					},
 				}},
 			{Name: "Laptop", Sub: "pairing code 421 907",
 				Btns: []uiBtn{
@@ -93,7 +101,16 @@ func peersFixtures() map[string]peersSt {
 					{Label: "Doesn't match", Variant: "destructive", Act: "peer-sas:node-2", Val: "0"},
 				}},
 			{Dot: "warning", Name: "node-3abc…", Sub: "connecting",
-				Btns: []uiBtn{{Label: "Forget", Variant: "ghost", Act: "peer-forget:node-3"}}},
+				Btns: []uiBtn{{Label: "Forget", Variant: "ghost", Act: "peer-forget:node-3"}},
+				Enc: &peerEncSt{
+					Status: "Authenticated only - peer is outdated", StatusVar: "warning",
+					Toggles: []uiToggle{
+						newToggle("Control (now-playing, MIDI, remote control)", "peer-enc:node-3\x1fcontrol", false),
+						newToggle("File transfers", "peer-enc:node-3\x1ffiles", true),
+						newToggle("Media (A/V routes)", "peer-enc:node-3\x1fmedia", true),
+					},
+					Warn: "Off = readable on your LAN: control commands, now-playing & MIDI",
+				}},
 		},
 	}
 	populated.Body.Media = peerMediaSt{
@@ -107,7 +124,7 @@ func peersFixtures() map[string]peersSt {
 			{Title: "Sending to Studio PC · stream 1 · 1204 frames · 12.4 MB",
 				Detail: "loss 0 · 0.00% · jitter 0.31 ms · retx 2 · pli 0",
 				Pipe:   "h264_nvenc tier 2 · 6.2 Mbps · kf 40 · out 30.0 fps · cuda"},
-			{Title: "Receiving from Laptop · stream 2 · 900 frames · 8.1 MB",
+			{Title: "Receiving from Laptop · stream 2 · 900 frames · 8.1 MB · plaintext", // media plane opted out both ends
 				Detail: "loss 3 · recovered 3 · jitter 0.90 ms · p50 12.3 ms · p95 41.0 ms · nack 5"},
 		},
 		Recv: peerRecvSt{
@@ -159,7 +176,7 @@ func peersFixtures() map[string]peersSt {
 				}},
 		},
 		Rows: []xferProgSt{
-			{Title: "⇩ set.wav from Studio PC", Bar: true, BarPct: progressPct(0.4237),
+			{Title: "⇩ set.wav from Studio PC · plaintext", Bar: true, BarPct: progressPct(0.4237), // files plane opted out both ends
 				BarCap: "4.2 MB / 10.0 MB · 1.1 MB/s",
 				Btn:    uiBtn{Label: "Cancel", Variant: "ghost", Act: "xfer-cancel:t2"}},
 			{Title: "⇧ mix.flac to Laptop", SubText: "Waiting for the peer…",
@@ -190,7 +207,15 @@ func peersFixtures() map[string]peersSt {
 		Empty: "None",
 		Rows: []peerRowSt{
 			{Dot: "muted", Name: "Old rig", Sub: "offline",
-				Btns: []uiBtn{{Label: "Forget", Variant: "ghost", Act: "peer-forget:node-6"}}},
+				Btns: []uiBtn{{Label: "Forget", Variant: "ghost", Act: "peer-forget:node-6"}},
+				Enc: &peerEncSt{ // offline: no live status line, one plane opted out
+					Toggles: []uiToggle{
+						newToggle("Control (now-playing, MIDI, remote control)", "peer-enc:node-6\x1fcontrol", true),
+						newToggle("File transfers", "peer-enc:node-6\x1ffiles", true),
+						newToggle("Media (A/V routes)", "peer-enc:node-6\x1fmedia", false),
+					},
+					Warn: "Off = readable on your LAN: the A/V stream",
+				}},
 		},
 	}
 
@@ -213,7 +238,14 @@ func peersFixtures() map[string]peersSt {
 		Rows: []peerRowSt{
 			{Dot: "success", Name: `A&B <"quoted'>`, Sub: `st&ate"<>'`,
 				Btns:  []uiBtn{{Label: `F&orget "x"`, Variant: "ghost", Act: `peer-forget:n&"1'<>`}},
-				Decks: []peerDeckSt{{Audible: true, Line: `Deck A · A&rtist - T"itle<>'`}}},
+				Decks: []peerDeckSt{{Audible: true, Line: `Deck A · A&rtist - T"itle<>'`}},
+				Enc: &peerEncSt{
+					Status: `Auth &only "you"<>'`, StatusVar: "warning",
+					Toggles: []uiToggle{
+						{Label: `C&ontrol "x"<>'`, DL: `c&ontrol "x"<>'`, Act: "peer-enc:n&\"1'<>\x1fcontrol", On: false},
+					},
+					Warn: `Off = &readable "LAN"<>'`,
+				}},
 		},
 	}
 	escaping.Body.Media = peerMediaSt{
