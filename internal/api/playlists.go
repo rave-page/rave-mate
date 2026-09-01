@@ -138,14 +138,43 @@ func (c *Client) DeletePlaylist(ctx context.Context, token, id string) error {
 	return c.playlistReq(ctx, token, http.MethodDelete, "/playlists/"+url.PathEscape(id), nil, nil)
 }
 
-// PutPlaylistItems replaces the playlist's full ordered item set (≤1000) and returns the
-// playlist with its post-replace items (server may link canonical ids from library rows).
+// PutPlaylistItems replaces the playlist's full ordered item set and returns the playlist with
+// its post-replace items (server may link canonical ids from library rows). Splits into
+// ≤maxPlaylistItems-item requests: chunk 1 replaces (truncates old content), chunks 2+ append
+// with expect_count = items written so far (server rejects with 409 on concurrent modification).
+// A single chunk (≤cap, the common case) emits the exact legacy body - no append/expect_count
+// keys - so an un-upgraded server keeps working. Returns the LAST chunk's PlaylistOut.
 func (c *Client) PutPlaylistItems(ctx context.Context, token, id string, items []PlaylistItemIn) (PlaylistOut, error) {
-	if len(items) > maxPlaylistItems {
-		return PlaylistOut{}, fmt.Errorf("playlist items: %d exceeds %d", len(items), maxPlaylistItems)
+	path := "/playlists/" + url.PathEscape(id) + "/items"
+	total := len(items)
+	chunks := (total + maxPlaylistItems - 1) / maxPlaylistItems
+	if chunks == 0 {
+		chunks = 1 // empty items = one replace-all clearing the playlist
 	}
-	body := map[string]any{"items": items}
 	var out PlaylistOut
-	err := c.playlistReq(ctx, token, http.MethodPut, "/playlists/"+url.PathEscape(id)+"/items", body, &out)
-	return out, err
+	written := 0 // items confirmed on the server so far = next chunk's expect_count
+	for ci := 0; ci < chunks; ci++ {
+		if err := ctx.Err(); err != nil {
+			return PlaylistOut{}, err
+		}
+		lo := ci * maxPlaylistItems
+		hi := min(lo+maxPlaylistItems, total)
+		body := map[string]any{"items": items[lo:hi]}
+		if ci > 0 { // omit on chunk 1 for byte-exact legacy wire compat
+			body["append"] = true
+			body["expect_count"] = written
+		}
+		out = PlaylistOut{}
+		if err := c.playlistReq(ctx, token, http.MethodPut, path, body, &out); err != nil {
+			if chunks == 1 {
+				return PlaylistOut{}, err
+			}
+			if StatusCode(err) == http.StatusConflict {
+				err = fmt.Errorf("playlist changed concurrently: %w", err)
+			}
+			return PlaylistOut{}, fmt.Errorf("chunk %d/%d (items %d-%d): %w", ci+1, chunks, lo, hi-1, err)
+		}
+		written = hi
+	}
+	return out, nil
 }
