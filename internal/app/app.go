@@ -45,6 +45,7 @@ import (
 	"rave.page/mate/internal/gistseq"
 	ghlink "rave.page/mate/internal/github"
 	"rave.page/mate/internal/governor"
+	"rave.page/mate/internal/gpumem"
 	"rave.page/mate/internal/gpuwatch"
 	"rave.page/mate/internal/guardian"
 	"rave.page/mate/internal/i18n"
@@ -1980,6 +1981,26 @@ func run(parent context.Context, serviceMode bool) error {
 	ctl.gpuRec = gpuRec
 	gpuwatch.Start(ctx, gpuwatch.Options{Log: log, OnFault: gpuRec.onFault})
 	log.Info("gpuwatch", "GPU-fault watchdog armed (TDR + hung-window auto-recovery)", nil)
+
+	// VRAM telemetry + low-VRAM watchdog: attribute a live-set VRAM leak from the logged
+	// growth curve and toast BEFORE the driver refuses interop (E_OUTOFVIDEOMEMORY). In-proc
+	// (read-only kernel D3DKMT syscalls, low throughput - the sysactivity/gpuwatch class).
+	if gm := cfg.Features.GPUMem; gm.Enabled {
+		var warnFree uint64
+		if gm.WarnFreeMB > 0 {
+			warnFree = uint64(gm.WarnFreeMB)
+		}
+		mon := gpumem.New(gpumem.Options{
+			Log:             log,
+			Notify:          u.Notify,
+			NotifyEnabled:   gm.Notify,
+			SampleInterval:  time.Duration(gm.SampleIntervalSeconds) * time.Second,
+			ProcessInterval: time.Duration(gm.ProcessIntervalSeconds) * time.Second,
+			WarnFreeMB:      warnFree,
+		})
+		debuglog.Go(log, "gpumem", func() { mon.Run(ctx) })
+		log.Info("gpumem", "VRAM watchdog armed (per-adapter + per-process growth curve, low-VRAM toast)", nil)
+	}
 
 	debuglog.Go(log, "app", func() {
 		<-ctx.Done()

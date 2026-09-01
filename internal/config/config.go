@@ -176,6 +176,7 @@ type Features struct {
 	WorldSync     WorldSyncFeature    `json:"worldSync"`     // VRChat world gist feeds (perms/posters/events/now-playing)
 	Notifications Toggle              `json:"notifications"` // native desktop notifications
 	UI            UIFeature           `json:"ui"`            // UI renderer: Fyne (default) or the HTML/CSS webview
+	GPUMem        GPUMemFeature       `json:"gpuMem"`        // GPU VRAM telemetry sampler + low-VRAM watchdog (Windows; no-op stub elsewhere)
 
 	// DJ-data aggregation sources + sinks (the session hub fuses these into one state).
 	NML            NMLFeature        `json:"nml"`            // Traktor history/collection file source
@@ -1852,6 +1853,25 @@ type FingerprintFeature struct {
 	SweepIntervalSeconds int `json:"sweepIntervalSeconds,omitempty"`
 }
 
+// GPUMemFeature gates the GPU dedicated-VRAM telemetry sampler + low-VRAM watchdog
+// (internal/gpumem). Default on: it's a zero-footprint safety watchdog (Windows-only effect,
+// no-op stub elsewhere) that logs a per-adapter + per-process VRAM growth curve for leak
+// attribution and toasts BEFORE the driver refuses OpenGL/DirectX interop (the
+// E_OUTOFVIDEOMEMORY that kills Spout in Resolume/OBS/VRChat ~1h into a live set).
+type GPUMemFeature struct {
+	Enabled bool `json:"enabled"`
+	// SampleIntervalSeconds is the per-adapter sample cadence (<=0 => 60).
+	SampleIntervalSeconds int `json:"sampleIntervalSeconds,omitempty"`
+	// ProcessIntervalSeconds is the per-process sweep cadence (<=0 => 300); a sweep also runs
+	// immediately on any warn-threshold crossing.
+	ProcessIntervalSeconds int `json:"processIntervalSeconds,omitempty"`
+	// WarnFreeMB is the warn threshold in MB of free dedicated VRAM; 0 => auto = max(1024, 8%
+	// of adapter budget).
+	WarnFreeMB int `json:"warnFreeMB,omitempty"`
+	// Notify shows a user-facing toast on the warn crossing (log lines always emit).
+	Notify bool `json:"notify"`
+}
+
 // EditorFeature holds editor-tab view preferences (no on/off - the tab is always
 // available). Zero values fall back to the renderer defaults.
 type EditorFeature struct {
@@ -2508,6 +2528,7 @@ func Default() Config {
 			Twitch:        TwitchFeature{Enabled: false},                                        // opt-in; bundled client id
 			WorldSync:     WorldSyncFeature{Enabled: false},                                     // opt-in; needs GitHub + VRChat links
 			Notifications: Toggle{Enabled: true},
+			GPUMem:        GPUMemFeature{Enabled: true, Notify: true}, // safety watchdog; Windows-only effect, no-op stub elsewhere
 
 			NML:            NMLFeature{Enabled: true},                                       // auto-detect Traktor files
 			MIDI:           MIDIFeature{Enabled: false},                                     // opt-in; needs a virtual MIDI port (loopMIDI)
