@@ -1,6 +1,9 @@
 package libdb
 
-import "fmt"
+import (
+	"database/sql"
+	"fmt"
+)
 
 // Collection maintenance: consistent on-disk snapshot + cleanup of tracks whose files are gone
 // (and the playlist references to them). All LOCAL - operates only on the rave-mate library DB,
@@ -15,13 +18,34 @@ type CleanupResult struct {
 
 // BackupTo writes a consistent snapshot of the whole library DB to dest (VACUUM INTO - a single
 // transactionally-clean file, safe to copy while the DB is open). dest must not already exist.
+//
+// It runs on a DEDICATED short-lived connection, NOT the shared pool. The pool is SetMaxOpenConns(1),
+// so a VACUUM INTO there monopolises the one connection for the whole snapshot (tens of seconds on a
+// multi-GB DB) and every other libdb query queues behind it - long enough on 2026-09-01 that an
+// unrelated page action blocked, froze the featurehost reader, and got a healthy webview child
+// killed as "hung". A separate connection lets concurrent reads/writes proceed on the pool while the
+// VACUUM takes its own WAL read snapshot.
 func (d *DB) BackupTo(dest string) error {
 	if d == nil || d.db == nil {
 		return fmt.Errorf("libdb: nil database")
 	}
+	if d.path == "" {
+		return fmt.Errorf("libdb: no path for a dedicated backup connection")
+	}
+	bdb, err := sql.Open("sqlite", d.path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = bdb.Close() }()
+	bdb.SetMaxOpenConns(1)
+	// WAL is a persistent DB property (already set by Open); busy_timeout is per-connection, so
+	// mirror it here - the VACUUM must wait on a transient lock, not fail fast (matches Open).
+	if _, err := bdb.Exec(`PRAGMA busy_timeout = 5000`); err != nil {
+		return err
+	}
 	// VACUUM INTO can't bind the path as a parameter; dest is an internal config path, not user
 	// input, but quote-escape defensively anyway.
-	_, err := d.db.Exec(`VACUUM INTO '` + escapeSQLLiteral(dest) + `'`)
+	_, err = bdb.Exec(`VACUUM INTO '` + escapeSQLLiteral(dest) + `'`)
 	return err
 }
 

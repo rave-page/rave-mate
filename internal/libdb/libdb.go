@@ -133,6 +133,7 @@ CREATE INDEX IF NOT EXISTS idx_played_tracks_started ON played_tracks(started_at
 // callers gate on it being non-nil, since the library feature needs persistence to work.
 type DB struct {
 	db     *sql.DB
+	path   string // DSN passed to Open; reused to open the dedicated BackupTo connection
 	nodeID string // change_log author (this node); set once at startup via SetNodeID
 	// In-proc mutation epochs for caches whose inputs do NOT append to change_log (so
 	// LibraryVersion() misses them). Bumped by the respective mutations; one daemon owns the DB,
@@ -299,7 +300,7 @@ func Open(path string) (*DB, error) {
 	} {
 		_, _ = sdb.Exec(m)
 	}
-	return &DB{db: sdb}, nil
+	return &DB{db: sdb, path: path}, nil
 }
 
 // Close closes the DB.
