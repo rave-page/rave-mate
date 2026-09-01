@@ -14,6 +14,7 @@ import (
 	"rave.page/mate/internal/mediaroute"
 	"rave.page/mate/internal/peerbridge"
 	"rave.page/mate/internal/peerlink"
+	"rave.page/mate/internal/peers"
 	"rave.page/mate/internal/webcam"
 	"rave.page/mate/internal/zigui"
 )
@@ -32,13 +33,25 @@ type peerDeckSt struct {
 }
 
 // peerRowSt is one `.row` line of a peers list: optional status dot, name, muted tail,
-// trailing buttons, plus (connections only) the bridged now-playing deck lines.
+// trailing buttons, plus (connections only) the bridged now-playing deck lines and (paired
+// peers only) the encryption sub-card.
 type peerRowSt struct {
 	Dot   string       `json:"dot"` // "" = no dot prefix
 	Name  string       `json:"name"`
 	Sub   string       `json:"sub"`
 	Btns  []uiBtn      `json:"btns,omitempty"`
 	Decks []peerDeckSt `json:"decks,omitempty"`
+	Enc   *peerEncSt   `json:"enc,omitempty"` // nil = no encryption sub-card (discovered rows)
+}
+
+// peerEncSt is a paired peer's encryption sub-card: the live control-plane wire state (connected
+// peers only), the three default-ON per-transfer-type toggles, and a warning naming what a
+// disabled plane exposes on the LAN.
+type peerEncSt struct {
+	Status    string     `json:"status,omitempty"`    // control-plane wire-state line
+	StatusVar string     `json:"statusVar,omitempty"` // status tone: "success" | "warning"
+	Toggles   []uiToggle `json:"toggles,omitempty"`
+	Warn      string     `json:"warn,omitempty"` // "" = every plane encrypted
 }
 
 // peerListSt is a rows-or-empty-state card (connections / discovered / remembered). Go
@@ -396,6 +409,10 @@ func (u *UI) peerConnsState(conns []peerlink.ConnInfo, remotes map[string]peerbr
 		}
 		btns = append(btns, uiBtn{Label: i18n.T("peers.forget"), Variant: "ghost", Act: "peer-forget:" + c.NodeID})
 		row := peerRowSt{Dot: v, Name: peerName(c.Nickname, c.NodeID), Sub: st, Btns: btns}
+		if c.Trusted {
+			ci := c
+			row.Enc = u.peerEncCard(c.NodeID, &ci)
+		}
 		for _, ds := range remotes[c.NodeID].NowPlaying.AllDecks() {
 			line := fmtRemoteDeck(ds)
 			if line == "" {
@@ -450,9 +467,59 @@ func (u *UI) peerRememberedState(byNode map[string]peerlink.ConnInfo) peerListSt
 		lst.Rows = append(lst.Rows, peerRowSt{
 			Dot: "muted", Name: peerName(p.Nickname, p.NodeID), Sub: i18n.T("peers.offline"),
 			Btns: []uiBtn{{Label: i18n.T("peers.forget"), Variant: "ghost", Act: "peer-forget:" + p.NodeID}},
+			Enc:  u.peerEncCard(p.NodeID, nil),
 		})
 	}
 	return lst
+}
+
+// peerEncCard builds a paired peer's encryption sub-card: the three default-ON toggles from the
+// stored per-plane opt-out, an exposure warning for each disabled plane, and (for a connected
+// peer) the live control-plane wire state. nil when there is no peers store.
+func (u *UI) peerEncCard(nodeID string, live *peerlink.ConnInfo) *peerEncSt {
+	if u.svc.Peers == nil {
+		return nil
+	}
+	ctrlOff := u.svc.Peers.EncOff(nodeID, peers.PlaneControl)
+	filesOff := u.svc.Peers.EncOff(nodeID, peers.PlaneFiles)
+	mediaOff := u.svc.Peers.EncOff(nodeID, peers.PlaneMedia)
+	st := &peerEncSt{Toggles: []uiToggle{
+		newToggle(i18n.T("peers.encControl"), "peer-enc:"+nodeID+"\x1f"+peers.PlaneControl, !ctrlOff),
+		newToggle(i18n.T("peers.encFiles"), "peer-enc:"+nodeID+"\x1f"+peers.PlaneFiles, !filesOff),
+		newToggle(i18n.T("peers.encMedia"), "peer-enc:"+nodeID+"\x1f"+peers.PlaneMedia, !mediaOff),
+	}}
+	var exposed []string
+	if ctrlOff {
+		exposed = append(exposed, i18n.T("peers.encWarnControl"))
+	}
+	if filesOff {
+		exposed = append(exposed, i18n.T("peers.encWarnFiles"))
+	}
+	if mediaOff {
+		exposed = append(exposed, i18n.T("peers.encWarnMedia"))
+	}
+	if len(exposed) > 0 {
+		st.Warn = i18n.T("peers.encWarn", i18n.A{"planes": strings.Join(exposed, ", ")})
+	}
+	if live != nil {
+		st.Status, st.StatusVar = encStatusLine(live.EncStatus)
+	}
+	return st
+}
+
+// encStatusLine maps a control-plane wire state to a localized line + tone.
+func encStatusLine(s peerlink.LinkEnc) (line, tone string) {
+	switch s {
+	case peerlink.LinkEncrypted:
+		return i18n.T("peers.encStatusEncrypted"), "success"
+	case peerlink.LinkAuthYouOff:
+		return i18n.T("peers.encStatusYouOff"), "warning"
+	case peerlink.LinkAuthPeerOff:
+		return i18n.T("peers.encStatusPeerOff"), "warning"
+	case peerlink.LinkAuthOld:
+		return i18n.T("peers.encStatusOutdated"), "warning"
+	}
+	return "", ""
 }
 
 func (u *UI) peerMediaState(resolve func(string) string) peerMediaSt {
@@ -726,6 +793,9 @@ func xferRowState(t filexfer.Transfer, resolve func(string) string) xferProgSt {
 		r.SubText = i18n.T("peers.canceled")
 		r.IsBadge, r.Badge, r.BadgeVar = true, string(t.State), "secondary"
 	}
+	if string(t.State) == "active" && !t.Encrypted { // files plane opted out both ends
+		r.Title += " " + i18n.T("peers.planePlaintext")
+	}
 	return r
 }
 
@@ -798,6 +868,31 @@ func peerRowHTML(r peerRowSt) string {
 		}
 		b.WriteString(`<div class="` + cls + `">` + mark + html.EscapeString(d.Line) + `</div>`)
 	}
+	if r.Enc != nil {
+		b.WriteString(peerEncHTML(*r.Enc))
+	}
+	return b.String()
+}
+
+// peerEncHTML renders the encryption sub-card: wire-state line, the three toggles, and (when a
+// plane is opted out) the exposure warning.
+func peerEncHTML(st peerEncSt) string {
+	var b strings.Builder
+	b.WriteString(`<div class=peer-enc>`)
+	if st.Status != "" {
+		tone := st.StatusVar
+		if tone == "" {
+			tone = "muted"
+		}
+		b.WriteString(`<div class="peer-enc-status ` + tone + `">` + html.EscapeString(st.Status) + `</div>`)
+	}
+	for _, t := range st.Toggles {
+		b.WriteString(t.html())
+	}
+	if st.Warn != "" {
+		b.WriteString(hint("warning", st.Warn))
+	}
+	b.WriteString(`</div>`)
 	return b.String()
 }
 
@@ -1231,6 +1326,9 @@ func fmtRouteStat(s medialink.RouteStat, resolve func(string) string) (title, de
 		"frames": fmt.Sprint(s.Frames),
 		"bytes":  humanBytes(s.Bytes),
 	})
+	if !s.Encrypted { // media plane opted out both ends - flag the plaintext route
+		title += " " + i18n.T("peers.planePlaintext")
+	}
 	if s.Direction == "recv" {
 		detail = i18n.T("peers.routeDetailRecv", i18n.A{
 			"loss":      fmt.Sprint(s.LostEst),

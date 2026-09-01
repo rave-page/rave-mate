@@ -41,6 +41,22 @@ func init() {
 		u.setPeerControl(m.arg("peers-control:"), m.Val == "1")
 	})
 
+	// Per-peer per-plane encryption toggle. Toggle ON = encrypted (default); OFF = opt out.
+	// Action arg is "<nodeID>\x1f<plane>" (plane = control/files/media).
+	onPrefix("peer-enc:", func(u *UI, m actMsg) {
+		node, plane, ok := strings.Cut(m.arg("peer-enc:"), "\x1f")
+		if !ok || node == "" || u.svc.Peers == nil {
+			return
+		}
+		off := m.Val != "true" // switch off = opt out of encryption for this plane
+		if err := u.svc.Peers.SetEncOff(node, plane, off); err != nil {
+			u.logErr("set peer encryption", err)
+			return
+		}
+		u.patchMain()
+		u.toast("Encryption " + onOff(!off))
+	})
+
 	// ── webcam ──
 	onPrefix("peers-cam-refresh:", func(u *UI, m actMsg) {
 		u.camCommand(webcam.Cmd{Target: m.arg("peers-cam-refresh:"), Action: webcam.ActRefresh})

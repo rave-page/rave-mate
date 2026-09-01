@@ -45,8 +45,24 @@ remote-control features. Pure peer-to-peer - **no rave.page API** (that's a late
 3. SAS is shown **only after both Ed25519 signatures verify**.
 4. A changed identity key for a **known** node id is **rejected**.
 
-The LAN transport is plaintext `ws://`; control frames are HMAC-authenticated. **Phase 3
-must add AEAD** (the sessionKey is already derived) before any library data crosses the link.
+The LAN transport is **AES-256-GCM by default** (`wsConn.Upgrade`, keyed from the handshake's
+`rave-peer-link-v1` linkSecret with LAN-specific `rave-lan-*` HKDF labels): after the AKE every
+control frame and data channel is sealed. The per-frame HMAC + monotonic seq stay inside the
+tunnel as defense in depth (and are the sole protection on an authenticated-only link).
+
+Default-on, per-peer per-plane opt-out (`peers.Peer.EncOff`, keys control/files/media):
+- **Control plane** feeds a signed `encPref` field in the hello (transcript-covered, so a wire
+  attacker cannot strip it to force a downgrade - stripping breaks the signature). Upgrade runs
+  UNLESS **both** peers opted the control plane out; a lone opt-out still encrypts. A peer whose
+  hello lacks `encPref` (older build) is not upgraded and shows `authenticated only (peer
+  outdated)`.
+- **Files/media planes** negotiate an `enc` pref on their ChanBus offer/answer; AEAD unless both
+  ends opted out (absent field = ON - these planes never downgrade for an old peer). When off,
+  frames go plaintext on their dedicated TCP conns (no half-encrypted states).
+
+The opt-out granularity is per-plane, not per-channel: AES-GCM on a sub-KB control frame is
+microseconds; the latency escape hatch that matters is the A/V plane. The Peers tab surfaces the
+live wire state per connection and per plane.
 
 ## Verification
 - Unit: wirecrypto TS-parity; identity load/sign; `change_log` append/seq/revert + TrackHash;
@@ -63,4 +79,5 @@ must add AEAD** (the sessionKey is already derived) before any library data cros
   play_events key on artist|title only, so they don't yet join import events by hash).
 - **Write-back** of merged values into the DJ collection - automatic, but only when the DJ
   app is closed / not holding the file (detect the lock holder), with a pre-write backup.
-- AEAD encryption of the link; play-state bridging; remote library/settings control.
+- ~~AEAD encryption of the link~~ (DONE: default-on LAN encryption with per-peer per-plane
+  opt-out); play-state bridging; remote library/settings control.
