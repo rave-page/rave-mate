@@ -265,6 +265,14 @@ type CreateStreamResp struct {
 	StartedAt             string `json:"started_at"`
 }
 
+// RefreshTokenResp is an in-place publish-token refresh grant. stream_id
+// is UNCHANGED (unlike CreateStream, which mints a new one).
+type RefreshTokenResp struct {
+	StreamID              string `json:"stream_id"`
+	PublishToken          string `json:"publish_token"`
+	PublishTokenExpiresAt string `json:"publish_token_expires_at"`
+}
+
 // IngestEvent is one batched live-set event (deck/channel/master/heartbeat).
 type IngestEvent struct {
 	Type    string         `json:"type"`
@@ -310,6 +318,37 @@ func (c *Client) Heartbeat(ctx context.Context, streamID, publishToken string) e
 		return err
 	}
 	return decode(resp, nil)
+}
+
+// RefreshPublishToken mints a fresh publish token for the SAME stream via
+// POST /streams/{id}/token-refresh, presenting the current (or recently-
+// expired, within the server grace window) publish token. Keeps stream_id
+// stable - unlike CreateStream, which ends the prior stream and mints a
+// new id (fragmenting one set into many). Hand-written POST (not in the
+// generated client). An empty publish_token in a 2xx is treated as an
+// error so a malformed/blank refresh falls back to full re-acquire.
+func (c *Client) RefreshPublishToken(ctx context.Context, streamID, publishToken string) (RefreshTokenResp, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.base+"/streams/"+url.PathEscape(streamID)+"/token-refresh", nil)
+	if err != nil {
+		return RefreshTokenResp{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if publishToken != "" {
+		req.Header.Set("Authorization", "Bearer "+publishToken)
+	}
+	resp, err := c.doer.Do(req)
+	if err != nil {
+		return RefreshTokenResp{}, err
+	}
+	var out RefreshTokenResp
+	if err := decode(resp, &out); err != nil {
+		return RefreshTokenResp{}, err
+	}
+	if out.PublishToken == "" {
+		return RefreshTokenResp{}, fmt.Errorf("token-refresh: empty publish_token in response")
+	}
+	return out, nil
 }
 
 // ── VRChat uplink (opt-in: share the VRChat session with rave.page) ──────────
