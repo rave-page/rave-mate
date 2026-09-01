@@ -16,19 +16,22 @@ import (
 	"rave.page/mate/internal/session"
 )
 
-// fakeStreamServer scripts /streams create + ingest/heartbeat auth per token generation.
+// fakeStreamServer scripts /streams create + ingest/heartbeat/token-refresh auth
+// per token generation.
 type fakeStreamServer struct {
-	mu        sync.Mutex
-	creates   int
-	ingests   int
-	ingestErr map[string]int // publish token → status to return (0/absent = 200)
-	hbErr     map[string]int
-	srv       *httptest.Server
+	mu         sync.Mutex
+	creates    int
+	ingests    int
+	refreshes  int
+	ingestErr  map[string]int // publish token → status to return (0/absent = 200)
+	hbErr      map[string]int
+	refreshErr map[string]int // publish token → status for token-refresh (0/absent = mint)
+	srv        *httptest.Server
 }
 
 func newFakeStreamServer(t *testing.T) *fakeStreamServer {
 	t.Helper()
-	f := &fakeStreamServer{ingestErr: map[string]int{}, hbErr: map[string]int{}}
+	f := &fakeStreamServer{ingestErr: map[string]int{}, hbErr: map[string]int{}, refreshErr: map[string]int{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/streams", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -56,6 +59,20 @@ func newFakeStreamServer(t *testing.T) *fakeStreamServer {
 				w.WriteHeader(code)
 				return
 			}
+		case strings.HasSuffix(r.URL.Path, "/token-refresh"):
+			f.refreshes++
+			if code := f.refreshErr[tok]; code != 0 {
+				w.WriteHeader(code)
+				return
+			}
+			// Mint a fresh token for the SAME stream_id (parsed from the path).
+			id := strings.TrimPrefix(strings.TrimSuffix(r.URL.Path, "/token-refresh"), "/streams/")
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"stream_id":                id,
+				"publish_token":            fmt.Sprintf("rtok%d", f.refreshes),
+				"publish_token_expires_at": "2099-01-01T00:00:00Z",
+			})
+			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -93,10 +110,10 @@ func (p *Publisher) enqueueOne(t *testing.T) {
 	p.enqueue(session.Update{Type: "deckUpdate", Scope: session.Scope{Kind: session.ScopeDeck, ID: "A"}})
 }
 
-// Test401Reacquire proves an expired publish token (401) triggers ONE CreateStream
-// re-acquire with the stored user token and publishing continues on the fresh
-// stream+token instead of retrying 401 forever.
-func Test401Reacquire(t *testing.T) {
+// Test401RefreshInPlace proves an expired publish token (401) triggers an IN-PLACE
+// token refresh that KEEPS stream_id (the set-fragmentation fix) - NOT a CreateStream
+// re-acquire. A second 401 within reacquireMin is rate-limited and arms a backoff.
+func Test401RefreshInPlace(t *testing.T) {
 	f := newFakeStreamServer(t)
 	p := startPaused(t, f)
 	f.mu.Lock()
@@ -104,46 +121,78 @@ func Test401Reacquire(t *testing.T) {
 	f.mu.Unlock()
 
 	p.enqueueOne(t)
-	p.flush(context.Background()) // 401 → re-acquire (create #2)
+	p.flush(context.Background()) // 401 → refresh in place (refresh #1, NO create)
 
 	f.mu.Lock()
-	creates := f.creates
+	creates, refreshes := f.creates, f.refreshes
 	f.mu.Unlock()
-	if creates != 2 {
-		t.Fatalf("creates=%d, want 2 (one re-acquire)", creates)
+	if creates != 1 {
+		t.Fatalf("creates=%d, want 1 (refresh must NOT re-create the stream)", creates)
+	}
+	if refreshes != 1 {
+		t.Fatalf("refreshes=%d, want 1", refreshes)
 	}
 	st := p.Status()
-	if st.StreamID != "s2" {
-		t.Errorf("stream not swapped: %+v", st)
+	if st.StreamID != "s1" {
+		t.Errorf("stream_id changed on refresh: %+v (want s1)", st)
 	}
 	if !st.IsLive {
-		t.Error("must stay live across re-acquire")
+		t.Error("must stay live across refresh")
 	}
 
-	// fresh token works: next flush lands
+	// refreshed token works: next flush lands (rtok1 not scripted to fail)
 	p.enqueueOne(t)
 	p.flush(context.Background())
 	if st := p.Status(); !st.LastFlushOK {
-		t.Errorf("flush with re-acquired token failed: %+v", st)
+		t.Errorf("flush with refreshed token failed: %+v", st)
 	}
 
-	// a second 401 within reacquireMin must NOT create again (rate limit)
+	// a second 401 within reacquireMin must NOT refresh/create again (rate limit)
 	f.mu.Lock()
-	f.ingestErr["tok2"] = 401
+	f.ingestErr["rtok1"] = 401
 	f.mu.Unlock()
 	p.enqueueOne(t)
 	p.flush(context.Background())
 	f.mu.Lock()
-	creates = f.creates
+	creates, refreshes = f.creates, f.refreshes
 	f.mu.Unlock()
-	if creates != 2 {
-		t.Errorf("creates=%d, want 2 (re-acquire rate-limited)", creates)
+	if creates != 1 || refreshes != 1 {
+		t.Errorf("recovery not rate-limited: creates=%d refreshes=%d (want 1/1)", creates, refreshes)
 	}
 	p.mu.Lock()
 	b := p.backoff
 	p.mu.Unlock()
 	if b == 0 {
 		t.Error("rate-limited 401 must arm a backoff (no full-cadence 401 loop)")
+	}
+}
+
+// Test401RefreshFailFallbackReacquire proves that when the refresh endpoint itself
+// fails (token expired beyond the server grace window, or an older backend without
+// the route), the 401 path falls back to a full CreateStream re-acquire (new
+// stream_id) so publishing still recovers.
+func Test401RefreshFailFallbackReacquire(t *testing.T) {
+	f := newFakeStreamServer(t)
+	p := startPaused(t, f)
+	f.mu.Lock()
+	f.ingestErr["tok1"] = 401  // token expired
+	f.refreshErr["tok1"] = 401 // refresh rejects it too (beyond grace)
+	f.mu.Unlock()
+
+	p.enqueueOne(t)
+	p.flush(context.Background()) // 401 → refresh fails → reacquire (create #2)
+
+	f.mu.Lock()
+	creates, refreshes := f.creates, f.refreshes
+	f.mu.Unlock()
+	if refreshes != 1 {
+		t.Fatalf("refreshes=%d, want 1 (one refresh attempt before fallback)", refreshes)
+	}
+	if creates != 2 {
+		t.Fatalf("creates=%d, want 2 (fallback re-acquire)", creates)
+	}
+	if st := p.Status(); st.StreamID != "s2" {
+		t.Errorf("stream not swapped on fallback: %+v", st)
 	}
 }
 
@@ -226,8 +275,9 @@ func Test429Backoff(t *testing.T) {
 	}
 }
 
-// TestHeartbeat401Reacquire proves the heartbeat arm re-acquires too.
-func TestHeartbeat401Reacquire(t *testing.T) {
+// TestHeartbeat401Refresh proves the heartbeat arm refreshes in place too
+// (keeps stream_id), not re-creates.
+func TestHeartbeat401Refresh(t *testing.T) {
 	f := newFakeStreamServer(t)
 	p := startPaused(t, f)
 	f.mu.Lock()
@@ -236,13 +286,13 @@ func TestHeartbeat401Reacquire(t *testing.T) {
 
 	p.heartbeat(context.Background())
 	f.mu.Lock()
-	creates := f.creates
+	creates, refreshes := f.creates, f.refreshes
 	f.mu.Unlock()
-	if creates != 2 {
-		t.Errorf("creates=%d, want 2 (heartbeat 401 re-acquires)", creates)
+	if creates != 1 || refreshes != 1 {
+		t.Errorf("heartbeat 401: creates=%d refreshes=%d, want 1/1 (refresh in place)", creates, refreshes)
 	}
-	if st := p.Status(); st.StreamID != "s2" {
-		t.Errorf("stream not swapped: %+v", st)
+	if st := p.Status(); st.StreamID != "s1" {
+		t.Errorf("stream_id changed: %+v (want s1)", st)
 	}
 }
 

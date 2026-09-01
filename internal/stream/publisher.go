@@ -9,6 +9,7 @@ package stream
 import (
 	"context"
 	"maps"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -35,7 +36,18 @@ const (
 var (
 	retryBackoffBase = time.Second
 	retryBackoffMax  = 2 * time.Minute
-	reacquireMin     = 30 * time.Second // min spacing between CreateStream re-acquire attempts
+	reacquireMin     = 30 * time.Second // min spacing between 401-recovery attempts (refresh, then re-acquire)
+)
+
+// Proactive publish-token refresh. The token has a short server TTL; refreshing
+// in place (POST /streams/{id}/token-refresh) keeps stream_id, so one continuous
+// set is NOT fragmented into many by a mid-set re-create. Fire at 70-80% of the
+// remaining lifetime (jittered) so the swap lands before expiry.
+const (
+	refreshFracMin = 0.70
+	refreshFracMax = 0.80
+	// refreshNever effectively disables the timer until it is armed from pubExp.
+	refreshNever = time.Duration(1 << 62)
 )
 
 // Status is the observable publisher state (drives the UI).
@@ -87,6 +99,7 @@ type Publisher struct {
 	wg                                 sync.WaitGroup
 	hbGate                             logbus.Gate // heartbeat-failure log gate (30s cadence)
 	flushGate                          logbus.Gate // ingest-failure log gate (2/s cadence)
+	refreshGate                        logbus.Gate // token-refresh-failure log gate
 
 	statusMu   sync.Mutex
 	statusSubs map[int]chan Status
@@ -152,6 +165,11 @@ func (p *Publisher) run(ctx context.Context, events <-chan session.Update, unsub
 	defer flush.Stop()
 	heart := time.NewTicker(heartbeatEvery)
 	defer heart.Stop()
+	// Proactive token refresh: armed from pubExp (~70-80% of TTL), re-armed after
+	// each fire. Swaps the token in place BEFORE it expires - keeps stream_id.
+	refresh := time.NewTimer(refreshNever)
+	defer refresh.Stop()
+	p.armRefresh(refresh)
 
 	for {
 		select {
@@ -167,8 +185,95 @@ func (p *Publisher) run(ctx context.Context, events <-chan session.Update, unsub
 			p.flush(ctx)
 		case <-heart.C:
 			p.heartbeat(ctx)
+		case <-refresh.C:
+			_ = p.refreshToken(ctx)
+			p.armRefresh(refresh)
 		}
 	}
+}
+
+// armRefresh (re)schedules the proactive refresh timer from the stored pubExp.
+// Leaves the timer un-armed when the delay is 0 (no/expired/unparseable expiry) -
+// the 401-grace recovery path is the safety net then.
+func (p *Publisher) armRefresh(t *time.Timer) {
+	if d := p.nextRefreshDelay(); d > 0 {
+		t.Reset(d)
+	}
+}
+
+// nextRefreshDelay computes the proactive-refresh delay from the current pubExp.
+// 0 when not live or the expiry is unusable.
+func (p *Publisher) nextRefreshDelay() time.Duration {
+	p.mu.Lock()
+	exp, live := p.pubExp, p.live
+	p.mu.Unlock()
+	if !live {
+		return 0
+	}
+	return refreshDelay(exp, time.Now())
+}
+
+// refreshDelay returns how long to wait before proactively refreshing, given the
+// token's absolute expiry (RFC3339): ~70-80% of the remaining lifetime, jittered.
+// 0 when the expiry is empty/unparseable/already-expired (caller skips; the
+// 401-grace path covers expiry). Floors at 1s so a tiny TTL never busy-loops.
+func refreshDelay(expiresAt string, now time.Time) time.Duration {
+	exp, err := time.Parse(time.RFC3339, expiresAt)
+	if err != nil {
+		return 0
+	}
+	life := exp.Sub(now)
+	if life <= 0 {
+		return 0
+	}
+	frac := refreshFracMin + rand.Float64()*(refreshFracMax-refreshFracMin)
+	d := time.Duration(float64(life) * frac)
+	if d < time.Second {
+		d = time.Second
+	}
+	return d
+}
+
+// refreshToken mints a fresh publish token for the SAME stream (proactively from
+// the run-loop timer, or reactively from a 401) and swaps it in place - stream_id
+// unchanged. Returns nil on success, else the error (for the 401 fallback).
+func (p *Publisher) refreshToken(ctx context.Context) error {
+	p.mu.Lock()
+	if !p.live {
+		p.mu.Unlock()
+		return nil
+	}
+	id, token := p.streamID, p.pubToken
+	p.mu.Unlock()
+	if id == "" {
+		return nil
+	}
+	resp, err := p.api.RefreshPublishToken(ctx, id, token)
+	if err != nil {
+		p.mu.Lock()
+		p.lastErr = "publish token refresh failed: " + err.Error()
+		p.mu.Unlock()
+		if n, ok := p.refreshGate.Should(err.Error(), 5*time.Minute); ok {
+			f := map[string]any{"error": err.Error(), "streamId": id}
+			if n > 0 {
+				f["suppressed"] = n
+			}
+			p.log.Warn(source, "publish token refresh failed", f)
+		}
+		return err
+	}
+	p.mu.Lock()
+	if !p.live { // ended while refreshing
+		p.mu.Unlock()
+		return nil
+	}
+	p.pubToken, p.pubExp = resp.PublishToken, resp.PublishTokenExpiresAt // stream_id unchanged
+	p.lastErr = ""
+	p.mu.Unlock()
+	p.refreshGate.Reset()
+	p.log.Info(source, "publish token refreshed", map[string]any{"streamId": id, "expires": resp.PublishTokenExpiresAt})
+	p.broadcast()
+	return nil
 }
 
 func (p *Publisher) enqueue(u session.Update) {
@@ -256,13 +361,14 @@ func (p *Publisher) heartbeat(ctx context.Context) {
 }
 
 // onPublishError applies the retry discipline after a failed publish-token call:
-// 401 = token expired mid-set → re-acquire via CreateStream; 429 (and any other
-// status/transport error) → exponential backoff so the flush/heartbeat tickers stop
-// re-hitting the server at full cadence. Success elsewhere clears the backoff.
+// 401 = token expired mid-set → recover in place (refresh, then re-create as a
+// last resort); 429 (and any other status/transport error) → exponential backoff
+// so the flush/heartbeat tickers stop re-hitting the server at full cadence.
+// Success elsewhere clears the backoff.
 func (p *Publisher) onPublishError(ctx context.Context, err error, op string) {
 	code := api.StatusCode(err)
 	if code == 401 {
-		p.reacquire(ctx)
+		p.recover401(ctx)
 		return
 	}
 	p.mu.Lock()
@@ -294,22 +400,47 @@ func (p *Publisher) bumpBackoffLocked() {
 	p.retryAfter = time.Now().Add(p.backoff)
 }
 
-// reacquire re-runs CreateStream with the stored user token after a 401 (publish token
-// expired mid-set). The server auto-ends the prior active stream and mints a fresh
-// stream+token; we swap ids in place and keep publishing. Rate-limited to reacquireMin;
-// a failed attempt backs off like any publish error.
-func (p *Publisher) reacquire(ctx context.Context) {
+// recover401 handles a mid-set publish-token expiry (401). Rate-limited to
+// reacquireMin so a persistent 401 can't hammer the server. FIRST tries an
+// in-place refresh (keeps stream_id; the server grace window accepts a just-
+// expired token) - the set-fragmentation fix. Only if refresh fails (expired
+// beyond grace, superseded, stream ended, transport, or an older backend without
+// the route) does it fall back to CreateStream re-acquire (new stream_id, last
+// resort). A rate-limited attempt arms the backoff instead.
+func (p *Publisher) recover401(ctx context.Context) {
 	p.mu.Lock()
 	if !p.live {
 		p.mu.Unlock()
 		return
 	}
 	if time.Since(p.lastReacq) < reacquireMin {
-		p.bumpBackoffLocked() // still 401ing right after a re-acquire: pause instead of hammering
+		p.bumpBackoffLocked() // still 401ing right after a recovery: pause instead of hammering
 		p.mu.Unlock()
 		return
 	}
 	p.lastReacq = time.Now()
+	p.mu.Unlock()
+
+	if err := p.refreshToken(ctx); err == nil {
+		p.mu.Lock()
+		p.backoff, p.retryAfter = 0, time.Time{}
+		p.mu.Unlock()
+		p.broadcast()
+		return
+	}
+	p.reacquire(ctx)
+}
+
+// reacquire re-runs CreateStream with the stored user token when an in-place
+// refresh could not recover a 401. The server auto-ends the prior active stream
+// and mints a fresh stream+token; we swap ids in place and keep publishing. The
+// caller (recover401) owns the rate-limit; a failed attempt backs off.
+func (p *Publisher) reacquire(ctx context.Context) {
+	p.mu.Lock()
+	if !p.live {
+		p.mu.Unlock()
+		return
+	}
 	args := p.args
 	p.mu.Unlock()
 
