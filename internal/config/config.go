@@ -2500,7 +2500,7 @@ func Default() Config {
 			Library:       Toggle{Enabled: true},
 			MediaEditor:   Toggle{Enabled: true},
 			Player:        PlayerFeature{Embed: true, VO: "gpu", HWDec: "auto-safe"}, // embed mpv in-window (Windows); gpu present path
-			Fingerprint:   FingerprintFeature{Enabled: false},                       // opt-in; needs fpcalc on PATH
+			Fingerprint:   FingerprintFeature{Enabled: false},                        // opt-in; needs fpcalc on PATH
 			VRChat:        VRChatFeature{Enabled: false, RememberSession: true},
 			VRCTools:      VRCToolsFeature{OrganizeByEvent: true, AutoBackupCamPaths: true, AutoRestoreCamPaths: true}, // event-match is the primary photo organize key; cam-path backup/restore default on for live-set crash-recovery
 			VR:            Toggle{Enabled: false},
