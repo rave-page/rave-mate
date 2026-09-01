@@ -1,13 +1,13 @@
 {
-  "version": "nightly-c5b15e0",
-  "build": 298,
-  "commit": "c5b15e0",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-298-20260901-c5b15e0.exe",
-  "sha256": "979ce987f7225fa461583e369c77445b660a75d46d4e4b9a7770c276687b43ae",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-298-20260901-c5b15e0.exe",
-  "installer_sha256": "c7adf9d65eabe45135c440afdd5439090368ec6934ee09e8754bea1a4139c67f",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-298-20260901-c5b15e0",
-  "linux_sha256": "0d9ac38a2037373e9f5f782f21d3ed167227d88037082fb7ce9cd3e18a265d9b",
+  "version": "nightly-16a698f",
+  "build": 299,
+  "commit": "16a698f",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-299-20260901-16a698f.exe",
+  "sha256": "85a112ea354525ecec63a1b8928285f8db3488b44c0887e1ba1fb920f17cfae9",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-299-20260901-16a698f.exe",
+  "installer_sha256": "53409c31563e482e9f85129c1f965f0209ab40aeec71178e2d5e1cf6b756e696",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-299-20260901-16a698f",
+  "linux_sha256": "8dba2dc17e621e730e0b54035f26413b5794deafd730c955c0b7084d458b22da",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-09-01T17:57:40Z",
-  "notes": "zigui: port the peer encryption sub-card to the Zig renderer (golden parity)"
+  "released": "2026-09-01T18:29:38Z",
+  "notes": "libfp: paced background sweep that fingerprints the library"
 }
