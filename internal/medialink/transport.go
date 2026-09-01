@@ -2,34 +2,30 @@ package medialink
 
 import (
 	"bufio"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/hkdf"
-	"crypto/sha256"
 	"encoding/binary"
 	"io"
 	"sync"
+
+	"rave.page/mate/internal/wirecrypto"
 )
 
 // Conn is an AEAD-sealed, length-framed media connection over a reliable byte stream (TCP / any
 // io.ReadWriteCloser). Each frame is sealed with AES-256-GCM; the 96-bit nonce is a per-direction
 // monotonic counter (never transmitted - both ends step in lockstep on the ordered stream), so the
 // per-frame overhead is just 4 length bytes + the 16-byte GCM tag. Keys are HKDF-derived from the
-// peerlink session secret, giving the media plane its own encryption (which peerlink's control
-// plane still lacks). Safe for one concurrent writer + one concurrent reader.
+// peerlink session secret (wirecrypto.Sealer), giving the media plane its own encryption. Safe for
+// one concurrent writer + one concurrent reader.
 type Conn struct {
 	rw io.ReadWriteCloser
 	br *bufio.Reader
 
-	send, recv cipher.AEAD
+	send, recv *wirecrypto.Sealer
 
 	wmu      sync.Mutex
-	sctr     uint64
 	wscratch []byte // reused frame-plaintext buffer
 	wout     []byte // reused length+ciphertext buffer
 
 	rmu   sync.Mutex
-	rctr  uint64
 	rbuf  []byte // reused ciphertext buffer
 	ptbuf []byte // reused plaintext buffer
 }
@@ -41,44 +37,11 @@ const maxCipher = headerLen + maxPayload + 64
 // initiator must be true on the dialing end and false on the accepting end so the two directions
 // use distinct keys.
 func NewConn(rw io.ReadWriteCloser, master []byte, initiator bool) (*Conn, error) {
-	sk, rk, err := deriveKeys(master, initiator)
+	send, recv, err := wirecrypto.NewDuplexSealer(master, nil, initiator, "medialink c2s v1", "medialink s2c v1")
 	if err != nil {
 		return nil, err
 	}
-	sa, err := newGCM(sk)
-	if err != nil {
-		return nil, err
-	}
-	ra, err := newGCM(rk)
-	if err != nil {
-		return nil, err
-	}
-	return &Conn{rw: rw, br: bufio.NewReaderSize(rw, 1<<16), send: sa, recv: ra}, nil
-}
-
-// deriveKeys splits the master into per-direction 256-bit keys. The initiator sends on c2s +
-// receives on s2c; the responder mirrors.
-func deriveKeys(master []byte, initiator bool) (send, recv []byte, err error) {
-	c2s, err := hkdf.Key(sha256.New, master, nil, "medialink c2s v1", 32)
-	if err != nil {
-		return nil, nil, err
-	}
-	s2c, err := hkdf.Key(sha256.New, master, nil, "medialink s2c v1", 32)
-	if err != nil {
-		return nil, nil, err
-	}
-	if initiator {
-		return c2s, s2c, nil
-	}
-	return s2c, c2s, nil
-}
-
-func newGCM(key []byte) (cipher.AEAD, error) {
-	blk, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-	return cipher.NewGCM(blk)
+	return &Conn{rw: rw, br: bufio.NewReaderSize(rw, 1<<16), send: send, recv: recv}, nil
 }
 
 // WriteFrame seals + sends one frame. Length prefix + ciphertext go out in a single Write to avoid
@@ -87,12 +50,9 @@ func (c *Conn) WriteFrame(f *Frame) error {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
 	c.wscratch = f.marshal(c.wscratch[:0])
-	var nonce [12]byte
-	binary.BigEndian.PutUint64(nonce[4:], c.sctr)
-	c.sctr++
 	// Layout: [4-byte len][ciphertext]. Seal appends into wout after the reserved length prefix.
 	c.wout = append(c.wout[:0], 0, 0, 0, 0)
-	c.wout = c.send.Seal(c.wout, nonce[:], c.wscratch, nil)
+	c.wout = c.send.Seal(c.wout, c.wscratch)
 	binary.BigEndian.PutUint32(c.wout[:4], uint32(len(c.wout)-4))
 	_, err := c.rw.Write(c.wout)
 	return err
@@ -118,10 +78,7 @@ func (c *Conn) ReadFrame() (*Frame, error) {
 	if _, err := io.ReadFull(c.br, c.rbuf); err != nil {
 		return nil, err
 	}
-	var nonce [12]byte
-	binary.BigEndian.PutUint64(nonce[4:], c.rctr)
-	c.rctr++
-	pt, err := c.recv.Open(c.ptbuf[:0], nonce[:], c.rbuf, nil)
+	pt, err := c.recv.Open(c.ptbuf[:0], c.rbuf)
 	if err != nil {
 		return nil, err
 	}

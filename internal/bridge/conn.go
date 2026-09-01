@@ -2,10 +2,6 @@ package bridge
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/hkdf"
-	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -13,6 +9,7 @@ import (
 	"time"
 
 	"rave.page/mate/internal/logbus"
+	"rave.page/mate/internal/wirecrypto"
 )
 
 // Conn is a reliable, ordered, optionally-encrypted message channel between two bridge
@@ -68,16 +65,15 @@ type Conn struct {
 	inbound   chan chunk
 	delivered chan []byte
 
-	// AEAD state. Nil until Upgrade. sealKey/openKey are per-direction so the two ends never
-	// share a (key, nonce) pair - the classic GCM catastrophe.
-	cmu       sync.Mutex
-	sealAEAD  cipher.AEAD
-	openAEAD  cipher.AEAD
-	sealCtr   uint64 // message counter → GCM nonce; monotonic, never reused under one key
-	openCtr   uint64
-	upgraded  bool
-	closeOnce sync.Once
-	closed    chan struct{}
+	// AEAD state. Nil until Upgrade. The two directions are keyed independently so the two ends
+	// never share a (key, nonce) pair - the classic GCM catastrophe. Each Sealer owns its own
+	// monotonic counter nonce (wirecrypto.Sealer).
+	cmu        sync.Mutex
+	sealSealer *wirecrypto.Sealer
+	openSealer *wirecrypto.Sealer
+	upgraded   bool
+	closeOnce  sync.Once
+	closed     chan struct{}
 }
 
 // frameSender publishes one relay frame. Injected so tests can drive a Conn without HTTP.
@@ -164,53 +160,25 @@ func (c *Conn) PeerSID() string { return c.peerSID }
 //
 // initiator selects which direction key is ours, so the two ends never seal with the same key.
 func (c *Conn) Upgrade(master []byte, initiator bool) error {
-	i2r, err := hkdf.Key(sha256.New, master, nil, "rave-bridge-i2r-v1", 32)
-	if err != nil {
-		return err
-	}
-	r2i, err := hkdf.Key(sha256.New, master, nil, "rave-bridge-r2i-v1", 32)
-	if err != nil {
-		return err
-	}
-	sealKey, openKey := i2r, r2i
-	if !initiator {
-		sealKey, openKey = r2i, i2r
-	}
-	sealAEAD, err := newGCM(sealKey)
-	if err != nil {
-		return err
-	}
-	openAEAD, err := newGCM(openKey)
+	send, recv, err := wirecrypto.NewDuplexSealer(master, nil, initiator, "rave-bridge-i2r-v1", "rave-bridge-r2i-v1")
 	if err != nil {
 		return err
 	}
 	c.cmu.Lock()
-	c.sealAEAD, c.openAEAD, c.upgraded = sealAEAD, openAEAD, true
-	c.sealCtr, c.openCtr = 0, 0
+	c.sealSealer, c.openSealer, c.upgraded = send, recv, true
 	c.cmu.Unlock()
 	return nil
 }
 
-func newGCM(key []byte) (cipher.AEAD, error) {
-	blk, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-	return cipher.NewGCM(blk)
-}
-
-// seal encrypts one logical message. Nonce = the per-direction message counter, so it can
-// never repeat under a key that is itself fresh per connection.
+// seal encrypts one logical message. Nonce = the per-direction message counter (inside the
+// Sealer), so it can never repeat under a key that is itself fresh per connection.
 func (c *Conn) seal(msg []byte) ([]byte, error) {
 	c.cmu.Lock()
 	defer c.cmu.Unlock()
 	if !c.upgraded {
 		return msg, nil
 	}
-	var nonce [12]byte
-	binary.BigEndian.PutUint64(nonce[4:], c.sealCtr)
-	c.sealCtr++
-	return c.sealAEAD.Seal(nil, nonce[:], msg, nil), nil
+	return c.sealSealer.Seal(nil, msg), nil
 }
 
 // open decrypts one logical message. Messages arrive in order (the ARQ guarantees it), so the
@@ -221,14 +189,11 @@ func (c *Conn) open(ct []byte) ([]byte, error) {
 	if !c.upgraded {
 		return ct, nil
 	}
-	var nonce [12]byte
-	binary.BigEndian.PutUint64(nonce[4:], c.openCtr)
-	pt, err := c.openAEAD.Open(nil, nonce[:], ct, nil)
+	pt, err := c.openSealer.Open(nil, ct)
 	if err != nil {
 		// A forged or reordered ciphertext. Never recoverable - the counter would desync.
 		return nil, fmt.Errorf("bridge: decrypt: %w", err)
 	}
-	c.openCtr++
 	return pt, nil
 }
 

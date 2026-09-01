@@ -2,10 +2,6 @@ package filexfer
 
 import (
 	"bufio"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/hkdf"
-	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -13,6 +9,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"rave.page/mate/internal/wirecrypto"
 )
 
 // conn.go - AEAD-sealed, length-framed transfer stream (the medialink transport pattern):
@@ -50,8 +48,7 @@ type fconn struct {
 	nc net.Conn // non-nil when rw is a real socket (idle deadlines)
 	br *bufio.Reader
 
-	send, recv cipher.AEAD
-	sctr, rctr uint64
+	send, recv *wirecrypto.Sealer
 
 	wmu      sync.Mutex
 	wscratch []byte // reused frame-plaintext buffer
@@ -63,39 +60,15 @@ type fconn struct {
 // newFConn wraps rw as a sealed transfer stream. master = peerlink FileSecret; salt = the
 // transfer id; initiator MUST be true on the dialing (receiver) end only.
 func newFConn(rw io.ReadWriteCloser, master []byte, salt string, initiator bool) (*fconn, error) {
-	c2s, err := hkdf.Key(sha256.New, master, []byte(salt), "filexfer c2s v1", 32)
+	send, recv, err := wirecrypto.NewDuplexSealer(master, []byte(salt), initiator, "filexfer c2s v1", "filexfer s2c v1")
 	if err != nil {
 		return nil, err
 	}
-	s2c, err := hkdf.Key(sha256.New, master, []byte(salt), "filexfer s2c v1", 32)
-	if err != nil {
-		return nil, err
-	}
-	sk, rk := c2s, s2c
-	if !initiator {
-		sk, rk = s2c, c2s
-	}
-	sa, err := newGCM(sk)
-	if err != nil {
-		return nil, err
-	}
-	ra, err := newGCM(rk)
-	if err != nil {
-		return nil, err
-	}
-	fc := &fconn{rw: rw, br: bufio.NewReaderSize(rw, 1<<16), send: sa, recv: ra}
+	fc := &fconn{rw: rw, br: bufio.NewReaderSize(rw, 1<<16), send: send, recv: recv}
 	if nc, ok := rw.(net.Conn); ok {
 		fc.nc = nc
 	}
 	return fc, nil
-}
-
-func newGCM(key []byte) (cipher.AEAD, error) {
-	blk, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-	return cipher.NewGCM(blk)
 }
 
 // write seals + sends one [1B type][body] frame.
@@ -105,14 +78,11 @@ func (c *fconn) write(typ byte, body []byte) error {
 	}
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
-	var nonce [12]byte
-	binary.BigEndian.PutUint64(nonce[4:], c.sctr)
-	c.sctr++
 	c.wscratch = append(c.wscratch[:0], typ)
 	c.wscratch = append(c.wscratch, body...)
 	// Layout: [4B len][ciphertext]; single Write (pair with TCP_NODELAY).
 	c.wout = append(c.wout[:0], 0, 0, 0, 0)
-	c.wout = c.send.Seal(c.wout, nonce[:], c.wscratch, nil)
+	c.wout = c.send.Seal(c.wout, c.wscratch)
 	binary.BigEndian.PutUint32(c.wout[:4], uint32(len(c.wout)-4))
 	if c.nc != nil {
 		_ = c.nc.SetWriteDeadline(time.Now().Add(ioIdle))
@@ -159,10 +129,7 @@ func (c *fconn) read() (typ byte, body []byte, err error) {
 	if _, err := io.ReadFull(c.br, c.rbuf); err != nil {
 		return 0, nil, err
 	}
-	var nonce [12]byte
-	binary.BigEndian.PutUint64(nonce[4:], c.rctr)
-	c.rctr++
-	pt, err := c.recv.Open(c.pt[:0], nonce[:], c.rbuf, nil)
+	pt, err := c.recv.Open(c.pt[:0], c.rbuf)
 	if err != nil {
 		return 0, nil, err // tampered/corrupt frame: AEAD open fails, conn is dead
 	}
