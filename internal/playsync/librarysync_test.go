@@ -274,6 +274,106 @@ func TestSyncLibraryUploadsLinksAndSkips(t *testing.T) {
 	}
 }
 
+// libraryBatches must cap by row count for tiny (print-less) rows and by byte budget once rows
+// carry fingerprints, never emit an empty batch, and preserve every row.
+func TestLibraryBatchesByteAware(t *testing.T) {
+	// Row-count cap: 250 tiny rows → 200 + 50.
+	small := make([]item, 250)
+	for i := range small {
+		small[i].size = 100
+	}
+	b := libraryBatches(small)
+	if len(b) != 2 || len(b[0]) != libraryBatch || len(b[1]) != 50 {
+		t.Fatalf("count-cap split wrong: %d batches, sizes %v", len(b), batchSizes(b))
+	}
+
+	// Byte cap: ~6 KB print-bearing rows must batch well under libraryBatch rows and every batch
+	// must stay under the byte budget. 500 rows total, all accounted for.
+	big := make([]item, 500)
+	for i := range big {
+		big[i].size = 6000
+	}
+	bb := libraryBatches(big)
+	total := 0
+	for _, batch := range bb {
+		sum := 0
+		for _, it := range batch {
+			sum += it.size + 1
+		}
+		if sum > maxLibraryBatchBytes {
+			t.Fatalf("batch exceeds byte budget: %d > %d", sum, maxLibraryBatchBytes)
+		}
+		if len(batch) > libraryBatch {
+			t.Fatalf("batch exceeds row cap: %d", len(batch))
+		}
+		total += len(batch)
+	}
+	if total != 500 {
+		t.Fatalf("rows lost in batching: %d, want 500", total)
+	}
+	if len(bb[0]) >= libraryBatch {
+		t.Fatalf("byte cap did not bite on 6KB rows: first batch has %d rows", len(bb[0]))
+	}
+
+	// A single row larger than the whole budget still ships alone (never an empty batch).
+	one := libraryBatches([]item{{size: maxLibraryBatchBytes + 10}, {size: 50}})
+	if len(one) != 2 || len(one[0]) != 1 || len(one[1]) != 1 {
+		t.Fatalf("oversized single row not isolated: %v", batchSizes(one))
+	}
+
+	if got := libraryBatches(nil); got != nil {
+		t.Fatalf("empty queue should batch to nil, got %v", got)
+	}
+}
+
+func batchSizes(bs [][]item) []int {
+	out := make([]int, len(bs))
+	for i, b := range bs {
+		out[i] = len(b)
+	}
+	return out
+}
+
+// A local print in the libdb (change_log fingerprint event) must ride along on the synced row;
+// a track without one omits fingerprint_b64.
+func TestSyncLibraryCarriesLocalFingerprint(t *testing.T) {
+	d := openDB(t)
+	seedLibrary(t, d,
+		musiclib.Track{Path: "a.mp3", Title: "T1", Artist: "A1", DurationSec: 200},
+		musiclib.Track{Path: "b.mp3", Title: "T2", Artist: "A2", DurationSec: 300},
+	)
+	// Record a print for T1 only (same shape internal/setfp writes).
+	h1 := libdb.TrackHash("A1", "T1", 0)
+	nv, _ := json.Marshal("CHROMAPRINT_T1")
+	if err := d.AppendChanges([]libdb.ChangeEvent{{
+		TrackHash: h1, TrackFP: "CHROMAPRINT_T1",
+		Field: "fingerprint", Op: "set", Origin: "fingerprint", NewValue: string(nv),
+	}}); err != nil {
+		t.Fatalf("append print: %v", err)
+	}
+
+	f := &fakeAPI{}
+	s := New(f, d, nil, tokenFn("tok"))
+	if _, err := s.SyncLibrary(context.Background()); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	byTitle := map[string]api.LibraryTrack{}
+	for _, p := range f.libTracks {
+		byTitle[p.Title] = p
+	}
+	if got := byTitle["T1"].FingerprintB64; got != "CHROMAPRINT_T1" {
+		t.Fatalf("T1 fingerprint_b64 = %q, want CHROMAPRINT_T1", got)
+	}
+	if got := byTitle["T2"].FingerprintB64; got != "" {
+		t.Fatalf("T2 has no local print, want fingerprint_b64 omitted, got %q", got)
+	}
+	// The wire row for T2 must not carry the key at all (omitempty).
+	if b, _ := json.Marshal(byTitle["T2"]); strings.Contains(string(b), "fingerprint_b64") {
+		t.Fatalf("T2 leaked fingerprint_b64 key: %s", b)
+	}
+}
+
 func TestSyncLibraryUnauthed(t *testing.T) {
 	d := openDB(t)
 	s := New(&fakeAPI{}, d, nil, tokenFn(""))

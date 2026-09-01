@@ -23,8 +23,24 @@ import (
 	"rave.page/mate/internal/musiclib"
 )
 
-// libraryBatch is the per-request upload size (backend caps at 500).
+// libraryBatch is the per-request upload row cap (backend caps at 500).
 const libraryBatch = 200
+
+// maxLibraryBatchBytes is a conservative client-side ceiling on one bulk request body. Metadata-
+// only rows are small (a few hundred bytes), so a full libraryBatch (200) is comfortably under
+// 1 MiB. A Chromaprint fingerprint_b64 adds ~2-6 KB per row, so once coverage exists a 200-row
+// batch could carry ~1-2 MB - past a typical server/proxy request-body limit. We therefore close
+// a batch early once its accumulated JSON would cross this budget (see libraryBatches). This only
+// shrinks print-bearing batches; a print-less sync still ships the full 200 rows per request.
+const maxLibraryBatchBytes = 1 << 20 // 1 MiB
+
+// item is one queued upload row: its identity hash, the payload change hash (skip-unchanged
+// ledger), the wire payload, and its marshaled JSON size (byte-aware batching).
+type item struct {
+	hash, payloadHash string
+	payload           api.LibraryTrack
+	size              int
+}
 
 // LibraryResult reports one library sync run.
 type LibraryResult struct {
@@ -60,10 +76,6 @@ func (s *Syncer) SyncLibrary(ctx context.Context) (LibraryResult, error) {
 		return LibraryResult{}, err
 	}
 
-	type item struct {
-		hash, payloadHash string
-		payload           api.LibraryTrack
-	}
 	res := LibraryResult{Total: len(tracks)}
 	var queue []item
 	seen := make(map[string]bool, len(tracks))
@@ -77,22 +89,23 @@ func (s *Syncer) SyncLibrary(ctx context.Context) (LibraryResult, error) {
 		fp, _, _ := s.lib.FingerprintForTrack(hash)
 		drops, hasDrops := dropRows[t.Path]
 		p := libraryPayload(t, fp, drops, hasDrops)
-		ph := payloadHash(p)
+		pb, ph := marshalPayload(p)
 		if synced[hash] == ph {
 			res.Skipped++
 			continue
 		}
-		queue = append(queue, item{hash: hash, payloadHash: ph, payload: p})
+		queue = append(queue, item{hash: hash, payloadHash: ph, payload: p, size: len(pb)})
 	}
 
-	batches := (len(queue) + libraryBatch - 1) / libraryBatch
-	s.info("library sync started", map[string]any{"tracks": res.Total, "toUpload": len(queue), "batches": batches})
-	for bi := 0; bi*libraryBatch < len(queue); bi++ {
+	batchList := libraryBatches(queue)
+	s.info("library sync started", map[string]any{"tracks": res.Total, "toUpload": len(queue), "batches": len(batchList)})
+	processed := 0 // rows in batches already begun; the rest count as failed on ctx cancel
+	for bi, batch := range batchList {
 		if ctx.Err() != nil {
-			res.Failed += len(queue) - bi*libraryBatch
+			res.Failed += len(queue) - processed
 			break
 		}
-		batch := queue[bi*libraryBatch : min((bi+1)*libraryBatch, len(queue))]
+		processed += len(batch)
 		payloads := make([]api.LibraryTrack, len(batch))
 		for i, it := range batch {
 			payloads[i] = it.payload
@@ -141,7 +154,7 @@ func (s *Syncer) SyncLibrary(ctx context.Context) (LibraryResult, error) {
 		}
 		if (bi+1)%10 == 0 {
 			s.info("library sync progress", map[string]any{
-				"batch": bi + 1, "of": batches, "uploaded": res.Uploaded, "linked": res.Linked, "failed": res.Failed,
+				"batch": bi + 1, "of": len(batchList), "uploaded": res.Uploaded, "linked": res.Linked, "failed": res.Failed,
 			})
 		}
 	}
@@ -234,12 +247,41 @@ func normRating(r int) int {
 	return 5
 }
 
+// marshalPayload marshals a payload once, returning the bytes and their sha256-hex change hash.
+// Callers needing only the hash use payloadHash; the byte length feeds byte-aware batching so a
+// single marshal serves both the change-ledger and the request-size accounting.
+func marshalPayload(p api.LibraryTrack) ([]byte, string) {
+	b, _ := json.Marshal(p)
+	sum := sha256.Sum256(b)
+	return b, hex.EncodeToString(sum[:])
+}
+
 // payloadHash is the change detector: sha256 hex over the payload's JSON. Field order is fixed
 // by the struct, so identical payloads hash identical across runs.
 func payloadHash(p api.LibraryTrack) string {
-	b, _ := json.Marshal(p)
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
+	_, h := marshalPayload(p)
+	return h
+}
+
+// libraryBatches splits the upload queue into request batches capped by BOTH the row count
+// (libraryBatch) and the JSON byte budget (maxLibraryBatchBytes). The byte cap only bites once
+// rows carry fingerprints - see maxLibraryBatchBytes. A single row larger than the budget still
+// ships alone (batches are never empty). Row order is preserved so item indices stay meaningful.
+func libraryBatches(queue []item) [][]item {
+	var batches [][]item
+	start, bytes := 0, 0
+	for i := range queue {
+		rowBytes := queue[i].size + 1 // +1 approximates the JSON array separator
+		if i > start && (i-start >= libraryBatch || bytes+rowBytes > maxLibraryBatchBytes) {
+			batches = append(batches, queue[start:i])
+			start, bytes = i, 0
+		}
+		bytes += rowBytes
+	}
+	if start < len(queue) {
+		batches = append(batches, queue[start:])
+	}
+	return batches
 }
 
 // sourceDateLayouts covers the raw DJ-software date formats we import: Traktor NML "2024/3/10",
