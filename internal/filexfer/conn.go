@@ -71,6 +71,17 @@ func newFConn(rw io.ReadWriteCloser, master []byte, salt string, initiator bool)
 	return fc, nil
 }
 
+// newPlainFConn wraps rw as an UNENCRYPTED transfer stream (send/recv nil): the negotiated
+// both-peers-opted-out files plane. Same [4B len][typ||body] framing, no AEAD - still
+// authenticated by the peerlink handshake, just not confidential on a trusted LAN.
+func newPlainFConn(rw io.ReadWriteCloser) *fconn {
+	fc := &fconn{rw: rw, br: bufio.NewReaderSize(rw, 1<<16)}
+	if nc, ok := rw.(net.Conn); ok {
+		fc.nc = nc
+	}
+	return fc
+}
+
 // write seals + sends one [1B type][body] frame.
 func (c *fconn) write(typ byte, body []byte) error {
 	if len(body) > maxPlain-1 {
@@ -80,9 +91,13 @@ func (c *fconn) write(typ byte, body []byte) error {
 	defer c.wmu.Unlock()
 	c.wscratch = append(c.wscratch[:0], typ)
 	c.wscratch = append(c.wscratch, body...)
-	// Layout: [4B len][ciphertext]; single Write (pair with TCP_NODELAY).
+	// Layout: [4B len][ciphertext|frame]; single Write (pair with TCP_NODELAY).
 	c.wout = append(c.wout[:0], 0, 0, 0, 0)
-	c.wout = c.send.Seal(c.wout, c.wscratch)
+	if c.send != nil {
+		c.wout = c.send.Seal(c.wout, c.wscratch)
+	} else {
+		c.wout = append(c.wout, c.wscratch...)
+	}
 	binary.BigEndian.PutUint32(c.wout[:4], uint32(len(c.wout)-4))
 	if c.nc != nil {
 		_ = c.nc.SetWriteDeadline(time.Now().Add(ioIdle))
@@ -119,7 +134,11 @@ func (c *fconn) read() (typ byte, body []byte, err error) {
 		return 0, nil, err
 	}
 	n := binary.BigEndian.Uint32(lp[:])
-	if n < 16 || n > maxCipher {
+	lo, hi := uint32(16), uint32(maxCipher) // sealed: min GCM tag, max cipher
+	if c.recv == nil {
+		lo, hi = 1, uint32(maxPlain) // plaintext: min type byte, max frame
+	}
+	if n < lo || n > hi {
 		return 0, nil, errBadFrame
 	}
 	if cap(c.rbuf) < int(n) {
@@ -129,11 +148,14 @@ func (c *fconn) read() (typ byte, body []byte, err error) {
 	if _, err := io.ReadFull(c.br, c.rbuf); err != nil {
 		return 0, nil, err
 	}
-	pt, err := c.recv.Open(c.pt[:0], c.rbuf)
-	if err != nil {
-		return 0, nil, err // tampered/corrupt frame: AEAD open fails, conn is dead
+	pt := c.rbuf
+	if c.recv != nil {
+		pt, err = c.recv.Open(c.pt[:0], c.rbuf)
+		if err != nil {
+			return 0, nil, err // tampered/corrupt frame: AEAD open fails, conn is dead
+		}
+		c.pt = pt
 	}
-	c.pt = pt
 	if len(pt) < 1 {
 		return 0, nil, errTooShort
 	}

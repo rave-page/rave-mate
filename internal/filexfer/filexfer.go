@@ -36,6 +36,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"path/filepath"
 	"strconv"
@@ -102,18 +103,19 @@ func (s State) Terminal() bool {
 
 // Transfer is one queued/running transfer's UI-facing snapshot.
 type Transfer struct {
-	ID    string
-	Peer  string // peer node id
-	Send  bool   // true = outgoing
-	Name  string // display name (base of the sent path)
-	Files int
-	Bytes int64 // total payload bytes
-	Done  int64 // bytes transferred (+ skipped as already present)
-	Rate  float64
-	State State
-	Error string
-	Path  string // send: source root; recv: destination root dir
-	At    time.Time
+	ID        string
+	Peer      string // peer node id
+	Send      bool   // true = outgoing
+	Name      string // display name (base of the sent path)
+	Files     int
+	Bytes     int64 // total payload bytes
+	Done      int64 // bytes transferred (+ skipped as already present)
+	Rate      float64
+	State     State
+	Error     string
+	Path      string // send: source root; recv: destination root dir
+	At        time.Time
+	Encrypted bool // files plane AEAD-sealed (default); false = both peers opted out (plaintext)
 }
 
 // Options configures a Manager. Self, Bus, Secrets, Policy are required.
@@ -133,6 +135,7 @@ type xfer struct {
 	Transfer
 	files     []FileEntry
 	addr      string             // recv: sender addr to dial
+	peerEnc   string             // the peer's advertised files-plane pref (recv: offer.Enc; send: answer.Enc)
 	accepted  bool               // recv: user/policy said yes (re-offers resume silently)
 	cancelReq bool               // local cancel requested (conn error → canceled, not stalled)
 	retries   int                // send: re-offer attempts since last progress
@@ -346,8 +349,9 @@ func (m *Manager) Accept(id string, ok bool) {
 	}
 	x.accepted = true
 	x.State = StateWaiting
+	peer := x.Peer
 	m.mu.Unlock()
-	m.publishAnswer(Answer{ID: id, Accept: true})
+	m.publishAnswer(Answer{ID: id, Accept: true, Enc: m.filesPref(peer)})
 	m.emit(id)
 	go m.dialPull(id)
 }
@@ -396,6 +400,39 @@ func (m *Manager) PeerStateChanged() {
 
 // ── negotiation ───────────────────────────────────────────────────────────────
 
+// filesPref reports this node's files-plane encryption preference for a peer: EncOff only when the
+// peer's files-plane opt-out is set; EncOn (default) otherwise. Read via an OPTIONAL method on the
+// secret provider, so a test SecretProvider without it defaults to encrypted.
+func (m *Manager) filesPref(peer string) string {
+	if ep, ok := m.secrets.(interface{ FilesEncOff(string) bool }); ok && ep.FilesEncOff(peer) {
+		return EncOff
+	}
+	return EncOn
+}
+
+// markEnc records a transfer's resolved files-plane encryption state (snapshot surface).
+func (m *Manager) markEnc(id string, enc bool) {
+	m.mu.Lock()
+	if x := m.xfers[id]; x != nil {
+		x.Encrypted = enc
+	}
+	m.mu.Unlock()
+}
+
+// fileConn builds the transfer stream: AEAD (default) unless the transfer negotiated the
+// both-peers-opted-out plaintext files plane. Errors only when an ENCRYPTED transfer has no live
+// peerlink secret; the plaintext path needs none.
+func (m *Manager) fileConn(rw io.ReadWriteCloser, peer, id string, encrypt, initiator bool) (*fconn, error) {
+	if !encrypt {
+		return newPlainFConn(rw), nil
+	}
+	secret, live := m.secrets.FileSecret(peer)
+	if !live {
+		return nil, errNoFileSecret
+	}
+	return newFConn(rw, secret, id, initiator)
+}
+
 // publishOffer emits the offer + arms the answer timeout.
 func (m *Manager) publishOffer(x *xfer) {
 	m.mu.Lock()
@@ -404,7 +441,8 @@ func (m *Manager) publishOffer(x *xfer) {
 		return
 	}
 	x.State = StateWaiting
-	off := Offer{ID: x.ID, Target: x.Peer, Name: x.Name, Files: x.Files, Bytes: x.Bytes, Addr: m.addr}
+	off := Offer{ID: x.ID, Target: x.Peer, Name: x.Name, Files: x.Files, Bytes: x.Bytes, Addr: m.addr,
+		Enc: m.filesPref(x.Peer)}
 	stopTimersLocked(x)
 	id := x.ID
 	x.answerT = time.AfterFunc(m.answerWait, func() { m.stallSend(id, "no answer from the paired instance") })
@@ -496,6 +534,7 @@ func (m *Manager) onOffer(ev Event) {
 		return // done/error: don't resurrect
 	}
 	x.addr = off.Addr
+	x.peerEnc = off.Enc // sender's advertised files-plane pref (for the dial-time decision)
 	if x.State == StateActive {
 		m.mu.Unlock()
 		return // already pulling
@@ -509,7 +548,7 @@ func (m *Manager) onOffer(ev Event) {
 	}
 	m.mu.Unlock()
 	if resume || auto {
-		m.publishAnswer(Answer{ID: off.ID, Accept: true})
+		m.publishAnswer(Answer{ID: off.ID, Accept: true, Enc: m.filesPref(ev.Origin)})
 		m.emit(off.ID)
 		go m.dialPull(off.ID)
 		return
@@ -540,6 +579,7 @@ func (m *Manager) onAnswer(ev Event) {
 	if ans.Accept {
 		// Keep waiting: the receiver dials next; the answer timer keeps running as the
 		// dial deadline and re-arms the retry path if no connection arrives.
+		x.peerEnc = ans.Enc // receiver's advertised files-plane pref (for the serve-time decision)
 		m.mu.Unlock()
 		return
 	}

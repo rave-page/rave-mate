@@ -125,6 +125,7 @@ type routeStat struct {
 	encoder   string // §3.2 negotiated encoder ("" = raw/echo route)
 	tier      int
 	software  bool
+	encrypted bool   // AEAD media plane (default); false = both peers opted out (plaintext)
 	keyframes uint64 // video keyframes seen (sent or received)
 	// rate is the sliding window's sample ring (see rateSpan): appended by count() only,
 	// evaluated - never mutated - by snapshot().
@@ -197,6 +198,13 @@ func (st *routeStat) rateOver(now time.Time) (bps, fps float64) {
 func (st *routeStat) setCodec(encoder string, tier int, software bool) {
 	st.mu.Lock()
 	st.encoder, st.tier, st.software = encoder, tier, software
+	st.mu.Unlock()
+}
+
+// setEncrypted records the negotiated media-plane encryption state (route-stat surface).
+func (st *routeStat) setEncrypted(on bool) {
+	st.mu.Lock()
+	st.encrypted = on
 	st.mu.Unlock()
 }
 
@@ -346,7 +354,7 @@ func (st *routeStat) snapshot() RouteStat {
 	out := RouteStat{
 		Session: st.session, Peer: st.peer, Stream: st.stream, Direction: st.direction,
 		Frames: st.frames, Bytes: st.bytes,
-		Encoder: st.encoder, Tier: st.tier, Software: st.software,
+		Encoder: st.encoder, Tier: st.tier, Software: st.software, Encrypted: st.encrypted,
 		Keyframes: st.keyframes,
 		SeqGaps:   st.seqGaps, LostEst: st.lostEst, Recovered: st.recovered,
 		NACKsSent: st.nacksSent, Retransmits: st.retransmits, PLIRequests: st.pliReqs,
@@ -389,6 +397,8 @@ type RouteStat struct {
 	Encoder  string
 	Tier     int
 	Software bool // tier-4 software encode - surface the CPU warning
+
+	Encrypted bool // media plane AEAD-sealed (default); false = both peers opted out (plaintext)
 
 	Keyframes uint64  // video keyframes (send: emitted; recv: seen)
 	RateBps   float64 // rolling media bitrate, bits/s (0 = no frame within rateStale)

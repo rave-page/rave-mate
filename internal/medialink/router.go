@@ -86,6 +86,21 @@ const (
 )
 
 var errNoSource = errors.New("medialink: no such source")
+var errNoMediaSecret = errors.New("medialink: no media secret for peer (no live link)")
+
+// mediaConn builds the media transport for a route: AEAD (default) unless the route negotiated the
+// both-peers-opted-out plaintext media plane. Errors only when an ENCRYPTED route has no live
+// peerlink secret; the plaintext path needs none.
+func (rm *RouteManager) mediaConn(c io.ReadWriteCloser, peer string, encrypt, initiator bool) (*Conn, error) {
+	if !encrypt {
+		return NewPlainConn(c), nil
+	}
+	secret, ok := rm.secrets.MediaSecret(peer)
+	if !ok {
+		return nil, errNoMediaSecret
+	}
+	return NewConn(c, secret, initiator)
+}
 
 // SourceOpen creates a live Source for an accepted offer (opened when the peer dials in).
 type SourceOpen func(ctx context.Context, o Offer) (Source, error)
@@ -158,6 +173,7 @@ type pendingAnswer struct {
 	choice  *CodecChoice // §3.2 negotiated encode (nil = raw echo, no encode child)
 	stream  uint16
 	caps    sessionCaps
+	encrypt bool // resolved media-plane AEAD decision (default true; false = both peers opted out)
 	timer   *time.Timer
 }
 
@@ -167,6 +183,7 @@ type pendingOffer struct {
 	sourceID string
 	sinkKind Kind
 	open     SinkOpen
+	enc      string // our advertised media-plane pref (EncOn/EncOff), for the answer-time decision
 	timer    *time.Timer
 }
 
@@ -599,14 +616,15 @@ func (rm *RouteManager) OfferRoute(target, sourceID, sinkID string, opt OfferOpt
 		return "", errors.New("medialink: video decoders not ready (ffmpeg missing or codec probe still running) - retry in a few seconds")
 	}
 	session := newSession()
-	po := &pendingOffer{target: target, sourceID: sourceID, sinkKind: sink.desc.Kind, open: sink.open}
+	enc := rm.mediaPref(target)
+	po := &pendingOffer{target: target, sourceID: sourceID, sinkKind: sink.desc.Kind, open: sink.open, enc: enc}
 	po.timer = time.AfterFunc(pendingTTL, func() { rm.expireOffer(session) })
 	rm.mu.Lock()
 	rm.pendingOff[session] = po
 	rm.mu.Unlock()
 
 	off := Offer{Session: session, Target: target, SourceID: sourceID, SinkID: sinkID, Codec: opt.Codec,
-		Transport: TransportTCP, NACK: true, Bitrate: opt.BitrateKbps,
+		Transport: TransportTCP, NACK: true, Bitrate: opt.BitrateKbps, Enc: enc,
 		Caps: &Caps{Report: true, Sync: true, Decoders: decoders}}
 	if raw, err := json.Marshal(off); err == nil {
 		rm.bus.Publish(TopicOffer, raw)
@@ -626,6 +644,16 @@ func (rm *RouteManager) CloseRoute(session string) {
 }
 
 // ── bus handlers ───────────────────────────────────────────────────────────────
+
+// mediaPref reports this node's media-plane encryption preference for a peer: EncOff only when the
+// peer's media-plane opt-out is set; EncOn (default) otherwise. Read via an OPTIONAL method on the
+// secret provider, so a test SecretProvider without it defaults to encrypted.
+func (rm *RouteManager) mediaPref(peer string) string {
+	if ep, ok := rm.secrets.(interface{ MediaEncOff(string) bool }); ok && ep.MediaEncOff(peer) {
+		return EncOff
+	}
+	return EncOn
+}
 
 // onOffer (source side): if we own the offered SourceID and are the target, accept + answer.
 func (rm *RouteManager) onOffer(ev Event) {
@@ -691,8 +719,9 @@ func (rm *RouteManager) onOffer(ev Event) {
 	}
 	stream := uint16(rm.streamSeq.Add(1))
 	granted := grantCaps(off)
+	ourEnc := rm.mediaPref(ev.Origin)
 	pa := &pendingAnswer{peer: ev.Origin, offer: off, open: src.open, srcDesc: src.desc,
-		choice: choice, stream: stream, caps: granted}
+		choice: choice, stream: stream, caps: granted, encrypt: planeEncrypt(off.Enc, ourEnc)}
 	pa.timer = time.AfterFunc(pendingTTL, func() { rm.expireAnswer(off.Session) })
 	rm.mu.Lock()
 	rm.pendingAns[off.Session] = pa
@@ -700,7 +729,7 @@ func (rm *RouteManager) onOffer(ev Event) {
 	addr := rm.answerAddr(ev.Origin)
 
 	ans := Answer{Session: off.Session, Accept: true, Addr: addr, Codec: codec, Stream: stream,
-		Transport: TransportTCP, NACK: granted.nack}
+		Transport: TransportTCP, NACK: granted.nack, Enc: ourEnc}
 	if granted.report || granted.sync || choice != nil {
 		ans.Caps = &Caps{Report: granted.report, Sync: granted.sync}
 		if choice != nil {
@@ -844,14 +873,9 @@ func (rm *RouteManager) serveInbound(ctx context.Context, c net.Conn) {
 		_ = c.Close()
 		return
 	}
-	secret, ok := rm.secrets.MediaSecret(pa.peer)
-	if !ok {
-		rm.warnf("no media secret for peer", map[string]any{"peer": pa.peer})
-		_ = c.Close()
-		return
-	}
-	conn, err := NewConn(c, secret, false) // accepting end = responder
+	conn, err := rm.mediaConn(c, pa.peer, pa.encrypt, false) // accepting end = responder
 	if err != nil {
+		rm.warnf("media conn setup failed", map[string]any{"peer": pa.peer, "error": err.Error()})
 		_ = c.Close()
 		return
 	}
@@ -906,6 +930,7 @@ func (rm *RouteManager) serveInbound(ctx context.Context, c net.Conn) {
 		src = esrc
 	}
 	st := newRouteStat(session, pa.peer, pa.stream, "send")
+	st.setEncrypted(pa.encrypt)
 	if pa.choice != nil {
 		st.setCodec(pa.choice.Encoder, pa.choice.Tier, pa.choice.Software)
 	}
@@ -1094,11 +1119,7 @@ func (rm *RouteManager) peerSyncEstimate(peer string) (SyncEstimate, bool) {
 // dialAndReceive handles the sink side: dial the answered addr, send the session preamble, derive
 // the AEAD key, open the sink, and pump conn→(jitter buffer→decode child→)sink.
 func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Answer, po *pendingOffer) {
-	secret, ok := rm.secrets.MediaSecret(peer)
-	if !ok {
-		rm.warnf("no media secret for peer", map[string]any{"peer": peer})
-		return
-	}
+	encrypt := planeEncrypt(po.enc, ans.Enc)
 	d := net.Dialer{Timeout: dialTimeout}
 	c, err := d.DialContext(ctx, "tcp", ans.Addr)
 	if err != nil {
@@ -1110,8 +1131,9 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 		_ = c.Close()
 		return
 	}
-	conn, err := NewConn(c, secret, true) // dialing end = initiator
+	conn, err := rm.mediaConn(c, peer, encrypt, true) // dialing end = initiator
 	if err != nil {
+		rm.warnf("media conn setup failed", map[string]any{"peer": peer, "error": err.Error()})
 		_ = c.Close()
 		return
 	}
@@ -1123,6 +1145,7 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 	}
 	rctx, cancel := context.WithCancel(ctx)
 	st := newRouteStat(ans.Session, peer, ans.Stream, "recv")
+	st.setEncrypted(encrypt)
 	// §3.2: the answered encode choice drives the recv-side stat tier + decode spec.
 	if ans.Caps != nil && len(ans.Caps.Encoders) == 1 {
 		if tier, sw, ok := EncoderTier(ans.Caps.Encoders[0]); ok {

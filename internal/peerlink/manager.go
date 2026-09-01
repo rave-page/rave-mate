@@ -599,6 +599,12 @@ func (m *Manager) SetEncOff(nodeID, plane string, off bool) error {
 	return m.store.SetEncOff(nodeID, plane, off)
 }
 
+// MediaEncOff / FilesEncOff report a peer's data-plane opt-out. They keep the medialink/filexfer
+// data planes decoupled from the plane-string contract (each consults this via an optional
+// interface on its SecretProvider), so the plane keys live only in package peers.
+func (m *Manager) MediaEncOff(nodeID string) bool { return m.store.EncOff(nodeID, peers.PlaneMedia) }
+func (m *Manager) FilesEncOff(nodeID string) bool { return m.store.EncOff(nodeID, peers.PlaneFiles) }
+
 // Remembered returns all trusted/paired peers (for the UI's offline list).
 func (m *Manager) Remembered() []peers.Peer {
 	list, _ := m.store.List()

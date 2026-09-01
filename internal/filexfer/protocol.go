@@ -18,6 +18,20 @@ const (
 	reasonDisabled = "file transfer is disabled on the paired instance"
 )
 
+// Enc is the files-plane encryption preference on Offer/Answer. ABSENT ("") = ON: an older peer
+// sends no field and MUST stay encrypted (this plane is default-AEAD). AEAD is dropped only when
+// BOTH ends explicitly send EncOff for each other (peers.PlaneFiles).
+const (
+	EncOn  = "on"
+	EncOff = "off"
+)
+
+// planeEncrypt resolves a transfer's files-plane encryption: default ON, plaintext only when BOTH
+// ends opted out. A lone or absent opt-out keeps AEAD.
+func planeEncrypt(offerEnc, answerEnc string) bool {
+	return !(offerEnc == EncOff && answerEnc == EncOff)
+}
+
 // Offer announces a transfer: the receiver dials Addr and pulls. Bytes/Files are the
 // manifest totals (display + sanity); the authoritative manifest crosses the AEAD conn.
 type Offer struct {
@@ -26,7 +40,8 @@ type Offer struct {
 	Name   string `json:"name"`   // display name (base of the sent path)
 	Files  int    `json:"files"`
 	Bytes  int64  `json:"bytes"`
-	Addr   string `json:"addr"` // sender's transfer listener "host:port"
+	Addr   string `json:"addr"`          // sender's transfer listener "host:port"
+	Enc    string `json:"enc,omitempty"` // sender's files-plane enc pref (EncOn/EncOff; "" = ON)
 }
 
 // Answer accepts or rejects an Offer.
@@ -34,6 +49,7 @@ type Answer struct {
 	ID     string `json:"id"`
 	Accept bool   `json:"accept"`
 	Reason string `json:"reason,omitempty"`
+	Enc    string `json:"enc,omitempty"` // receiver's files-plane enc pref (EncOn/EncOff; "" = ON)
 }
 
 // Control message types on the AEAD conn (ctlMsg.T).

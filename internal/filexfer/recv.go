@@ -24,17 +24,13 @@ func (m *Manager) dialPull(id string) {
 		m.mu.Unlock()
 		return
 	}
-	addr, peer := x.addr, x.Peer
+	addr, peer, peerEnc := x.addr, x.Peer, x.peerEnc
 	ctx := m.ctx
 	m.mu.Unlock()
 	if ctx == nil {
 		return
 	}
-	secret, live := m.secrets.FileSecret(peer)
-	if !live {
-		m.endSession(id, errors.New("no live link to the paired instance"))
-		return
-	}
+	encrypt := planeEncrypt(peerEnc, m.filesPref(peer))
 	d := net.Dialer{Timeout: dialTimeout}
 	c, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
@@ -47,12 +43,13 @@ func (m *Manager) dialPull(id string) {
 		m.endSession(id, err)
 		return
 	}
-	conn, err := newFConn(c, secret, id, true) // dialing end = initiator
+	conn, err := m.fileConn(c, peer, id, encrypt, true) // dialing end = initiator
 	if err != nil {
 		_ = c.Close()
-		m.endSession(id, err)
+		m.endSession(id, errors.New("no live link to the paired instance"))
 		return
 	}
+	m.markEnc(id, encrypt)
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if !m.beginSession(id, cancel) {

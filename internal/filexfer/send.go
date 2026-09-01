@@ -18,6 +18,9 @@ import (
 // errRemoteCanceled marks a peer-initiated cancel (endSession settles to canceled).
 var errRemoteCanceled = errors.New("canceled by the paired instance")
 
+// errNoFileSecret - an encrypted transfer has no live peerlink secret for the peer.
+var errNoFileSecret = errors.New("filexfer: no file secret for peer (no live link)")
+
 func (m *Manager) acceptLoop(ctx context.Context, ln net.Listener) {
 	for {
 		c, err := ln.Accept()
@@ -38,27 +41,24 @@ func (m *Manager) serveInbound(ctx context.Context, c net.Conn) {
 	}
 	m.mu.Lock()
 	x := m.xfers[id]
-	var peer string
+	var peer, peerEnc string
 	ok := x != nil && x.Send && !x.State.Terminal() && x.cancel == nil
 	if ok {
-		peer = x.Peer
+		peer, peerEnc = x.Peer, x.peerEnc
 	}
 	m.mu.Unlock()
 	if !ok {
 		_ = c.Close()
 		return
 	}
-	secret, live := m.secrets.FileSecret(peer)
-	if !live {
+	encrypt := planeEncrypt(m.filesPref(peer), peerEnc)
+	conn, err := m.fileConn(c, peer, id, encrypt, false) // accepting end = responder
+	if err != nil {
 		m.warnf("no file secret for peer", map[string]any{"peer": peer})
 		_ = c.Close()
 		return
 	}
-	conn, err := newFConn(c, secret, id, false) // accepting end = responder
-	if err != nil {
-		_ = c.Close()
-		return
-	}
+	m.markEnc(id, encrypt)
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if !m.beginSession(id, cancel) {

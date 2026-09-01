@@ -19,6 +19,20 @@ const (
 	TransportUDP = "udp" // §2.5 datagram profile, implemented P8 (explicit nonce + replay window)
 )
 
+// Enc is the media-plane encryption preference on Offer/Answer. ABSENT ("") = ON: an older peer
+// sends no field and MUST stay encrypted (this plane is default-AEAD). AEAD is dropped only when
+// BOTH ends explicitly send EncOff for each other (peers.PlaneMedia).
+const (
+	EncOn  = "on"
+	EncOff = "off"
+)
+
+// planeEncrypt resolves the route's media-plane encryption: default ON, plaintext only when BOTH
+// ends opted out. A lone or absent opt-out keeps AEAD.
+func planeEncrypt(offerEnc, answerEnc string) bool {
+	return !(offerEnc == EncOff && answerEnc == EncOff)
+}
+
 // FEC is the reserved per-stream forward-error-correction descriptor (§2.5 / D9). Absent = off.
 // Scheme "xor" = SMPTE 2022-1-style interleaved; "rs" = Reed-Solomon (RFC 8627-style). k data /
 // n total packets per block. Repair data rides KindRepair frames. Never negotiated ON in P1–P7.
@@ -86,6 +100,7 @@ type Offer struct {
 	FEC       *FEC   `json:"fec,omitempty"`       // reserved (§2.5)
 	Caps      *Caps  `json:"caps,omitempty"`      // requester session caps (P2+; absent = P1 peer)
 	Bitrate   int    `json:"br,omitempty"`        // video bitrate budget, kbps (P4 additive; 0 = sender default)
+	Enc       string `json:"enc,omitempty"`       // requester's media-plane enc pref (EncOn/EncOff; "" = ON)
 }
 
 // Answer responds to an Offer. On accept, Addr is the "host:port" of the media listener to dial and
@@ -102,4 +117,5 @@ type Answer struct {
 	NACK      bool   `json:"nack,omitempty"`      // NACK/retransmit armed both ends (§2.5)
 	FEC       *FEC   `json:"fec,omitempty"`       // reserved (§2.5)
 	Caps      *Caps  `json:"caps,omitempty"`      // granted session caps (P2+; absent = P1 peer)
+	Enc       string `json:"enc,omitempty"`       // answerer's media-plane enc pref (EncOn/EncOff; "" = ON)
 }
