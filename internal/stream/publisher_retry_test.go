@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -24,14 +25,16 @@ type fakeStreamServer struct {
 	ingests    int
 	refreshes  int
 	ingestErr  map[string]int // publish token → status to return (0/absent = 200)
+	ingestRA   map[string]int // publish token → Retry-After seconds on the ingest error
 	hbErr      map[string]int
 	refreshErr map[string]int // publish token → status for token-refresh (0/absent = mint)
+	ingested   []uint64       // seqs successfully ingested (2xx), in arrival order
 	srv        *httptest.Server
 }
 
 func newFakeStreamServer(t *testing.T) *fakeStreamServer {
 	t.Helper()
-	f := &fakeStreamServer{ingestErr: map[string]int{}, hbErr: map[string]int{}, refreshErr: map[string]int{}}
+	f := &fakeStreamServer{ingestErr: map[string]int{}, ingestRA: map[string]int{}, hbErr: map[string]int{}, refreshErr: map[string]int{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/streams", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -51,8 +54,21 @@ func newFakeStreamServer(t *testing.T) *fakeStreamServer {
 		case strings.HasSuffix(r.URL.Path, "/ingest"):
 			f.ingests++
 			if code := f.ingestErr[tok]; code != 0 {
+				if ra := f.ingestRA[tok]; ra != 0 {
+					w.Header().Set("Retry-After", strconv.Itoa(ra))
+				}
 				w.WriteHeader(code)
 				return
+			}
+			var body struct {
+				Events []struct {
+					Seq uint64 `json:"seq"`
+				} `json:"events"`
+			}
+			if json.NewDecoder(r.Body).Decode(&body) == nil {
+				for _, e := range body.Events {
+					f.ingested = append(f.ingested, e.Seq)
+				}
 			}
 		case strings.HasSuffix(r.URL.Path, "/heartbeat"):
 			if code := f.hbErr[tok]; code != 0 {
@@ -314,6 +330,135 @@ func TestPendingCap(t *testing.T) {
 		t.Errorf("pending=%d, want cap %d", n, pendingMax)
 	}
 	if last != uint64(pendingMax+50) || first != last-uint64(pendingMax)+1 {
+		t.Errorf("drop-oldest violated: first=%d last=%d", first, last)
+	}
+}
+
+// Test429RequeueNoDataLoss proves a 429 (throttle) RETAINS the failed batch at the
+// front of pending (order preserved) instead of dropping it, and that once the error
+// clears the SAME updates land server-side, none lost.
+func Test429RequeueNoDataLoss(t *testing.T) {
+	f := newFakeStreamServer(t)
+	p := startPaused(t, f)
+	f.mu.Lock()
+	f.ingestErr["tok1"] = 429
+	f.ingestRA["tok1"] = 7
+	f.mu.Unlock()
+
+	for i := 0; i < 3; i++ {
+		p.enqueueOne(t)
+	}
+	p.mu.Lock()
+	want := make([]uint64, len(p.pending))
+	for i, ev := range p.pending {
+		want[i] = ev.Seq
+	}
+	p.mu.Unlock()
+
+	p.flush(context.Background()) // 429 → batch re-queued at front, retained
+	p.mu.Lock()
+	got := make([]uint64, len(p.pending))
+	for i, ev := range p.pending {
+		got[i] = ev.Seq
+	}
+	p.mu.Unlock()
+	if len(got) != len(want) {
+		t.Fatalf("429 lost data: pending=%d, want %d retained", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("429 requeue reordered pending: got %v want %v", got, want)
+		}
+	}
+
+	// clear the error, expire the pause, flush again → same updates land, none lost
+	f.mu.Lock()
+	delete(f.ingestErr, "tok1")
+	f.mu.Unlock()
+	p.mu.Lock()
+	p.retryAfter = time.Now().Add(-time.Millisecond)
+	p.mu.Unlock()
+	p.flush(context.Background())
+
+	p.mu.Lock()
+	remaining := len(p.pending)
+	p.mu.Unlock()
+	if remaining != 0 {
+		t.Errorf("updates not flushed after recovery: %d remain", remaining)
+	}
+	f.mu.Lock()
+	landed := append([]uint64(nil), f.ingested...)
+	f.mu.Unlock()
+	if len(landed) != len(want) {
+		t.Fatalf("landed=%v, want same set %v", landed, want)
+	}
+	for i := range want {
+		if landed[i] != want[i] {
+			t.Fatalf("wrong/reordered updates landed: got %v want %v", landed, want)
+		}
+	}
+}
+
+// Test429RetryAfterHonored proves the armed pause after a 429 respects a server
+// Retry-After (>= its seconds) while staying within the backoff cap.
+func Test429RetryAfterHonored(t *testing.T) {
+	f := newFakeStreamServer(t)
+	p := startPaused(t, f)
+	f.mu.Lock()
+	f.ingestErr["tok1"] = 429
+	f.ingestRA["tok1"] = 7
+	f.mu.Unlock()
+
+	p.enqueueOne(t)
+	start := time.Now()
+	p.flush(context.Background())
+	p.mu.Lock()
+	pause := p.retryAfter.Sub(start)
+	backoff := p.backoff
+	p.mu.Unlock()
+	if pause < 7*time.Second {
+		t.Errorf("Retry-After not honored: armed pause=%v, want >=7s", pause)
+	}
+	if pause > retryBackoffMax || backoff > retryBackoffMax {
+		t.Errorf("pause exceeds cap: pause=%v backoff=%v cap=%v", pause, backoff, retryBackoffMax)
+	}
+}
+
+// Test429CapHeldDropOldest proves that while stuck on 429 (each flush re-queues its
+// batch at the front), enqueuing past pendingMax keeps the queue bounded at the cap
+// via drop-OLDEST - newest survive, oldest gone.
+func Test429CapHeldDropOldest(t *testing.T) {
+	f := newFakeStreamServer(t)
+	p := startPaused(t, f)
+	f.mu.Lock()
+	f.ingestErr["tok1"] = 429 // stuck; no Retry-After
+	f.mu.Unlock()
+
+	total := pendingMax + 3*flushBatchSize
+	for i := 0; i < total; i++ {
+		p.mu.Lock()
+		p.retryAfter = time.Time{} // clear pause so the requeue+cap path runs each enqueue-flush
+		p.mu.Unlock()
+		p.enqueueOne(t)
+		p.flush(context.Background())
+		p.mu.Lock()
+		n := len(p.pending)
+		p.mu.Unlock()
+		if n > pendingMax {
+			t.Fatalf("pending exceeded cap during 429: %d > %d (iter %d)", n, pendingMax, i)
+		}
+	}
+	p.mu.Lock()
+	n := len(p.pending)
+	first, last := p.pending[0].Seq, p.pending[n-1].Seq
+	p.mu.Unlock()
+	if n != pendingMax {
+		t.Errorf("pending=%d, want cap %d", n, pendingMax)
+	}
+	if last != uint64(total) {
+		t.Errorf("newest not retained: last=%d, want %d", last, total)
+	}
+	if first != last-uint64(pendingMax)+1 {
 		t.Errorf("drop-oldest violated: first=%d last=%d", first, last)
 	}
 }
