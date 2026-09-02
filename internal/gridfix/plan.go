@@ -40,6 +40,16 @@ type PlanInput struct {
 	RangeHi     float64
 }
 
+// maxTrustDriftS caps end-to-end grid drift (s) a snapped/stored BPM may cost before
+// we keep the measured tempo instead. 15ms sits below beat-match perceptibility.
+const maxTrustDriftS = 0.015
+
+// driftS is total grid drift (s) between tempos a,b (BPM) over nBeats:
+// |60/a - 60/b| x nBeats - the per-beat period error accumulated across the track.
+func driftS(a, b float64, nBeats int) float64 {
+	return math.Abs(60.0/a-60.0/b) * float64(nBeats)
+}
+
 // PlanFix decides FIX/OK/SKIP for a fitted grid. fit must be the raw FitConstantGrid
 // result (octave choice happens here, mirroring process_entry).
 func PlanFix(fit GridFit, downbeats []float64, in PlanInput) Plan {
@@ -55,19 +65,27 @@ func PlanFix(fit GridFit, downbeats []float64, in PlanInput) Plan {
 	}
 	fit = ChooseOctaveRange(fit, prior, downbeats, in.RangeLo, in.RangeHi)
 	fitted := fit.BPM()
-	// confident integer tempo: snap, correcting stored artifacts like 173.999
-	var newBPM float64
+	// Trust a snapped/stored BPM over the measured one only when keeping it costs
+	// <=maxTrustDriftS end-to-end grid drift (driftS accumulates the per-beat period
+	// error across NBeats). tempoAgrees keeps its original meaning - the
+	// coverage-relaxation flag still fires when stored+measured tempo agree within
+	// jitter; the drift gate only tightens which value we persist, never the flag.
+	snapped := math.RoundToEven(fitted)
+	canSnap := math.Abs(fitted-snapped) < 0.02
 	tempoAgrees := false
-	if snapped := math.RoundToEven(fitted); math.Abs(fitted-snapped) < 0.02 {
-		newBPM = snapped
-		tempoAgrees = prior > 0 && math.Abs(newBPM-prior) < 0.1
+	if canSnap {
+		tempoAgrees = prior > 0 && math.Abs(snapped-prior) < 0.1
 	} else if prior > 0 && math.Abs(fitted-prior) < 0.1 {
-		// non-integer measurement within jitter noise of the (folded) stored BPM:
-		// trust it (keeping it costs <15ms drift over a track)
-		newBPM = prior
 		tempoAgrees = true
-	} else {
-		newBPM = fitted
+	}
+	var newBPM float64
+	switch {
+	case canSnap && driftS(snapped, fitted, fit.NBeats) <= maxTrustDriftS:
+		newBPM = snapped // integer artifact (173.999->174): snap is inaudible here
+	case prior > 0 && math.Abs(fitted-prior) < 0.1 && driftS(prior, fitted, fit.NBeats) <= maxTrustDriftS:
+		newBPM = prior // within jitter of the (folded) stored BPM AND drift stays <15ms
+	default:
+		newBPM = fitted // any rounded/stored alternative would drift audibly
 	}
 	bpmChanged := in.OldBPM <= 0 || math.Abs(newBPM-in.OldBPM) > 5e-4
 	// phase-only fixes (tempo agrees) are safe at lower coverage - half-time sections

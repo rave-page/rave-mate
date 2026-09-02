@@ -97,3 +97,41 @@ func (r planRec) OutMulti() bool { return len(r.In.CuesMS) > 1 }
 func itoa(i int) string {
 	return string(rune('0'+i/10)) + string(rune('0'+i%10))
 }
+
+// TestPlanFixDriftBound exercises the 15ms drift gate on both trust branches: a
+// snapped/stored BPM is kept only when keeping it costs <=maxTrustDriftS end-to-end
+// drift (driftS = |60/a-60/b| x NBeats). Drift numbers below are hand-computed.
+func TestPlanFixDriftBound(t *testing.T) {
+	const tol = 1e-9
+	bpmFit := func(bpm float64, nBeats int) GridFit {
+		return GridFit{Anchor: 0, Period: 60.0 / bpm, Coverage: 0.9, Explained: 1, NBeats: nBeats, PhaseR: 0.9}
+	}
+	cases := []struct {
+		name   string
+		fitBPM float64
+		nBeats int
+		oldBPM float64 // 0 = none
+		want   float64
+	}{
+		// snap ACCEPTED: 173.9995->174, driftS(174,173.9995,900)   = 0.89ms  <=15ms -> snap
+		{"snap_accepted", 173.9995, 900, 0, 174.0},
+		// snap REJECTED: 173.982->174,  driftS(174,173.982,1200)   = 42.81ms > 15ms -> keep fitted
+		{"snap_rejected", 173.982, 1200, 0, 173.982},
+		// prior ACCEPTED: 174.05 vs 174.09 (<0.1), driftS(174.09,174.05,150) = 11.88ms  <=15ms -> prior
+		{"prior_accepted", 174.05, 150, 174.09, 174.09},
+		// prior REJECTED: 174.05 vs 174.13 (<0.1), driftS(174.13,174.05,900) = 142.54ms > 15ms -> keep fitted
+		{"prior_rejected", 174.05, 900, 174.13, 174.05},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			in := PlanInput{OldBPM: c.oldBPM, MinQuality: 0.85, ThresholdMS: 12.0}
+			p := PlanFix(bpmFit(c.fitBPM, c.nBeats), nil, in)
+			if p.Status == StatusSkip {
+				t.Fatalf("unexpected SKIP: %s", p.Detail)
+			}
+			if math.Abs(p.NewBPM-c.want) > tol {
+				t.Errorf("NewBPM got %.9f want %.9f", p.NewBPM, c.want)
+			}
+		})
+	}
+}
