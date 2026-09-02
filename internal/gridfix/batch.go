@@ -151,7 +151,7 @@ func (b *Batch) Run(ctx context.Context, tracks []BatchTrack, onProgress func(Ba
 			}
 			fit := FitConstantGrid(det.Beats, det.Downbeats, prior)
 			if fit == nil {
-				res.Plan = Plan{Status: StatusSkip,
+				res.Plan = Plan{Status: StatusSkip, Manual: true, // engine tried but found no stable grid - manual candidate
 					Detail: "no stable constant grid found - fix manually", OldBPM: t.OldBPM}
 				break
 			}

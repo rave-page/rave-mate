@@ -21,6 +21,7 @@ const (
 type Plan struct {
 	Status    Status
 	Detail    string
+	Manual    bool    // true = engine tried a fit + track genuinely needs manual gridding (prep candidate); false on protection skips
 	OldBPM    float64 // 0 = none stored
 	NewBPM    float64
 	NewStartS float64 // grid marker position (s); valid when Status==FIX
@@ -99,6 +100,7 @@ func PlanFix(fit GridFit, downbeats []float64, in PlanInput) Plan {
 	if fit.Coverage < minCov && !(tempoAgrees && fit.PhaseR >= 0.70) {
 		return Plan{
 			Status: StatusSkip,
+			Manual: true, // engine fitted but coverage/phase too weak - needs manual gridding
 			Detail: fmt.Sprintf("tempo unstable (grid coverage %.0f%%, phase concentration %.2f) - fix manually",
 				fit.Coverage*100, fit.PhaseR),
 			OldBPM: in.OldBPM,
