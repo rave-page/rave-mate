@@ -1,13 +1,13 @@
 {
   "version": "nightly-85022aa",
-  "build": 305,
+  "build": 306,
   "commit": "85022aa",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-305-20260905-85022aa.exe",
-  "sha256": "eb38d112f95dc2f4dfba6ebd77f095cd7776e792d212c36cd25ecb51fdeb0773",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-305-20260905-85022aa.exe",
-  "installer_sha256": "8c201cb45643ba5b4c5bccab1f5551a0a5bc82314804a5c0634f005031394067",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-305-20260905-85022aa",
-  "linux_sha256": "3301c41031bcfc3c6305779ee12006eb435f77b6436e91abbdfea3b99891b752",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-306-20260906-85022aa.exe",
+  "sha256": "0757a16fd70e5e860c0585dbe918d6c4727fe357875844317f999fd9259ae665",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-306-20260906-85022aa.exe",
+  "installer_sha256": "77a8831ca23576637eacb46eb4721beddad7f08f63ffc0feae3b58fef4f8e14c",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-306-20260906-85022aa",
+  "linux_sha256": "fbc14b37e9e5562484926fde572d3eef1b349a38ec07637e0675ac4165fa1641",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-09-05T08:53:35Z",
+  "released": "2026-09-06T09:12:38Z",
   "notes": "feat(gpumem): wire VRAM watchdog into the daemon + config feature"
 }
