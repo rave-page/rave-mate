@@ -323,7 +323,21 @@ func (p *Publisher) flush(ctx context.Context) {
 	if err != nil {
 		p.lastFlushOK = false
 		p.lastFlushErr = err.Error()
-		// Drop the failed batch (desktop is source of truth; next batch carries fresh state).
+		if api.StatusCode(err) == 429 {
+			// 429 = we're being throttled, not superseded: re-queue the failed batch at
+			// the FRONT (failed batch first, then what accumulated) preserving order, so
+			// no set data is lost while backing off. Cap: pendingMax events; policy:
+			// drop-OLDEST (freshest survives) - trim from the front after requeue.
+			rq := make([]api.IngestEvent, 0, len(batch)+len(p.pending))
+			rq = append(rq, batch...)
+			rq = append(rq, p.pending...)
+			p.pending = rq
+			if over := len(p.pending) - pendingMax; over > 0 {
+				p.pending = p.pending[over:]
+			}
+		}
+		// Non-429 failure: drop the failed batch (desktop is source of truth; the next
+		// batch carries fresh state - superseded state need not be retried).
 		p.mu.Unlock()
 		p.onPublishError(ctx, err, "ingest")
 		p.broadcast()
@@ -373,6 +387,11 @@ func (p *Publisher) onPublishError(ctx context.Context, err error, op string) {
 	}
 	p.mu.Lock()
 	p.bumpBackoffLocked()
+	// Honor a 429 Retry-After: pause = max(exp backoff, Retry-After), capped at the max.
+	if ra := api.RetryAfter(err); ra > p.backoff {
+		p.backoff = min(ra, retryBackoffMax)
+		p.retryAfter = time.Now().Add(p.backoff)
+	}
 	pause := p.backoff
 	p.mu.Unlock()
 	if n, ok := p.flushGate.Should(err.Error(), 5*time.Minute); ok {

@@ -2,6 +2,7 @@ package gridfix
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 
@@ -96,8 +97,19 @@ func (b *Batch) Run(ctx context.Context, tracks []BatchTrack, onProgress func(Ba
 		res := TrackResult{Path: t.Path, Title: t.Title, OldBPM: t.OldBPM}
 		switch {
 		case t.Verified:
-			// user confirmed this grid - never re-touch, not even in force mode
+			// user confirmed this grid - never re-touch, not even in force mode. But a WRONG
+			// verified BPM would otherwise be skipped forever & invisibly. If a checkpoint-matched
+			// cached detection already exists (cache ONLY - never Analyze, so zero new GPU work) and
+			// it confidently contradicts the verified BPM, surface that in the SKIP detail so the
+			// user can re-verify. Still a SKIP - no auto-apply over a verified grid.
 			res.Plan = Plan{Status: StatusSkip, Detail: "verified grid - protected", OldBPM: t.OldBPM}
+			if b.cache != nil {
+				if det, ok := b.cache.Get(t.Path, b.opts.Checkpoint); ok {
+					if d := verifiedContradiction(t, det); d != "" {
+						res.Plan.Detail = d
+					}
+				}
+			}
 		case !b.opts.Force && t.Locked:
 			res.Plan = Plan{Status: StatusSkip, Detail: "grid locked - not touching", OldBPM: t.OldBPM}
 		case !b.opts.Force && t.MultiMarker:
@@ -139,7 +151,7 @@ func (b *Batch) Run(ctx context.Context, tracks []BatchTrack, onProgress func(Ba
 			}
 			fit := FitConstantGrid(det.Beats, det.Downbeats, prior)
 			if fit == nil {
-				res.Plan = Plan{Status: StatusSkip,
+				res.Plan = Plan{Status: StatusSkip, Manual: true, // engine tried but found no stable grid - manual candidate
 					Detail: "no stable constant grid found - fix manually", OldBPM: t.OldBPM}
 				break
 			}
@@ -257,4 +269,45 @@ func (b *Batch) RunAutoBias(ctx context.Context, tracks []BatchTrack, onProgress
 	}
 	ab.Applied = true
 	return results2, ab
+}
+
+// verifiedContradiction returns a SKIP detail when a cached detection confidently disagrees with a
+// Verified track's stored BPM, else "". Cached beats only - zero new GPU. Mirrors the plan path's
+// fit + octave choice (band-folded prior → FitConstantGrid → ChooseOctaveRange), then compares in
+// the SAME octave (fold by x2/÷2): confident = Coverage >= 0.9, contradiction = |detected-verified|
+// > 0.3 BPM. Never auto-applies - surfacing only.
+func verifiedContradiction(t BatchTrack, det *Detection) string {
+	if t.OldBPM <= 0 || det == nil {
+		return ""
+	}
+	prior := t.OldBPM
+	if p, ok := musiclib.FoldBPM(t.OldBPM, musiclib.BPMRange{Min: t.RangeLo, Max: t.RangeHi}); ok {
+		prior = p
+	}
+	fit := FitConstantGrid(det.Beats, det.Downbeats, prior)
+	if fit == nil || fit.Coverage < 0.9 {
+		return ""
+	}
+	detected := ChooseOctaveRange(*fit, prior, det.Downbeats, t.RangeLo, t.RangeHi).BPM()
+	detected = foldToOctave(detected, t.OldBPM) // compare against the verified octave
+	if math.Abs(detected-t.OldBPM) <= 0.3 {
+		return ""
+	}
+	return fmt.Sprintf("verified grid contradicts detection (verified %.2f, detected %.2f) - re-verify",
+		t.OldBPM, detected)
+}
+
+// foldToOctave shifts bpm by x2/÷2 until it lands in ref's octave, so a fitted tempo and a stored
+// one are compared in the same octave (e.g. an 87 fit vs a 174 verified value).
+func foldToOctave(bpm, ref float64) float64 {
+	if bpm <= 0 || ref <= 0 {
+		return bpm
+	}
+	for bpm < ref/1.5 {
+		bpm *= 2
+	}
+	for bpm > ref*1.5 {
+		bpm /= 2
+	}
+	return bpm
 }

@@ -115,6 +115,67 @@ func TestApplyTagsRevert(t *testing.T) {
 	}
 }
 
+// TestApplyNoOpSuppressed: re-applying identical analysis must not flood change_log (the
+// cross-machine merge backbone). First write logs one set of "set" rows; a same-value re-sync
+// logs zero (incl. a decimal BPM that must survive tag round-trip byte-exact); a genuine change
+// logs again.
+func TestApplyNoOpSuppressed(t *testing.T) {
+	db, err := libdb.Open(filepath.Join(t.TempDir(), "lib.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	mp3 := filepath.Join(t.TempDir(), "n.mp3")
+	if err := os.WriteFile(mp3, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tr := musiclib.Track{Path: mp3, Artist: "A", Title: "T", DurationSec: 300,
+		BPM: 173.999878, Key: "8A", Genre: "DnB", Comment: "x"}
+	hash := libdb.TrackHash(tr.Artist, tr.Title, tr.DurationSec)
+
+	// First apply: empty file → bpm/key/genre/comment all real changes → 4 rows.
+	if _, err := Apply(db, tr); err != nil {
+		t.Fatalf("apply 1: %v", err)
+	}
+	first, err := db.ChangesForTrack(hash)
+	if err != nil {
+		t.Fatalf("changes 1: %v", err)
+	}
+	if len(first) != 4 {
+		t.Fatalf("first apply logged %d rows, want 4: %+v", len(first), first)
+	}
+
+	// Second apply, same values → file already matches → zero new rows.
+	if _, err := Apply(db, tr); err != nil {
+		t.Fatalf("apply 2: %v", err)
+	}
+	second, err := db.ChangesForTrack(hash)
+	if err != nil {
+		t.Fatalf("changes 2: %v", err)
+	}
+	if len(second) != len(first) {
+		t.Fatalf("no-op re-apply added %d rows, want 0", len(second)-len(first))
+	}
+
+	// A genuine change still logs (one new bpm row).
+	tr.BPM = 174.0
+	if _, err := Apply(db, tr); err != nil {
+		t.Fatalf("apply 3: %v", err)
+	}
+	third, err := db.ChangesForTrack(hash)
+	if err != nil {
+		t.Fatalf("changes 3: %v", err)
+	}
+	if len(third) != len(second)+1 {
+		t.Fatalf("genuine change added %d rows, want 1", len(third)-len(second))
+	}
+	if third[0].Field != "bpm" || third[0].Origin != "tagsync" || third[0].NewValue != `"174"` {
+		t.Fatalf("newest change = %+v, want bpm/tagsync/\"174\"", third[0])
+	}
+}
+
 func TestApplyUnsupported(t *testing.T) {
 	wav := filepath.Join(t.TempDir(), "x.wav")
 	_ = os.WriteFile(wav, []byte("RIFF"), 0o644)

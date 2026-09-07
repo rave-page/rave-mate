@@ -84,8 +84,19 @@ func ApplyTags(db *libdb.DB, t musiclib.Track, desired tagwrite.Tags) (tagwrite.
 		return nil, err
 	}
 	before := map[string]string{}
+	changed := false
 	for f := range desired {
 		before[f] = cur[f]
+		if cur[f] != desired[f] {
+			changed = true
+		}
+	}
+	// Periodic library sync re-applies the same analysis every pass; when the file already
+	// carries every desired value the write, the tag_edits row, AND the change_log append are
+	// pure no-op noise (change_log is the cross-machine merge backbone - see .devnotes/PEER_LINK_SUMMARY.md).
+	// Skip all three.
+	if !changed {
+		return desired, nil
 	}
 	if err := tagwrite.Write(t.Path, desired); err != nil {
 		return nil, err
@@ -102,7 +113,10 @@ func ApplyTags(db *libdb.DB, t musiclib.Track, desired tagwrite.Tags) (tagwrite.
 	return desired, nil
 }
 
-// tagsyncEvents builds change_log "set" events for the fields a tag write changed.
+// tagsyncEvents builds change_log "set" events for the fields a tag write actually changed.
+// Value-unchanged fields are skipped (compared on the same serialized form the log stores, so
+// float formatting can't spoof a diff): a partial write logs only its real changes, and the
+// periodic re-sync of identical analysis adds nothing - see the ApplyTags no-op guard.
 func tagsyncEvents(t musiclib.Track, before, after tagwrite.Tags) []libdb.ChangeEvent {
 	hash := libdb.TrackHash(t.Artist, t.Title, t.DurationSec)
 	var evs []libdb.ChangeEvent
@@ -113,6 +127,9 @@ func tagsyncEvents(t musiclib.Track, before, after tagwrite.Tags) []libdb.Change
 		}
 		oldJSON, _ := json.Marshal(before[f])
 		newJSON, _ := json.Marshal(newV)
+		if string(oldJSON) == string(newJSON) { // no-op - don't flood the merge backbone
+			continue
+		}
 		evs = append(evs, libdb.ChangeEvent{
 			TrackHash: hash, Path: t.Path, Field: col, Op: "set",
 			OldValue: string(oldJSON), NewValue: string(newJSON), Origin: "tagsync",
