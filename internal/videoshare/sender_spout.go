@@ -176,7 +176,7 @@ func (s *spoutSender) run(deck string, w *deckWorker) {
 			if hint, ok := interopErrName(ierr); ok {
 				fields["errName"] = hint
 			}
-			s.log.Warn(source, "spout: GPU driver refused OpenGL/DirectX interop - deck sender idle (entering SpoutLibrary would be fatal; it retries on the next track cycle, a reboot usually clears the driver state)", fields)
+			s.log.Warn(source, "spout: GPU driver refused OpenGL/DirectX interop - deck sender idle until video share restarts (entering SpoutLibrary would be fatal; a reboot usually clears the driver state)", fields)
 		} else {
 			s.log.Warn(source, "spout: OpenGL context unavailable; deck idle",
 				map[string]any{"deck": deck, "sender": name})

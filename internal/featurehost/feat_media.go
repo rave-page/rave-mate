@@ -76,7 +76,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 	// zigmedia: the zero-copy Spout->encoder capture path, DEFAULT ON since inc 5. Same live config
 	// as the daemon, so the isolated child behaves identically.
 	mediapipe.ZeroCopyCapture = func() bool { return liveCfg().ZeroCopyCapture() }
-	// zigmedia inc 2: native GPU-resident decode+publish. Still default OFF - see config.ZigDecode.
+	// zigmedia inc 2: native GPU-resident decode+publish, DEFAULT ON since inc 5 (config.ZeroCopyDecode).
 	mediapipe.ZeroCopyDecode = func() bool { return liveCfg().ZeroCopyDecode() }
 	// zigmedia inc 3: adapter-affinity re-placement. Still default OFF - see config.ZigAffinity.
 	mediapipe.ZeroCopyAffinity = func() bool { return liveCfg().ZeroCopyAffinity() }
