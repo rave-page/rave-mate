@@ -17,6 +17,9 @@ func TestStructSizes(t *testing.T) {
 	if got := unsafe.Sizeof(adapterInfo{}); got != 20 {
 		t.Fatalf("adapterInfo size %d != 20", got)
 	}
+	if got := unsafe.Sizeof(segmentSizeInfo{}); got != 24 {
+		t.Fatalf("segmentSizeInfo size %d != 24", got)
+	}
 }
 
 // TestLiveSample hits real hardware. Opt-in (RAVE_GPUMEM_LIVE=1); cross-check the printed
@@ -35,8 +38,8 @@ func TestLiveSample(t *testing.T) {
 		if a.BudgetMB > 0 {
 			real++
 		}
-		t.Logf("[gpumem] vram adapter=%q luid=%s usedMB=%d freeMB=%d budgetMB=%d",
-			a.Name, a.LUID, a.UsedMB, a.FreeMB, a.BudgetMB)
+		t.Logf("[gpumem] vram adapter=%q luid=%s usedMB=%d freeMB=%d budgetMB=%d integrated=%v primary=%v",
+			a.Name, a.LUID, a.UsedMB, a.FreeMB, a.BudgetMB, a.Integrated, a.Primary)
 	}
 	if real == 0 {
 		t.Fatal("no adapter with budget>0")

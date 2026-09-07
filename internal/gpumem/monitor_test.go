@@ -1,6 +1,7 @@
 package gpumem
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -138,7 +139,7 @@ func TestSampleAdaptersWarnsAndSweepsOnCrossing(t *testing.T) {
 	if len(*toasts) != 1 {
 		t.Fatalf("toast count=%d want 1", len(*toasts))
 	}
-	if want := "GPU memory nearly full|GPU memory nearly full (11.2/11.7 GB) - Spout/video interop may start failing. Close GPU-heavy apps (browser, extra sources)."; (*toasts)[0] != want {
+	if want := "GPU memory nearly full|GPU memory nearly full on RTX (11.2/11.7 GB) - Spout/video interop may start failing. Close GPU-heavy apps (browser, extra sources)."; (*toasts)[0] != want {
 		t.Errorf("toast=%q want %q", (*toasts)[0], want)
 	}
 }
@@ -213,5 +214,99 @@ func TestTopString(t *testing.T) {
 	}
 	if got := topString(nil); got != "" {
 		t.Errorf("empty topString=%q want empty", got)
+	}
+}
+
+func countPrimary(ads []AdapterUsage) int {
+	n := 0
+	for _, a := range ads {
+		if a.Primary {
+			n++
+		}
+	}
+	return n
+}
+
+func TestRankAdapters(t *testing.T) {
+	// APU + dGPU -> dGPU primary and index 0.
+	ads := rankAdapters([]AdapterUsage{
+		{Name: "AMD Radeon(TM) Graphics", BudgetMB: 512, Integrated: true},
+		{Name: "RX 7900 XTX", BudgetMB: 24000},
+	})
+	if !ads[0].Primary || ads[0].Name != "RX 7900 XTX" {
+		t.Fatalf("dGPU should be primary at index 0, got %+v", ads[0])
+	}
+	if n := countPrimary(ads); n != 1 {
+		t.Fatalf("exactly one primary, got %d", n)
+	}
+	// single adapter -> primary.
+	if one := rankAdapters([]AdapterUsage{{Name: "solo", BudgetMB: 8000}}); !one[0].Primary {
+		t.Fatal("single adapter should be primary")
+	}
+	// two integrated -> the larger is primary.
+	two := rankAdapters([]AdapterUsage{
+		{Name: "small", BudgetMB: 512, Integrated: true},
+		{Name: "big", BudgetMB: 2048, Integrated: true},
+	})
+	if !two[0].Primary || two[0].Name != "big" {
+		t.Fatalf("larger integrated should be primary, got %+v", two[0])
+	}
+	// nil -> empty.
+	if got := rankAdapters(nil); len(got) != 0 {
+		t.Fatalf("rankAdapters(nil) len=%d want 0", len(got))
+	}
+}
+
+func TestWatchdogArmsOnlyOnPrimary(t *testing.T) {
+	warnMsg := "GPU memory nearly exhausted - OpenGL/DirectX interop creation will start failing (Spout senders/receivers in any app: Resolume, OBS, VRChat)"
+	apu := AdapterUsage{Name: "AMD Radeon(TM) Graphics", LUID: "0:2", BudgetMB: 512, UsedMB: 500, FreeMB: 12, Integrated: true}
+	dgpu := AdapterUsage{Name: "RX 7900 XTX", LUID: "0:1", BudgetMB: 24000, UsedMB: 4000, FreeMB: 20000}
+	f := &fakeSampler{adapters: []AdapterUsage{apu, dgpu}}
+	m, bus, toasts, _ := newTestMonitor(f, true)
+	m.sampleAdapters()
+
+	if got := countMsg(bus, logbus.Info, "vram"); got != 2 {
+		t.Errorf("vram lines=%d want 2", got)
+	}
+	if got := countMsg(bus, logbus.Warn, warnMsg); got != 0 {
+		t.Errorf("starved iGPU + healthy dGPU warned %d times want 0", got)
+	}
+	if len(*toasts) != 0 {
+		t.Errorf("toasts=%d want 0", len(*toasts))
+	}
+
+	dgpu.UsedMB, dgpu.FreeMB = 23500, 500
+	f.adapters = []AdapterUsage{apu, dgpu}
+	m.sampleAdapters()
+	if got := countMsg(bus, logbus.Warn, warnMsg); got != 1 {
+		t.Errorf("warn count=%d want 1", got)
+	}
+	if len(*toasts) != 1 {
+		t.Fatalf("toasts=%d want 1", len(*toasts))
+	}
+	if !strings.Contains((*toasts)[0], "RX 7900 XTX") {
+		t.Errorf("toast %q missing dGPU name", (*toasts)[0])
+	}
+}
+
+func TestProbe(t *testing.T) {
+	f := &fakeSampler{
+		adapters: []AdapterUsage{
+			{Name: "AMD Radeon(TM) Graphics", LUID: "0:2", BudgetMB: 512, UsedMB: 100, FreeMB: 412, Integrated: true},
+			{Name: "RX 7900 XTX", LUID: "0:1", BudgetMB: 24000, UsedMB: 4000, FreeMB: 20000},
+		},
+		procs: []AdapterProcs{{Adapter: "RX 7900 XTX", Procs: []ProcUsage{{Name: "Arena.exe", PID: 1, MB: 3000}}}},
+	}
+	m, _, _, _ := newTestMonitor(f, true)
+	if got := m.Probe(); got != "(no sample yet)" {
+		t.Errorf("empty Probe=%q want (no sample yet)", got)
+	}
+	m.sampleAdapters()
+	m.processSweep()
+	got := m.Probe()
+	for _, want := range []string{"AMD Radeon(TM) Graphics", "RX 7900 XTX", "[primary]", "[integrated]", "Arena.exe="} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Probe()=%q missing %q", got, want)
+		}
 	}
 }
