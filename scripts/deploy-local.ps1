@@ -34,11 +34,17 @@ if ($live -and -not $Force) {
 }
 
 $target = Join-Path $InstallDir "rave-mate.exe"
-if (Test-Path $target) {
-    Copy-Item $target (Join-Path $InstallDir ("rave-mate.exe.bak-" + (Get-Date -Format "yyyyMMdd-HHmmss")))
+try {
+    if (Test-Path $target) {
+        # Rename, not copy: Windows lets a RUNNING exe be renamed but not overwritten, and the live
+        # process keeps executing from the renamed file until it restarts.
+        Move-Item $target (Join-Path $InstallDir ("rave-mate.exe.bak-" + (Get-Date -Format "yyyyMMdd-HHmmss"))) -ErrorAction Stop
+    }
+    Copy-Item $Exe $target -ErrorAction Stop
+} catch {
+    Write-Error "deploy FAILED - install dir unchanged or backup left in place: $_"
+    exit 5
 }
-
-Copy-Item $Exe $target -Force
 Write-Host "Deployed $stamp -> $target"
 Write-Host "Restart: & '$target' ctl quit ; then start '$target'. This script never restarts the app - a set may be running."
 
