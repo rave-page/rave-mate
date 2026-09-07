@@ -8,7 +8,10 @@ DIST := dist
 # exe runs on a clean machine with no MinGW DLLs beside it (matches the CI build). Vendored runtime
 # DLLs (SpoutLibrary.dll, openvr_api.dll) are still shipped beside the exe - they're not MinGW.
 GOOS := $(shell go env GOOS)
-LDFLAGS := -s -w
+COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null)
+DIRTY := $(shell git diff --quiet 2>/dev/null || echo -dirty)
+VERSION ?= dev-$(COMMIT)$(DIRTY)
+LDFLAGS := -s -w -X rave.page/mate/internal/version.Version=$(VERSION) -X rave.page/mate/internal/version.Commit=$(COMMIT)
 ifeq ($(GOOS),windows)
   BIN := rave-mate.exe
   LDFLAGS += -H windowsgui -extldflags=-static
