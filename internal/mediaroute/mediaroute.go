@@ -36,6 +36,11 @@ const (
 	camPrefix     = "rave-mate cam "  // the webcam feature's OWN capture sender - already a direct "webcam" source; re-sharing it double-advertises the camera
 	receiveGrace  = 30 * time.Second  // offered-but-never-up receives are cleaned after this
 	defaultFPSAdv = 60                // Spout carries no fps metadata; advertise the common case
+	// parkTTL bounds how long a kept-alive republish sender is held after its route ended before it
+	// is destroyed; parkCap bounds the held set (= medialink's concurrent-route cap). Both keep the
+	// VRAM-churn fix (kept senders survive a route restart, 12b25a7) from leaking DX11 textures.
+	parkTTL = 10 * time.Minute
+	parkCap = 8
 )
 
 // Router is the medialink surface mediaroute drives (satisfied by *medialink.RouteManager).
@@ -103,10 +108,21 @@ type Manager struct {
 	openSink     func(string, int, int) (medialink.Sink, error)
 	hub          *captureHub // one capture per Spout source, fanned out to N routes
 
+	now func() time.Time // seam for the park TTL reaper (default time.Now)
+
 	mu       sync.Mutex
 	shared   map[string]medialink.SourceDesc // sender name → advertised desc
 	receives map[string]Receive              // session → state
 	tc       *testcard.Gen                   // running diagnostic generator (nil = off)
+	// parked holds republish senders whose route ended but whose Spout sender (+ DX11 shared
+	// texture) is kept open for the next reconnect, so Resolume never re-registers GL/DX interop.
+	// Keyed by sender name (linkPrefix + source). Bounded: cap parkCap, drop-oldest on overflow
+	// (evicted inner sink is closed) - a held 4K sender is ~33 MB of texture, so an unbounded cache
+	// is a VRAM leak. Reaped after parkTTL idle.
+	parked map[string]*parkedSink
+	// stopping marks senders whose NEXT keptSink.Close must destroy (explicit StopReceive) rather
+	// than park. Keyed by sender name; deleted when consumed.
+	stopping map[string]bool
 }
 
 // New builds the manager (inert until Start).
@@ -117,6 +133,7 @@ func New(o Options) *Manager {
 		grabFrame: o.GrabFrame, newFrameSnd: o.NewFrameSender,
 		newSharedSnd: o.NewSharedSender, openSource: o.OpenSource, openSink: o.OpenSink,
 		shared: map[string]medialink.SourceDesc{}, receives: map[string]Receive{},
+		parked: map[string]*parkedSink{}, stopping: map[string]bool{}, now: time.Now,
 	}
 	m.hub = newCaptureHub(o.Log, o.OpenReceiver, o.PutPix)
 	if m.listSenders == nil {
@@ -155,6 +172,7 @@ func (m *Manager) Start(ctx context.Context) {
 	debuglog.Go(m.log, source, func() {
 		t := time.NewTicker(scanEvery)
 		defer t.Stop()
+		defer m.destroyAllParked() // release every held sender on shutdown
 		for {
 			select {
 			case <-ctx.Done():
@@ -162,6 +180,7 @@ func (m *Manager) Start(ctx context.Context) {
 			case <-t.C:
 				m.scan()
 				m.cleanup()
+				m.reapParked()
 			}
 		}
 	})
@@ -337,7 +356,7 @@ func (m *Manager) StartReceive(peer, sourceID string) (string, error) {
 	w, h := desc.Width, desc.Height
 	m.router.RegisterSink(medialink.SinkDesc{ID: sinkID, Name: sender, Kind: medialink.KindVideo},
 		func(context.Context, medialink.Answer) (medialink.Sink, error) {
-			return m.openSink(sender, w, h)
+			return m.openReceiveSink(sender, w, h)
 		})
 	cfg := m.cfg()
 	opt := medialink.OfferOptions{
@@ -358,15 +377,31 @@ func (m *Manager) StartReceive(peer, sourceID string) (string, error) {
 	return session, nil
 }
 
-// StopReceive tears one receive route down and unregisters its sink.
+// StopReceive tears one receive route down and unregisters its sink. Unlike a route restart, an
+// explicit stop DESTROYS the kept-alive sender: mark it so the pending keptSink.Close closes the
+// inner, or - if the route already ended and the sender is parked - close it directly here.
 func (m *Manager) StopReceive(session string) {
 	m.mu.Lock()
 	r, ok := m.receives[session]
 	delete(m.receives, session)
+	var destroyNow medialink.Sink
+	if ok {
+		name := linkPrefix + r.Name
+		if p, parked := m.parked[name]; parked {
+			delete(m.parked, name)
+			destroyNow = p.inner
+		} else {
+			m.stopping[name] = true
+		}
+	}
 	m.mu.Unlock()
 	m.router.CloseRoute(session)
 	if ok {
 		m.router.UnregisterSink(r.SinkID)
+	}
+	if destroyNow != nil {
+		_ = destroyNow.Close()
+		m.log.Info(source, "receive stopped - kept-alive sender destroyed", map[string]any{"session": session})
 	}
 }
 
@@ -406,6 +441,170 @@ func encoderCodec(enc string) string {
 		return medialink.DecodeJPEG
 	}
 	return ""
+}
+
+// ── kept-alive republish senders (VRAM interop-churn fix, mirrors 12b25a7) ────
+
+// keptSink wraps a route's inner Spout sink so a route restart (peer reconnect, decoder hard-fail)
+// PARKS the sender instead of destroying it. Destroying it makes a NEW DX11 shared texture on the
+// next route, which forces Resolume to re-register its GL/DX interop; on NVIDIA that churn is
+// cumulative and ends in E_OUTOFVIDEOMEMORY mid-set. It delegates Write/Close and forwards the
+// optional ZeroCopySink / PipelineReporter surfaces so the native GPU decode path and the route
+// panel keep working.
+type keptSink struct {
+	m     *Manager
+	inner medialink.Sink
+	name  string
+	w, h  int
+	blank []byte // reused transparent gate-out frame (w*h*4); carried across park/reopen, one per sender lineage
+}
+
+var _ medialink.ZeroCopySink = (*keptSink)(nil)
+var _ medialink.PipelineReporter = (*keptSink)(nil)
+
+func (k *keptSink) Write(f *medialink.Frame) error { return k.inner.Write(f) }
+
+// SharedTexture forwards the inner sink's destination texture (medialink.ZeroCopySink) so the
+// native decoder can still render straight into it; zero/false when the inner has none (CPU sink).
+func (k *keptSink) SharedTexture() (uint64, uint32, int, int, string, bool) {
+	if zc, ok := k.inner.(medialink.ZeroCopySink); ok {
+		return zc.SharedTexture()
+	}
+	return 0, 0, 0, 0, "", false
+}
+
+// PipeStats forwards the inner sink's telemetry (medialink.PipelineReporter); zero when absent.
+func (k *keptSink) PipeStats() medialink.PipelineStats {
+	if pr, ok := k.inner.(medialink.PipelineReporter); ok {
+		return pr.PipeStats()
+	}
+	return medialink.PipelineStats{}
+}
+
+// Close parks the inner sink (kept alive) unless StopReceive flagged it for destruction.
+func (k *keptSink) Close() error { return k.m.closeKept(k) }
+
+// parkedSink is a kept-alive republish sender held between routes. blank is the reusable transparent
+// frame buffer for this sender's dims (freed with the entry).
+type parkedSink struct {
+	inner medialink.Sink
+	w, h  int
+	since time.Time
+	blank []byte
+}
+
+// openReceiveSink is the route sink open path: reuse a parked sender (same dims) so its shared
+// handle is unchanged, replace it on a dims change, or open a fresh one. The result is always a
+// keptSink so the next Close parks rather than destroys.
+func (m *Manager) openReceiveSink(name string, w, h int) (medialink.Sink, error) {
+	m.mu.Lock()
+	p, ok := m.parked[name]
+	if ok {
+		delete(m.parked, name)
+	}
+	m.mu.Unlock()
+	if ok {
+		if p.w == w && p.h == h {
+			m.log.Info(source, "receive sink reopened - reusing kept-alive Spout sender (shared handle unchanged)",
+				map[string]any{"sender": name, "w": w, "h": h})
+			return &keptSink{m: m, inner: p.inner, name: name, w: w, h: h, blank: p.blank}, nil
+		}
+		m.log.Info(source, "receive sink dims changed - replacing kept-alive sender",
+			map[string]any{"sender": name, "oldW": p.w, "oldH": p.h, "w": w, "h": h})
+		_ = p.inner.Close()
+	}
+	inner, err := m.openSink(name, w, h)
+	if err != nil {
+		return nil, err
+	}
+	return &keptSink{m: m, inner: inner, name: name, w: w, h: h}, nil
+}
+
+// closeKept is keptSink.Close: destroy on an explicit stop, else publish ONE transparent frame and
+// park the sender. Blocking sink I/O runs outside m.mu (Send waits for the worker read; Close joins).
+func (m *Manager) closeKept(k *keptSink) error {
+	m.mu.Lock()
+	destroy := m.stopping[k.name]
+	if destroy {
+		delete(m.stopping, k.name)
+	}
+	m.mu.Unlock()
+	if destroy {
+		_ = k.inner.Close()
+		return nil
+	}
+	if k.blank == nil {
+		k.blank = make([]byte, k.w*k.h*4) // one reusable blank per sender lineage; a 4K blank is 33 MB - never per-frame/per-close
+	}
+	if err := k.inner.Write(&medialink.Frame{Kind: medialink.KindVideo, Codec: medialink.CodecNRGBA, Payload: k.blank}); err != nil {
+		m.log.Debug(source, "kept-alive park: transparent frame write failed", map[string]any{"sender": k.name, "err": err.Error()})
+	}
+	m.parkKept(k)
+	return nil
+}
+
+// parkKept adds k to the parked cache under the cap (drop-oldest; evicted inner closed outside mu).
+func (m *Manager) parkKept(k *keptSink) {
+	entry := &parkedSink{inner: k.inner, w: k.w, h: k.h, since: m.now(), blank: k.blank}
+	m.mu.Lock()
+	var evName string
+	var evicted medialink.Sink
+	if old, exists := m.parked[k.name]; exists {
+		evName, evicted = k.name, old.inner // stale duplicate under one name: close it, don't leak
+	} else if len(m.parked) >= parkCap {
+		var oldest time.Time
+		for n, p := range m.parked {
+			if evName == "" || p.since.Before(oldest) {
+				evName, oldest = n, p.since
+			}
+		}
+		evicted = m.parked[evName].inner
+		delete(m.parked, evName)
+	}
+	m.parked[k.name] = entry
+	m.mu.Unlock()
+	if evicted != nil {
+		_ = evicted.Close()
+		m.log.Info(source, "kept-alive sender evicted - cache full (drop-oldest)", map[string]any{"sender": evName})
+	}
+}
+
+// reapParked destroys parked senders idle longer than parkTTL (inner Close runs outside mu).
+func (m *Manager) reapParked() {
+	now := m.now()
+	m.mu.Lock()
+	var expired []struct {
+		name  string
+		inner medialink.Sink
+	}
+	for n, p := range m.parked {
+		if now.Sub(p.since) > parkTTL {
+			expired = append(expired, struct {
+				name  string
+				inner medialink.Sink
+			}{n, p.inner})
+			delete(m.parked, n)
+		}
+	}
+	m.mu.Unlock()
+	for _, e := range expired {
+		_ = e.inner.Close()
+		m.log.Info(source, "kept-alive sender released after idle TTL", map[string]any{"sender": e.name})
+	}
+}
+
+// destroyAllParked closes every held sender (Start shutdown).
+func (m *Manager) destroyAllParked() {
+	m.mu.Lock()
+	all := m.parked
+	m.parked = map[string]*parkedSink{}
+	m.mu.Unlock()
+	for _, p := range all {
+		_ = p.inner.Close()
+	}
+	if len(all) > 0 {
+		m.log.Info(source, "kept-alive senders released on shutdown", map[string]any{"count": len(all)})
+	}
 }
 
 // ── videoshare-backed source/sink ─────────────────────────────────────────────
