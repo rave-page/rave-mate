@@ -71,3 +71,35 @@ RX 7900 XTX as [primary] and the APU as [integrated].
 
 Stamped dev builds (Makefile + CLAUDE.md build row) and scripts/deploy-local.ps1, which
 refuses trees without origin/development and backs up the installed exe.
+
+## Dev-on-set-PC: keep the client updatable
+
+The rig is developed on the same PC that runs live sets. A plain dev build stamps `version.FeedURL=""`,
+and the in-app self-updater is INERT on an empty FeedURL: `internal/app/app.go:2872` builds
+`selfupdate.New(version.FeedURL, version.BuildNum(), version.UpdatePubKey)`, the updater polls
+`Feed.Available(ctx)` every `updater.DefaultInterval` (5 min), and `selfupdate.Available` returns
+update-available only when `rel.Build > u.current`. Empty FeedURL => no feed => never updates. On
+2026-09-02 such a dev exe sat in the install dir and froze the client on a stale build for 5 days.
+
+Arming fix (`scripts/build-local.ps1`, POSIX twin `make build-local`): stamp the dev build with
+`FeedURL=<nightly feed>`, `Channel=nightly`, and `Build = the CURRENT nightly build` read from
+`<FEED>latest.json` at build time; keep the DEFAULT `UpdatePubKey` (do NOT empty it) so the signed
+nightly manifest still verifies against the real release pubkey. Effect: during the session no
+published nightly is `> Build`, so the dev build STICKS and is testable; the next pushed nightly
+(`Build = current+N`, strictly greater) auto-replaces it on the 5-min interval. Feed unreachable ->
+`Build=0` (any nightly then supersedes it) with a warning. Full-feature tags
+(`spout vr abletonlink zigdsp zigui zigvr encembed shellembed`) + static MinGW runtime match the
+nightly recipe, so the deployed dev build is never the crippled `spout,vr`-only build.
+
+`scripts/deploy-local.ps1` now REFUSES (exit 6) any exe whose `go version -m` lacks the full-feature
+markers (`-tags=` must contain `zigui` AND `encembed`) or the arming stamps
+(`version.FeedURL=<nightly feed>` AND `version.Channel=nightly`) - exactly the 2026-09-02 mistake. It
+also gained `-Build` (build full+armed via build-local.ps1, then deploy) and `-RestoreNightly`
+(download `<FEED>latest.json` -> `installer_url`, verify `installer_sha256` with Get-FileHash SHA256
+[exit 7 on mismatch], run the installer `/S`, print the manual-restart note). All prior guards stay
+(origin/development exit 2, missing exit 1, unstamped exit 3, Resolume/OBS-live exit 4, copy exit 5);
+it still never restarts the app.
+
+A live-set mid-update is NOT a new risk: the nightly already auto-updates on the same 5-min interval
+whenever a strictly-greater Build appears. Pushes happen at end of session, and the scheduled nightly
+fires ~07:00 local (cron `0 5 * * *` = 05:00 UTC), not during a set.

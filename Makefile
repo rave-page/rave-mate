@@ -126,3 +126,16 @@ clean:
 .PHONY: build-zig-all
 build-zig-all: zig
 	$(MAKE) build ZIG=1 ZIGVR=1
+
+# build-local - full-feature, updater-ARMED dev build (POSIX/CI-parity twin of scripts/build-local.ps1).
+# WHY armed: this rig is developed on the set PC (2026-09-02 freeze). Stamp the nightly FeedURL +
+# Channel=nightly + Build=CURRENT-nightly so the dev build STICKS this session (no published nightly
+# is > it) and the 5-min self-updater auto-replaces it with the next nightly (Build strictly greater)
+# after you push development. UpdatePubKey stays the source default so the signed nightly manifest
+# verifies. NIGHTLY_BUILD reads the live feed (curl+jq); defaults 0 (any nightly then supersedes it)
+# when curl/jq are unavailable or the field is missing. Does NOT alter the default `build` target.
+FEED_URL := https://github.com/rave-page/rave-mate/releases/download/nightly/
+.PHONY: build-local
+build-local:
+	bash scripts/build-zig.sh
+	NIGHTLY_BUILD=$$(curl -fsSL $(FEED_URL)latest.json | (jq -r .build 2>/dev/null || echo 0)); case "$$NIGHTLY_BUILD" in ''|*[!0-9]*) NIGHTLY_BUILD=0;; esac; CGO_ENABLED=1 go build -tags "spout vr abletonlink zigdsp zigui zigvr encembed shellembed" -ldflags "-s -w -H windowsgui -linkmode external -extldflags '-static -static-libgcc -static-libstdc++' -X rave.page/mate/internal/version.Version=dev-$(COMMIT)$(DIRTY) -X rave.page/mate/internal/version.Commit=$(COMMIT) -X rave.page/mate/internal/version.Build=$$NIGHTLY_BUILD -X rave.page/mate/internal/version.Channel=nightly -X rave.page/mate/internal/version.FeedURL=$(FEED_URL)" -o $(DIST)/$(BIN) $(PKG)

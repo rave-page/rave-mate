@@ -112,6 +112,9 @@ From `rave-mate/`:
 | Regenerate Windows exe icon resource (only when `icon.png` changes) | `make generate-icon` |
 | Build (current OS) | `make build` (OS-aware ldflags) |
 | Build (Windows tray, no console) | `go build -tags "spout vr" -ldflags "-s -w -H windowsgui -extldflags=-static -X rave.page/mate/internal/version.Version=dev-$(git rev-parse --short HEAD) -X rave.page/mate/internal/version.Commit=$(git rev-parse --short HEAD)" -o dist/rave-mate.exe ./cmd/rave-mate` (build ALL feature tags so the exe ships every feature - CI does the same. `-extldflags=-static` statically links the MinGW C/C++ runtime so the exe runs on a clean PC; without it you get `libgcc_s_seh-1.dll` / `libstdc++-6.dll` missing errors. `openvr_api.dll` / `SpoutLibrary.dll` are runtime-loaded - ship them beside the exe so VR/Spout work, but their absence only disables that feature, never blocks launch. Dev builds MUST be stamped - an unstamped exe reports `dev` and `go version -m` shows the rave-suite superproject sha (submodule trap), so the running build cannot be identified. Deploy into the install dir only via `scripts/deploy-local.ps1`, which refuses a tree that does not contain origin/development.) |
+| Build a full-feature, updater-armed DEV build (set PC) | `pwsh scripts/build-local.ps1` (or `make build-local`) |
+| Deploy that dev build to the local install (set PC) | `pwsh scripts/deploy-local.ps1 -Build` |
+| Restore the set PC to the current nightly | `pwsh scripts/deploy-local.ps1 -RestoreNightly` |
 | Run | `go run ./cmd/rave-mate` |
 | Run as background service (headless) | `go run ./cmd/rave-mate --service` |
 | Install / remove OS service | `rave-mate install` / `uninstall` / `status` (Windows install needs admin) |
@@ -128,6 +131,18 @@ From `rave-mate/`:
 | Zig UI golden gate (per migrated tab) | `GOWORK=off go test -tags zigui ./internal/webui -run TestZig` |
 
 "Tests pass" = `go build ./... && go vet ./... && go test ./...` clean.
+
+### Developing on the set PC (build/deploy policy)
+
+This repo is often developed on the machine that runs live sets. A dev build deployed there MUST be
+full-feature AND updater-armed: `scripts/build-local.ps1` (or `make build-local`) stamps FeedURL +
+Channel=nightly + Build=current-nightly (default UpdatePubKey kept), so the client keeps every
+feature during the session and auto-updates to the next nightly (5-min updater, Build strictly
+greater) after you push development. An unstamped/empty-FeedURL dev build FREEZES the self-updater
+(the 2026-09-02 incident) - `scripts/deploy-local.ps1` now REFUSES a non-full-feature/unarmed exe
+(exit 6). `deploy-local.ps1 -Build` builds full+armed then deploys; `deploy-local.ps1 -RestoreNightly`
+downloads + sha-verifies the current nightly installer and runs it to force the set PC back onto the
+pure auto-updating nightly.
 
 ## Architecture
 
