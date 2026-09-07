@@ -1664,9 +1664,18 @@ func run(parent context.Context, serviceMode bool) error {
 	// listener below spawns/stops it lazily (adverts self-heal every 5s, so a child that comes up
 	// moments after a connect still exchanges sources promptly).
 	if useMediaChild {
+		// lastConnected + the linger timer add disconnect hysteresis: a brief peer flap must NOT
+		// stop the child (which destroys every republish sender → interop churn). mpMu guards both
+		// (the peer listener may fire from several peer goroutines).
+		var mpMu sync.Mutex
+		var lastConnected time.Time
+		var lingerTimer *time.Timer
 		mediaPlaneNeeded := func() bool {
-			return mediaPlaneDemand(cfg.Features.Webcam.Enabled, cfg.Features.Peers.Enabled,
-				peersConnected(peerMgr))
+			mpMu.Lock()
+			lc := lastConnected
+			mpMu.Unlock()
+			return mediaPlaneDemandLinger(cfg.Features.Webcam.Enabled, cfg.Features.Peers.Enabled,
+				peersConnected(peerMgr), lc, time.Now(), mediaPlaneLinger)
 		}
 		mods.Add(&module.Service{
 			Name:    "mediaplane",
@@ -1677,6 +1686,22 @@ func run(parent context.Context, serviceMode bool) error {
 		// Off the peer-state callback: Stop blocks until the child is reaped (stopGrace), and
 		// SetEnabled re-reads demand at execution time so a flap converges on the latest state.
 		peerMgr.AddListener(nil, func() {
+			connected := peersConnected(peerMgr)
+			mpMu.Lock()
+			if connected {
+				lastConnected = time.Now()
+			} else if cfg.Features.Peers.Enabled && !cfg.Features.Webcam.Enabled && !lastConnected.IsZero() {
+				// Gate is held true only by the linger window now - arm ONE timer to re-evaluate at
+				// its end so the child stops if nobody reconnected. Reset, never stack.
+				if lingerTimer == nil {
+					lingerTimer = time.AfterFunc(mediaPlaneLinger, func() {
+						debuglog.Go(log, "medialink", func() { mods.SetEnabled("mediaplane", mediaPlaneNeeded()) })
+					})
+				} else {
+					lingerTimer.Reset(mediaPlaneLinger)
+				}
+			}
+			mpMu.Unlock()
 			debuglog.Go(log, "medialink", func() { mods.SetEnabled("mediaplane", mediaPlaneNeeded()) })
 		})
 	}
@@ -2319,6 +2344,19 @@ const mediaChildMemMB = 2048
 // peer, not just the peers feature flag. Pure so the gate is testable.
 func mediaPlaneDemand(webcamOn, peersOn, peerConnected bool) bool {
 	return webcamOn || (peersOn && peerConnected)
+}
+
+// mediaPlaneLinger keeps the media child alive this long after the last peer disconnects, so a brief
+// flap does not tear down every republish sender (a new DX11 texture per respawn churns Resolume's
+// GL/DX interop into E_OUTOFVIDEOMEMORY - see mediaroute keep-alive / videoshare 12b25a7).
+const mediaPlaneLinger = 2 * time.Minute
+
+// mediaPlaneDemandLinger is mediaPlaneDemand plus disconnect hysteresis: while peers are enabled and
+// the last connection dropped less than `linger` ago, demand stays true. Webcam-off + peers-disabled
+// still stops immediately (no linger). Pure so the gate is testable.
+func mediaPlaneDemandLinger(webcamOn, peersOn, peerConnected bool, lastConnected, now time.Time, linger time.Duration) bool {
+	return mediaPlaneDemand(webcamOn, peersOn, peerConnected) ||
+		(peersOn && !peerConnected && !lastConnected.IsZero() && now.Sub(lastConnected) < linger)
 }
 
 // peersConnected reports whether any paired peer link is currently up.
