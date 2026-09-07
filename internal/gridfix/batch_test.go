@@ -290,6 +290,107 @@ func TestBatchForceOverridesSkipsAndCache(t *testing.T) {
 	}
 }
 
+// TestBatchVerifiedContradictionSurfaced: a Verified track whose checkpoint-matched cache entry
+// confidently fits a BPM that contradicts the verified value must surface as a SKIP naming the
+// contradiction (not the silent "protected" skip), with ZERO new analysis. A cache entry that
+// agrees, and a verified track with no cache entry, keep today's silent protected skip.
+func TestBatchVerifiedContradictionSurfaced(t *testing.T) {
+	dir := t.TempDir()
+	wrong := writeAudioStub(t, dir, "wrong.mp3", "w")     // verified 173, cache fits 174 → contradiction
+	right := writeAudioStub(t, dir, "right.mp3", "r")     // verified 174, cache fits 174 → agrees
+	nocache := writeAudioStub(t, dir, "nocache.mp3", "n") // verified, no cache entry → unchanged
+	cache, err := OpenDetectionCache(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	det174 := synthDet(200, 0.25, 60.0/174.0)
+	if err := cache.Put(wrong, det174, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.Put(right, det174, ""); err != nil {
+		t.Fatal(err)
+	}
+	// analyzer with NO scripted detections: any Analyze call errors, proving the verified path
+	// never analyzes (cached beats only, zero GPU).
+	stub := &stubAnalyzer{det: map[string]*Detection{}}
+	b := NewBatch(stub, cache, BatchOptions{})
+	tracks := []BatchTrack{
+		{Path: wrong, Title: "Wrong", OldBPM: 173, Verified: true, OldStartMs: ptr(250)},
+		{Path: right, Title: "Right", OldBPM: 174, Verified: true, OldStartMs: ptr(250)},
+		{Path: nocache, Title: "NoCache", OldBPM: 173, Verified: true, OldStartMs: ptr(250)},
+	}
+	r := b.Run(context.Background(), tracks, nil)
+	if stub.callCount() != 0 {
+		t.Fatalf("verified path analyzed %d tracks - must be zero GPU", stub.callCount())
+	}
+	if r[0].Plan.Status != StatusSkip {
+		t.Fatalf("wrong: status=%s want SKIP", r[0].Plan.Status)
+	}
+	wantDetail := "verified grid contradicts detection (verified 173.00, detected 174.00) - re-verify"
+	if r[0].Plan.Detail != wantDetail {
+		t.Fatalf("wrong: detail=%q\n want %q", r[0].Plan.Detail, wantDetail)
+	}
+	if r[1].Plan.Status != StatusSkip || r[1].Plan.Detail != "verified grid - protected" {
+		t.Fatalf("right (agrees): %+v want protected skip", r[1].Plan)
+	}
+	if r[2].Plan.Status != StatusSkip || r[2].Plan.Detail != "verified grid - protected" {
+		t.Fatalf("nocache: %+v want protected skip", r[2].Plan)
+	}
+}
+
+// TestBatchManualFlag asserts the Plan.Manual taxonomy: protection skips (verified/locked/
+// multi-marker) are Manual==false; skips where the engine tried a fit and it failed (nil fit,
+// tempo-unstable) are Manual==true - only the latter belong in the manual-gridding prep playlist.
+func TestBatchManualFlag(t *testing.T) {
+	dir := t.TempDir()
+	unstable := writeAudioStub(t, dir, "unstable.mp3", "u")
+	verified := writeAudioStub(t, dir, "verified.mp3", "v")
+	stub := &stubAnalyzer{det: map[string]*Detection{
+		unstable: synthDet(10, 0.25, 0.5), // <16 beats → nil fit → manual skip
+		verified: synthDet(128, 0.25, 0.5),
+	}}
+	cache, err := OpenDetectionCache(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := NewBatch(stub, cache, BatchOptions{MinQuality: 0.85, ThresholdMS: 12})
+	tracks := []BatchTrack{
+		{Path: verified, Title: "Verified", OldBPM: 120, OldStartMs: ptr(250), Verified: true},
+		{Path: "locked.mp3", Title: "Locked", OldBPM: 140, Locked: true},
+		{Path: "multi.mp3", Title: "Multi", OldBPM: 100, MultiMarker: true},
+		{Path: unstable, Title: "Unstable", OldBPM: 120},
+	}
+	r := b.Run(context.Background(), tracks, nil)
+	for i, want := range []struct {
+		name   string
+		manual bool
+	}{
+		{"verified", false}, {"locked", false}, {"multi-marker", false}, {"nil-fit", true},
+	} {
+		if r[i].Plan.Status != StatusSkip {
+			t.Fatalf("%s: status=%s want SKIP", want.name, r[i].Plan.Status)
+		}
+		if r[i].Plan.Manual != want.manual {
+			t.Errorf("%s skip: Manual=%v want %v (detail %q)", want.name, r[i].Plan.Manual, want.manual, r[i].Plan.Detail)
+		}
+	}
+
+	// tempo-unstable PlanFix skip (low coverage, no prior) → Manual==true
+	weak := GridFit{Anchor: 0, Period: 60.0 / 174.0, Coverage: 0.50, Explained: 1, NBeats: 400, PhaseR: 0.40}
+	p := PlanFix(weak, nil, PlanInput{MinQuality: 0.85, ThresholdMS: 12})
+	if p.Status != StatusSkip {
+		t.Fatalf("tempo-unstable: status=%s want SKIP (%s)", p.Status, p.Detail)
+	}
+	if !p.Manual {
+		t.Errorf("tempo-unstable skip: Manual=false want true (detail %q)", p.Detail)
+	}
+
+	// multi-marker PlanFix skip → Manual==false (protection)
+	if pm := PlanFix(GridFit{}, nil, PlanInput{MultiMarker: true}); pm.Status != StatusSkip || pm.Manual {
+		t.Errorf("multi-marker PlanFix: status=%s Manual=%v want SKIP/false", pm.Status, pm.Manual)
+	}
+}
+
 func TestBatchETAPositiveWhileAnalyzing(t *testing.T) {
 	dir := t.TempDir()
 	det := synthDet(128, 0.25, 0.5)

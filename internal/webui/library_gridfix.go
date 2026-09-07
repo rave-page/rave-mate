@@ -309,8 +309,9 @@ func (u *UI) gfDoneState(g *gfState) libGFSt {
 			hasTraktor = true
 		}
 	}
-	if p.Skipped > 0 && g.prepped < 0 && hasTraktor {
-		st.Acts = append(st.Acts, newBtn(i18n.T("library.gf.prep", i18n.A{"n": fmt.Sprint(p.Skipped)}), "outline", "gf-prep"))
+	manualN := len(gfManualSkipPaths(g.results)) // prep candidates only (matches gf-prep); caller holds g.mu
+	if manualN > 0 && g.prepped < 0 && hasTraktor {
+		st.Acts = append(st.Acts, newBtn(i18n.T("library.gf.prep", i18n.A{"n": fmt.Sprint(manualN)}), "outline", "gf-prep"))
 	}
 	if g.prepped >= 0 {
 		st.Hints = append(st.Hints, libHintSt{Tone: "ok",
@@ -951,7 +952,20 @@ func (u *UI) gfApplyFail(msg string) {
 	u.patchMain()
 }
 
-// gfPrep collects SKIP tracks into the manual-gridding prep playlist.
+// gfManualSkipPaths returns paths of results that belong in the manual-gridding prep playlist:
+// the engine attempted a fit and the track genuinely needs manual gridding (Plan.Manual). Protection
+// skips (verified/locked/multi-marker) and errors are excluded, so the count matches what gf-prep sends.
+func gfManualSkipPaths(results []gridfix.TrackResult) []string {
+	var paths []string
+	for _, r := range results {
+		if r.Err == "" && r.Plan.Status == gridfix.StatusSkip && r.Plan.Manual {
+			paths = append(paths, r.Path)
+		}
+	}
+	return paths
+}
+
+// gfPrep collects manual-gridding SKIP tracks into the prep playlist (protection skips excluded).
 func (u *UI) gfPrep() {
 	g := &u.gf
 	g.mu.Lock()
@@ -959,12 +973,7 @@ func (u *UI) gfPrep() {
 		g.mu.Unlock()
 		return
 	}
-	var paths []string
-	for _, r := range g.results {
-		if r.Err == "" && r.Plan.Status == gridfix.StatusSkip {
-			paths = append(paths, r.Path)
-		}
-	}
+	paths := gfManualSkipPaths(g.results)
 	g.mu.Unlock()
 	nml := u.gfNMLPath()
 	if nml == "" {

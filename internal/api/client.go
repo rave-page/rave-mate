@@ -189,9 +189,11 @@ func bearer(token string) apiclient.RequestEditorFn {
 }
 
 // StatusError is a non-2xx API response; callers branch on Code (401 re-auth, 429 backoff).
+// RetryAfter carries a parsed Retry-After header (429 throttle), 0 when absent.
 type StatusError struct {
-	Code int
-	Msg  string
+	Code       int
+	Msg        string
+	RetryAfter time.Duration
 }
 
 func (e *StatusError) Error() string { return e.Msg }
@@ -205,13 +207,28 @@ func StatusCode(err error) int {
 	return 0
 }
 
+// RetryAfter extracts a parsed Retry-After delay from an api error chain (429
+// throttle); 0 = absent or not a status error.
+func RetryAfter(err error) time.Duration {
+	var se *StatusError
+	if errors.As(err, &se) {
+		return se.RetryAfter
+	}
+	return 0
+}
+
 // decode reads a 2xx JSON body into out; on non-2xx returns a *StatusError with a short snippet.
 func decode(resp *http.Response, out any) error {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return &StatusError{Code: resp.StatusCode,
+		se := &StatusError{Code: resp.StatusCode,
 			Msg: fmt.Sprintf("%s -> %d: %s", resp.Request.URL.Path, resp.StatusCode, strings.TrimSpace(string(snippet)))}
+		// Retry-After (integer seconds) tells us how long to back off; not a secret, never logged.
+		if sec, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After"))); err == nil && sec > 0 {
+			se.RetryAfter = time.Duration(sec) * time.Second
+		}
+		return se
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
 		return nil
