@@ -32,8 +32,15 @@ const (
 	qsSegment        = 3
 	qsProcessSegment = 4
 	// KMTQUERYADAPTERINFOTYPE
-	kmtAdapterAddress  = 6
-	kmtRegistryInfo    = 8
+	kmtGetSegmentSize = 3
+	kmtAdapterAddress = 6
+	kmtRegistryInfo   = 8
+	kmtAdapterType    = 15
+	// D3DKMT_ADAPTERTYPE flag bits (UINT bitfield).
+	atSoftwareDevice   = 1 << 2
+	atHybridIntegrated = 1 << 5
+	atIndirectDisplay  = 1 << 6
+	atParavirtualized  = 1 << 7
 	processQueryInfo   = 0x0400 // PROCESS_QUERY_INFORMATION (no VM_READ needed for D3DKMT)
 	maxEnumAdapters    = 64     // D3DKMTEnumAdapters2 buffer cap; a box enumerates ~30-40 handles
 	maxProcSweep       = 2048   // cap the process sweep; drop-past-cap (a real box has <1k procs)
@@ -93,14 +100,23 @@ type adapterRegistryInfo struct {
 
 type closeAdapterArg struct{ hAdapter uint32 }
 
+// segmentSizeInfo mirrors D3DKMT_SEGMENTSIZEINFO (3 * ULONGLONG = 24 bytes): DXGI-parity
+// dedicated video, dedicated system, and shared system budgets.
+type segmentSizeInfo struct {
+	dedicatedVideo  uint64
+	dedicatedSystem uint64
+	sharedSystem    uint64
+}
+
 // realAdapter is a deduped physical adapter with dedicated-VRAM totals + per-segment aperture map.
 type realAdapter struct {
-	name     string
-	luid     luid
-	luidStr  string
-	budget   uint64 // bytes
-	used     uint64 // bytes (resident)
-	aperture []bool // segment index -> is shared/system (excluded from totals)
+	name       string
+	luid       luid
+	luidStr    string
+	budget     uint64 // bytes
+	used       uint64 // bytes (resident)
+	aperture   []bool // segment index -> is shared/system (excluded from totals)
+	integrated bool   // APU / hybrid-integrated GPU (UMA carve-out, not a watchdog target)
 }
 
 type winSampler struct{}
@@ -114,9 +130,10 @@ func (winSampler) Sample() ([]AdapterUsage, error) {
 		out = append(out, AdapterUsage{
 			Name: r.name, LUID: r.luidStr,
 			BudgetMB: r.budget >> 20, UsedMB: r.used >> 20, FreeMB: freeMB(r.budget, r.used),
+			Integrated: r.integrated,
 		})
 	}
-	return out, nil
+	return rankAdapters(out), nil
 }
 
 func (winSampler) SampleProcesses(topN int) ([]AdapterProcs, error) {
@@ -165,22 +182,43 @@ func (winSampler) SampleProcesses(topN int) ([]AdapterProcs, error) {
 	return out, nil
 }
 
-// collectAdapters enumerates every D3DKMT adapter, keeps the ones with real dedicated VRAM,
-// and dedupes physical GPUs that WDDM enumerates under several LUIDs. The dedupe key is the
-// PCI address (ADAPTERADDRESS), falling back to the driver registry name; an adapter that
-// resolves neither is a phantom alias of a real GPU and is dropped (observed: the RTX 3060
-// appears twice reporting identical memory - once named with valid pci 9:0.0, once as an
-// unnamed alias whose registry name is empty and whose ADAPTERADDRESS returns out-of-range
-// garbage, both rejected by identity()).
+// collectAdapters enumerates every D3DKMT adapter, keeps the ones with a real memory budget,
+// and dedupes physical GPUs that WDDM enumerates under several LUIDs. Software, indirect-display,
+// and paravirtualized adapters (D3DKMT_ADAPTERTYPE flags) are dropped BEFORE any memory query.
+// Budget source order: GETSEGMENTSIZE dedicated video, else dedicated system (an integrated GPU's
+// UMA carve-out), else the segment CommitLimit sum. An adapter is integrated when the
+// HybridIntegrated flag is set or its budget is dedicated-system-only. The dedupe key is the PCI
+// address (ADAPTERADDRESS), falling back to the driver registry name; an adapter that resolves
+// neither is a phantom alias of a real GPU and is dropped (observed: the RTX 3060 appears twice
+// reporting identical memory - once named with valid pci 9:0.0, once as an unnamed alias whose
+// registry name is empty and whose ADAPTERADDRESS returns out-of-range garbage, both rejected by
+// identity()).
 func collectAdapters() []realAdapter {
 	var reals []realAdapter
 	seen := map[string]bool{}
 	for _, ad := range enumAdapters() {
-		budget, used, aperture := adapterTotals(ad.adapterLuid)
-		key, name := identity(ad.hAdapter)
-		closeAdapter(ad.hAdapter)
+		h, l := ad.hAdapter, ad.adapterLuid
+		flags, hasType := adapterType(h)
+		if hasType && flags&(atSoftwareDevice|atIndirectDisplay|atParavirtualized) != 0 {
+			closeAdapter(h) // not a real render GPU
+			continue
+		}
+		sizes, hasSizes := adapterSizes(h)
+		key, name := identity(h)
+		closeAdapter(h)
+		segBudget, used, aperture := adapterTotals(l)
+		integrated := (hasType && flags&atHybridIntegrated != 0) ||
+			(hasSizes && sizes.dedicatedVideo == 0 && sizes.dedicatedSystem > 0)
+		budget := segBudget
+		if hasSizes {
+			if sizes.dedicatedVideo > 0 {
+				budget = sizes.dedicatedVideo
+			} else if sizes.dedicatedSystem > 0 {
+				budget = sizes.dedicatedSystem
+			}
+		}
 		if budget == 0 {
-			continue // software renderer / iGPU / aperture-only - not a real dedicated GPU
+			continue // software renderer / aperture-only - not a real GPU
 		}
 		if key == "" || seen[key] {
 			continue
@@ -190,11 +228,12 @@ func collectAdapters() []realAdapter {
 			name = "GPU " + key
 		}
 		reals = append(reals, realAdapter{
-			name: name, luid: ad.adapterLuid,
-			luidStr:  fmt.Sprintf("%d:%d", ad.adapterLuid.High, ad.adapterLuid.Low),
-			budget:   budget,
-			used:     used,
-			aperture: aperture,
+			name: name, luid: l,
+			luidStr:    fmt.Sprintf("%d:%d", l.High, l.Low),
+			budget:     budget,
+			used:       used,
+			aperture:   aperture,
+			integrated: integrated,
 		})
 	}
 	return reals
@@ -307,6 +346,27 @@ func adapterAddr(h uint32) (bus, dev, fn uint32, ok bool) {
 		return 0, 0, 0, false // out-of-range -> phantom alias, not a real PCI device
 	}
 	return a[0], a[1], a[2], true
+}
+
+// adapterType returns the D3DKMT_ADAPTERTYPE flag bitfield (render/display/software/hybrid/
+// paravirtualized bits). ok=false when the NTSTATUS is non-zero.
+func adapterType(h uint32) (flags uint32, ok bool) {
+	qai := queryAdapterInfo{hAdapter: h, typ: kmtAdapterType, pData: uintptr(unsafe.Pointer(&flags)), dataSize: 4}
+	if st, _, _ := procQueryAdapterInfo.Call(uintptr(unsafe.Pointer(&qai))); st != 0 {
+		return 0, false
+	}
+	return flags, true
+}
+
+// adapterSizes returns D3DKMT_SEGMENTSIZEINFO (DXGI-parity dedicated/shared budgets). ok=false
+// when the NTSTATUS is non-zero.
+func adapterSizes(h uint32) (segmentSizeInfo, bool) {
+	var s segmentSizeInfo
+	qai := queryAdapterInfo{hAdapter: h, typ: kmtGetSegmentSize, pData: uintptr(unsafe.Pointer(&s)), dataSize: uint32(unsafe.Sizeof(s))}
+	if st, _, _ := procQueryAdapterInfo.Call(uintptr(unsafe.Pointer(&qai))); st != 0 {
+		return segmentSizeInfo{}, false
+	}
+	return s, true
 }
 
 func closeAdapter(h uint32) {

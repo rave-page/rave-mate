@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"rave.page/mate/internal/logbus"
@@ -58,6 +59,13 @@ func (o *Options) applyDefaults() {
 type Monitor struct {
 	opt    Options
 	states map[string]*watchState // per-adapter (keyed by LUID) hysteresis state
+
+	// last-sample snapshot for Probe (perf report reads it from another goroutine).
+	mu          sync.Mutex
+	last        []AdapterUsage
+	lastAt      time.Time
+	lastProcs   []AdapterProcs
+	lastProcsAt time.Time
 }
 
 // New builds a Monitor. Cheap; no syscalls until Run.
@@ -86,18 +94,28 @@ func (m *Monitor) Run(ctx context.Context) {
 	}
 }
 
-// sampleAdapters logs one line per adapter + folds each into its watchdog state.
+// sampleAdapters logs one line per adapter + folds the PRIMARY adapter into its watchdog state.
+// Non-primary adapters (an APU's UMA carve-out beside a discrete card) are logged, never warned.
 func (m *Monitor) sampleAdapters() {
 	ads, err := m.opt.Sampler.Sample()
 	if err != nil {
 		m.opt.Log.Debug("gpumem", "sample failed", map[string]any{"err": err.Error()})
 		return
 	}
+	ads = rankAdapters(ads)
 	now := m.opt.now()
+	m.mu.Lock()
+	m.last = append([]AdapterUsage(nil), ads...)
+	m.lastAt = now
+	m.mu.Unlock()
 	for _, a := range ads {
 		m.opt.Log.Info("gpumem", "vram", map[string]any{
 			"adapter": a.Name, "usedMB": a.UsedMB, "freeMB": a.FreeMB, "budgetMB": a.BudgetMB,
+			"primary": a.Primary, "integrated": a.Integrated,
 		})
+		if !a.Primary {
+			continue
+		}
 		st := m.states[a.LUID]
 		if st == nil {
 			st = &watchState{}
@@ -128,6 +146,10 @@ func (m *Monitor) processSweep() {
 		m.opt.Log.Debug("gpumem", "process sweep failed", map[string]any{"err": err.Error()})
 		return
 	}
+	m.mu.Lock()
+	m.lastProcs = append([]AdapterProcs(nil), aps...)
+	m.lastProcsAt = m.opt.now()
+	m.mu.Unlock()
 	for _, ap := range aps {
 		m.opt.Log.Info("gpumem", "vram by process", map[string]any{
 			"adapter": ap.Adapter, "top": topString(ap.Procs),
@@ -136,8 +158,36 @@ func (m *Monitor) processSweep() {
 }
 
 func notifyBody(a AdapterUsage) string {
-	return fmt.Sprintf("GPU memory nearly full (%.1f/%.1f GB) - Spout/video interop may start failing. Close GPU-heavy apps (browser, extra sources).",
-		float64(a.UsedMB)/1024, float64(a.BudgetMB)/1024)
+	return fmt.Sprintf("GPU memory nearly full on %s (%.1f/%.1f GB) - Spout/video interop may start failing. Close GPU-heavy apps (browser, extra sources).",
+		a.Name, float64(a.UsedMB)/1024, float64(a.BudgetMB)/1024)
+}
+
+// Probe returns the gpu-memory perf-report section from the last stored sample: per-adapter
+// totals then per-adapter process attribution. Pure formatting; safe to call concurrently.
+func (m *Monitor) Probe() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.last) == 0 {
+		return "(no sample yet)"
+	}
+	var b strings.Builder
+	for i, a := range m.last {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		prim, integ := "", ""
+		if a.Primary {
+			prim = " [primary]"
+		}
+		if a.Integrated {
+			integ = " [integrated]"
+		}
+		fmt.Fprintf(&b, "%s  used %d/%d MB  free %d MB%s%s", a.Name, a.UsedMB, a.BudgetMB, a.FreeMB, prim, integ)
+	}
+	for _, ap := range m.lastProcs {
+		fmt.Fprintf(&b, "\ntop %s: %s (%ds ago)", ap.Adapter, topString(ap.Procs), int(m.opt.now().Sub(m.lastProcsAt).Seconds()))
+	}
+	return b.String()
 }
 
 func topString(ps []ProcUsage) string {

@@ -2023,6 +2023,7 @@ func run(parent context.Context, serviceMode bool) error {
 			ProcessInterval: time.Duration(gm.ProcessIntervalSeconds) * time.Second,
 			WarnFreeMB:      warnFree,
 		})
+		perfmon.RegisterProbe("gpu memory", mon.Probe)
 		debuglog.Go(log, "gpumem", func() { mon.Run(ctx) })
 		log.Info("gpumem", "VRAM watchdog armed (per-adapter + per-process growth curve, low-VRAM toast)", nil)
 	}
