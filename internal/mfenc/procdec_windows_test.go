@@ -173,11 +173,17 @@ func TestDecCheckOracle(t *testing.T) {
 			decFrames: 120, prevFrames: 60, appended: 130, prevAppended: 65,
 			lastPubNs: 8_900_000_000, nowNs: 9_000_000_000, staleNs: stale,
 		}, spoutRecycleNow},
-		{"FROZEN: AUs arriving, nothing published, publish clock stopped", decProbe{
+		{"FROZEN wedge: AUs arriving, nothing published, NO mutex contention -> recycle", decProbe{
 			curHandle: 0xA, newHandle: 0xA, resolved: true,
 			decFrames: 120, prevFrames: 120, appended: 200, prevAppended: 130,
 			lastPubNs: 1_000_000_000, nowNs: 9_000_000_000, staleNs: stale,
 		}, spoutRecycleNow},
+		{"FROZEN but contended: mutex timeouts climbing -> HOLD the pipeline, do not recycle", decProbe{
+			curHandle: 0xA, newHandle: 0xA, resolved: true,
+			decFrames: 120, prevFrames: 120, appended: 200, prevAppended: 130,
+			mtxTimeouts: 47, prevMtxTimeouts: 12,
+			lastPubNs: 1_000_000_000, nowNs: 9_000_000_000, staleNs: stale,
+		}, spoutHealthy},
 		{"IDLE route: no AUs, nothing published - healthy, must not churn reopens", decProbe{
 			curHandle: 0xA, newHandle: 0xA, resolved: true,
 			decFrames: 120, prevFrames: 120, appended: 130, prevAppended: 130,
@@ -202,6 +208,16 @@ func TestDecCheckOracle(t *testing.T) {
 		if got == spoutRecycleNow && why == "" {
 			t.Errorf("%s: a recycle must always name a reason", c.name)
 		}
+	}
+	// The contended-hold must NAME why it is holding, so a live set shows it rode out contention
+	// rather than silently recycling (the 2026-09-11 cascade).
+	if v, why := decCheck(decProbe{
+		curHandle: 0xA, newHandle: 0xA, resolved: true,
+		decFrames: 5, prevFrames: 5, appended: 20, prevAppended: 10,
+		mtxTimeouts: 9, prevMtxTimeouts: 2,
+		lastPubNs: 1_000_000_000, nowNs: 9_000_000_000, staleNs: stale,
+	}); v != spoutHealthy || why == "" {
+		t.Errorf("contended hold: verdict=%d why=%q, want spoutHealthy with a reason", v, why)
 	}
 }
 

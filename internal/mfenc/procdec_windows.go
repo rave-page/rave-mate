@@ -329,7 +329,8 @@ func (d *ProcDecSession) watchDest() {
 	defer close(d.watchDone)
 	t := time.NewTicker(decWatchEvery)
 	defer t.Stop()
-	var prevFrames, prevAppended uint64
+	var prevFrames, prevAppended, prevMtx uint64
+	held := false // in a contended-hold episode: log its start once, not every tick
 	for {
 		select {
 		case <-d.done:
@@ -349,30 +350,43 @@ func (d *ProcDecSession) watchDest() {
 		d.dstMu.Unlock()
 		frames := atomic.LoadUint64(d.shm.u64(offDecFrames))
 		appended := d.appended.Load()
+		mtx := atomic.LoadUint64(d.shm.u64(offDecMtxTimeo))
 		v, why := decCheck(decProbe{curHandle: cur, newHandle: newH, resolved: ok,
 			decFrames: frames, prevFrames: prevFrames,
 			appended: appended, prevAppended: prevAppended,
+			mtxTimeouts: mtx, prevMtxTimeouts: prevMtx,
 			lastPubNs: atomic.LoadInt64(d.shm.i64(offLastPubNs)), nowNs: childNowNs(),
 			staleNs: int64(decRingRecovery)})
-		prevFrames, prevAppended = frames, appended
-		if v == spoutRecycleNow && d.recycle != nil {
+		prevFrames, prevAppended, prevMtx = frames, appended, mtx
+		switch {
+		case v == spoutRecycleNow && d.recycle != nil:
+			held = false
 			d.recycle(why)
+		case v == spoutHealthy && why != "": // contended-hold: rode it out instead of reopening
+			if !held {
+				held = true
+				Warnf("mfenc: native decode destination %q %s", d.dstName, why)
+			}
+		default:
+			held = false
 		}
 	}
 }
 
 // decProbe is one destination-health sample.
 type decProbe struct {
-	curHandle    uint64
-	newHandle    uint64
-	resolved     bool
-	decFrames    uint64
-	prevFrames   uint64
-	appended     uint64
-	prevAppended uint64
-	lastPubNs    int64
-	nowNs        int64
-	staleNs      int64
+	curHandle       uint64
+	newHandle       uint64
+	resolved        bool
+	decFrames       uint64
+	prevFrames      uint64
+	appended        uint64
+	prevAppended    uint64
+	mtxTimeouts     uint64 // destination-texture acquire timeouts (receiver/DWM contention)
+	prevMtxTimeouts uint64
+	lastPubNs       int64
+	nowNs           int64
+	staleNs         int64
 }
 
 // decCheck is the frozen-destination oracle, pure so it can be asserted without hardware.
@@ -389,6 +403,17 @@ func decCheck(p decProbe) (spoutVerdict, string) {
 	}
 	if p.staleNs > 0 && p.lastPubNs > 0 && p.decFrames == p.prevFrames &&
 		p.appended > p.prevAppended && p.nowNs-p.lastPubNs > p.staleNs {
+		// Publish clock stopped while AUs keep arriving - two causes, only ONE wants a reopen.
+		// mtxTimeouts climbing = the decoder IS producing but publish() cannot acquire the
+		// destination texture: a receiver (Resolume) / DWM holds it under GPU/VRAM pressure. The
+		// pipeline is alive and GPU-resident; a reopen would FREE it and then fail to rebuild on
+		// the saturated card (the 2026-09-11 cascade: reopen "open timeout" x3 -> pinned to the
+		// ffmpeg CPU path). HOLD - publish resumes when the receiver yields the mutex, exactly as a
+		// stable NDI->Spout sender rides out a busy card. No contention = a genuine decoder wedge,
+		// where a reopen is the only recovery: keep recycling.
+		if p.mtxTimeouts > p.prevMtxTimeouts {
+			return spoutHealthy, "destination contended (receiver/DWM holds the texture) - holding the pipeline, not recycling"
+		}
 		return spoutRecycleNow, "AUs arriving but nothing published (frozen destination)"
 	}
 	return spoutHealthy, ""
