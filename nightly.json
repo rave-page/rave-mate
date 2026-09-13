@@ -1,13 +1,13 @@
 {
   "version": "nightly-7ae6905",
-  "build": 315,
+  "build": 316,
   "commit": "7ae6905",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-315-20260912-7ae6905.exe",
-  "sha256": "5d45223fdd88c8fbbb43b30c8ab1d9050cf1b88810545f43e10979564a0c573d",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-315-20260912-7ae6905.exe",
-  "installer_sha256": "0dbcafa314f6c6f6b3420eb44586e436750eb5e89ab473043c62fe1013614e74",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-315-20260912-7ae6905",
-  "linux_sha256": "b314fd8ff05d3564b38db873861ab80c8563eaa3888b3010639916bb08919897",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-316-20260913-7ae6905.exe",
+  "sha256": "34dfaa2eb37f04d8c148eb0b928090b36e5d0a9a58ad15dca1395d7d53ec529c",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-316-20260913-7ae6905.exe",
+  "installer_sha256": "90d01c921c29be4bcde38c1f82a69a888ca3106a952966512d00d522b1a8b6f7",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-316-20260913-7ae6905",
+  "linux_sha256": "a3c5a1b7324e69ec8c448356575c78e06a4fa8449e054aa5821e0781a2ba8e21",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-09-12T09:07:42Z",
+  "released": "2026-09-13T10:01:13Z",
   "notes": "fix(mfenc): hold contended decode destination instead of recycling under VRAM saturation"
 }
