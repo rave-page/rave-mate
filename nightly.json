@@ -1,13 +1,13 @@
 {
-  "version": "nightly-eb43e5f",
-  "build": 319,
-  "commit": "eb43e5f",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-319-20260915-eb43e5f.exe",
-  "sha256": "494952ed342a82df3435c0cce93112d4cdde7231d23deb26140a4cdbdebb86aa",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-319-20260915-eb43e5f.exe",
-  "installer_sha256": "ee4e037cdf67eaa31e1d93849e6913fafb97ae54e4b38e6ff0fe0c10615cf748",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-319-20260915-eb43e5f",
-  "linux_sha256": "aa316f8b05ec76cd5cbd77c1b2ebcdbc2af557bb72837e42642415f169566c49",
+  "version": "nightly-77ab18a",
+  "build": 324,
+  "commit": "77ab18a",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-324-20260915-77ab18a.exe",
+  "sha256": "a6768f0121f994444f5b3f72237be94a34bab72ef6856abdcf3596064ddb5079",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-324-20260915-77ab18a.exe",
+  "installer_sha256": "664dccd2134c269e5e5981f3322fbad3504fcace3aecab30fd9deac5433dbd77",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-324-20260915-77ab18a",
+  "linux_sha256": "76e301deaf2c6f8de0f82ad479f9d963fdf8f6f753efa93ece2d2ff715399268",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-09-15T10:33:33Z",
-  "notes": "feat(mediaroute): immortal Spout sender - never re-create on a source-resolution change"
+  "released": "2026-09-15T11:29:29Z",
+  "notes": "feat(webcam): remember UVC settings per device, restore on open"
 }
