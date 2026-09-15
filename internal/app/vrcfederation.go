@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"rave.page/mate/internal/logbus"
+	"rave.page/mate/internal/peerfed"
 	"rave.page/mate/internal/peerlink"
 	"rave.page/mate/internal/remotectl"
 	"rave.page/mate/internal/vrchat"
@@ -136,65 +137,57 @@ func (t *vrcProxyTransport) RoundTrip(req *http.Request) (*http.Response, error)
 // with no LOCAL session, the first connected peer holding one serves EVERY
 // feature (tabs, worlds, status edits) through a peer-tunneled client. A local
 // login always wins; the serving peer vanishing/unlinking disarms. 30s cadence
-// + an immediate first pass, all status probes bounded at 5s.
+// + an immediate first pass, all status probes bounded at 5s. The arm/disarm
+// state machine is the shared peerfed.Watcher (Twitch + GitHub reuse it).
 func runVrcFederationWatcher(ctx context.Context, log *logbus.Bus, mgr *vrchat.Manager,
 	peers *peerlink.Manager, endpoint func() *remotectl.Endpoint) {
-	armed := ""
-	check := func() {
-		if mgr.LocalState().LoggedIn {
-			if armed != "" {
-				armed = ""
-				mgr.ClearFederated()
+	peerfed.Watcher[remotectl.VrcStatus]{
+		Interval: 30 * time.Second,
+		LocalActive: func() bool {
+			return mgr.LocalState().LoggedIn
+		},
+		Peers: func() []peerfed.Peer {
+			if endpoint() == nil || peers == nil {
+				return nil
 			}
-			return
-		}
-		e := endpoint()
-		if e == nil || peers == nil {
-			return
-		}
-		for _, c := range peers.Connections() {
-			if c.Status != peerlink.StatusConnected {
-				continue
+			return connectedPeers(peers)
+		},
+		Probe: func(pctx context.Context, nodeID string) (remotectl.VrcStatus, bool, error) {
+			e := endpoint()
+			if e == nil {
+				return remotectl.VrcStatus{}, false, nil
 			}
-			cli := remotectl.NewClient(e, c.NodeID)
-			sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			st, err := cli.VrcStatus(sctx)
-			cancel()
-			if err != nil || !st.Linked {
-				if armed == c.NodeID {
-					armed = ""
-					mgr.ClearFederated()
-				}
-				continue
-			}
-			if armed == c.NodeID {
-				return // serving peer still healthy
-			}
-			name := strings.TrimSpace(c.Nickname)
-			if name == "" && len(c.NodeID) >= 8 {
-				name = c.NodeID[:8]
-			}
-			fed := vrchat.NewWithTransport(log, &vrcProxyTransport{endpoint: endpoint, nodeID: c.NodeID})
+			st, err := remotectl.NewClient(e, nodeID).VrcStatus(pctx)
+			return st, st.Linked, err
+		},
+		Arm: func(nodeID, name string, st remotectl.VrcStatus) {
+			fed := vrchat.NewWithTransport(log, &vrcProxyTransport{endpoint: endpoint, nodeID: nodeID})
 			mgr.SetFederated(fed, vrchat.State{UserID: st.UserID, DisplayName: st.DisplayName, Via: name})
-			armed = c.NodeID
 			log.Info("vrchat", "federation armed - session served by peer", map[string]any{"via": name})
-			return
+		},
+		Disarm: func() { mgr.ClearFederated() },
+	}.Run(ctx)
+}
+
+// connectedPeers maps the peerlink connection list to peerfed candidates (connected only),
+// resolving each peer's display name the same way every federation watcher does: nickname,
+// else a short node-id prefix. Shared by the VRChat/Twitch/GitHub watchers.
+func connectedPeers(peers *peerlink.Manager) []peerfed.Peer {
+	var out []peerfed.Peer
+	for _, c := range peers.Connections() {
+		if c.Status != peerlink.StatusConnected {
+			continue
 		}
-		if armed != "" {
-			armed = ""
-			mgr.ClearFederated()
-			log.Info("vrchat", "federation disarmed - serving peer gone", nil)
-		}
+		out = append(out, peerfed.Peer{NodeID: c.NodeID, Name: peerName(c.Nickname, c.NodeID)})
 	}
-	check()
-	tick := time.NewTicker(30 * time.Second)
-	defer tick.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-			check()
-		}
+	return out
+}
+
+// peerName is nickname-or-short-node-id (the "via <name>" label).
+func peerName(nickname, nodeID string) string {
+	name := strings.TrimSpace(nickname)
+	if name == "" && len(nodeID) >= 8 {
+		name = nodeID[:8]
 	}
+	return name
 }
