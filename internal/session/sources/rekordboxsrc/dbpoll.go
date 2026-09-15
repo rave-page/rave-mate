@@ -88,7 +88,12 @@ func (s *Source) queryLatestPlay(path string, gate *onceLog) (latestPlay, bool) 
 		return latestPlay{}, false
 	}
 	defer func() { _ = cleanup() }()
+	return s.latestPlayFromDB(db, gate)
+}
 
+// latestPlayFromDB reads the newest djmdSongHistory play from an open plaintext snapshot
+// (SQL-executing core, separated for tests against a synthetic *sql.DB fixture).
+func (s *Source) latestPlayFromDB(db *sql.DB, gate *onceLog) (latestPlay, bool) {
 	if !tableExists(db, "djmdSongHistory") || !tableExists(db, "djmdContent") {
 		if gate.changed("no-history") {
 			s.log.Warn(logSource, "master.db has no play history tables", nil)
@@ -193,6 +198,14 @@ func optionsDBPath() string {
 	if err != nil {
 		return ""
 	}
+	return optionsDBPathFrom(data)
+}
+
+// optionsDBPathFrom extracts the master.db path from options.json bytes: parses the
+// {"options":[[key,value],…]} array, then returns the first pair value that stat-validates as a
+// master.db file (or a dir containing one). "" on parse failure or no valid path. Only the
+// array shape is recognized (rekordboxAgent's format); other shapes yield "".
+func optionsDBPathFrom(data []byte) string {
 	var nf struct {
 		Options [][]any `json:"options"`
 	}

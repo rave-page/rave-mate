@@ -55,42 +55,52 @@ func (s *Source) Capabilities() []session.Capability {
 // Start runs the listener until ctx is cancelled, emitting a deck Observation per status packet.
 func (s *Source) Start(ctx context.Context, emit func(session.Observation)) error {
 	return prodjlink.Listen(ctx, func(st prodjlink.Status) {
-		if st.Player < 1 {
-			return
-		}
-		fields := map[string]any{session.FieldIsPlaying: st.Playing}
-		if st.EffectiveBPM > 0 {
-			fields[session.FieldBPM] = st.EffectiveBPM
-		}
-
-		s.mu.Lock()
-		prev, seen := s.last[st.Player]
-		loaded := !seen || prev != st.TrackID
-		s.last[st.Player] = st.TrackID
+		// resolve read under lock (SetResolver mutates it off-goroutine); the last map is touched
+		// only by this serial listener callback, so it needs no lock. resolve()+emit() run
+		// unlocked (both may do I/O), matching the original ordering.
+		s.mu.RLock()
 		resolve := s.resolve
-		s.mu.Unlock()
+		s.mu.RUnlock()
+		handleStatus(st, resolve, s.last, emit)
+	})
+}
 
-		if resolve != nil && st.TrackID != 0 && st.Type == prodjlink.TrackRekordbox {
-			if title, artist, key, ok := resolve(st.TrackID); ok {
-				if title != "" {
-					fields[session.FieldTitle] = title
-				}
-				if artist != "" {
-					fields[session.FieldArtist] = artist
-				}
-				if key != "" {
-					fields[session.FieldKey] = key
-				}
+// handleStatus maps one CDJ status packet to a deck Observation and emits it, updating last
+// (player→trackID) for the Loaded boundary. Players < 1 are ignored. resolve (if non-nil) fills
+// title/artist/key for a rekordbox-sourced track; a nil resolver still emits bpm/isPlaying.
+func handleStatus(st prodjlink.Status, resolve Resolver, last map[int]uint32, emit func(session.Observation)) {
+	if st.Player < 1 {
+		return
+	}
+	fields := map[string]any{session.FieldIsPlaying: st.Playing}
+	if st.EffectiveBPM > 0 {
+		fields[session.FieldBPM] = st.EffectiveBPM
+	}
+
+	prev, seen := last[st.Player]
+	loaded := !seen || prev != st.TrackID
+	last[st.Player] = st.TrackID
+
+	if resolve != nil && st.TrackID != 0 && st.Type == prodjlink.TrackRekordbox {
+		if title, artist, key, ok := resolve(st.TrackID); ok {
+			if title != "" {
+				fields[session.FieldTitle] = title
+			}
+			if artist != "" {
+				fields[session.FieldArtist] = artist
+			}
+			if key != "" {
+				fields[session.FieldKey] = key
 			}
 		}
+	}
 
-		emit(session.Observation{
-			Source:     session.SourceProDJLink,
-			Scope:      session.Scope{Kind: session.ScopeDeck, ID: deckID(st.Player)},
-			Fields:     fields,
-			Confidence: confidence,
-			Loaded:     loaded,
-		})
+	emit(session.Observation{
+		Source:     session.SourceProDJLink,
+		Scope:      session.Scope{Kind: session.ScopeDeck, ID: deckID(st.Player)},
+		Fields:     fields,
+		Confidence: confidence,
+		Loaded:     loaded,
 	})
 }
 
