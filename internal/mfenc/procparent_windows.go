@@ -1009,6 +1009,7 @@ type ProcSession struct {
 	zcRecycles int   // reopen attempts spent on a stale/dead source (cap spoutMaxRecycles)
 	zcLastCap  int64 // last observed child lastCapNs (staleness oracle)
 	zcLastMove time.Time
+	zcHeld     bool // in a VRAM-hold episode (recycle refused for lack of headroom): log its start once
 	// recycle is the srcgone/staleness ACTION seam (tests assert the oracle→action wiring
 	// without a live child).
 	recycle    func(reason string)
@@ -1403,7 +1404,23 @@ func (s *ProcSession) recycleSpout(why string) {
 	if s.closed.Load() {
 		return
 	}
+	// VRAM-headroom gate (mirror of recycleDest): a close()+reopen must re-allocate the capture
+	// pipeline (device/VP/encoder MFT/NV12 pool) and, on failure, pins the sender to the HEAVIER
+	// readback path. On a saturated card that cannot succeed, so HOLD the resident pipeline instead;
+	// capture resumes when headroom returns. Fails open (headroom unknown => behave as before).
+	if h := DecHeadroom(); !recycleAllowed(h, DecRebuildFloorMB) {
+		s.zcMu.Lock()
+		first := !s.zcHeld
+		s.zcHeld = true
+		s.zcMu.Unlock()
+		if first {
+			Warnf("mfenc: zero-copy source %q recycle HELD - free VRAM %d MB < rebuild floor %d MB (%s); holding the resident pipeline, not reopening on a full card",
+				s.zcName, h.FreeMB, DecRebuildFloorMB, why)
+		}
+		return
+	}
 	s.zcMu.Lock()
+	s.zcHeld = false
 	if time.Since(s.zcLastMove) < spoutWatchEvery {
 		s.zcMu.Unlock()
 		return // one recycle per tick, no matter how many detectors fired
