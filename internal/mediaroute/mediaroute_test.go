@@ -240,22 +240,37 @@ func TestReceiveSinkDestroyedOnExplicitStop(t *testing.T) {
 	}
 }
 
-func TestReceiveSinkDimsChangeReplaces(t *testing.T) {
-	sf := &sinkFactory{}
+func TestReceiveSinkDimsChangeKeepsImmortalSender(t *testing.T) {
+	sf := &sinkFactory{shared: true}
 	m := keptManager(sf)
 	name := linkPrefix + "OBS"
 	s1, _ := m.openReceiveSink(name, 8, 4)
-	_ = s1.Close() // park at 8x4
-	s2, err := m.openReceiveSink(name, 16, 8)
+	_ = s1.Close()                            // park at 8x4
+	s2, err := m.openReceiveSink(name, 16, 8) // source resolution changed mid-session
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = s2
-	if sf.opens != 2 {
-		t.Fatalf("opens=%d, want 2 (fresh sender for new dims)", sf.opens)
+	// IMMORTAL SENDER: no fresh open, old sender NOT closed - the shared handle must never change or
+	// Resolume is forced to re-register GL/DX interop on a full card (the mid-set crash). The native
+	// decoder's video processor scales the new source into this fixed texture instead.
+	if sf.opens != 1 {
+		t.Fatalf("opens=%d, want 1 (immortal sender reused across a source-res change)", sf.opens)
 	}
-	if sf.sinks[0].closed != 1 {
-		t.Fatalf("old sender not closed on dims change: closed=%d", sf.sinks[0].closed)
+	if sf.sinks[0].closed != 0 {
+		t.Fatalf("immortal sender closed on source-res change: closed=%d", sf.sinks[0].closed)
+	}
+	// keptSink + SharedTexture carry the sender's ORIGINAL pinned geometry and unchanged handle,
+	// never the new source's dims.
+	ks := s2.(*keptSink)
+	if ks.w != 8 || ks.h != 4 {
+		t.Fatalf("keptSink dims=%dx%d, want 8x4 (pinned at first open)", ks.w, ks.h)
+	}
+	hnd, _, gw, gh, _, ok := ks.SharedTexture()
+	if !ok || gw != 8 || gh != 4 {
+		t.Fatalf("shared texture geometry drifted: ok=%v %dx%d", ok, gw, gh)
+	}
+	if hnd != sf.sinks[0].handle {
+		t.Fatalf("shared handle changed: %#x vs %#x", hnd, sf.sinks[0].handle)
 	}
 }
 

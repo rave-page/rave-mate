@@ -504,14 +504,21 @@ func (m *Manager) openReceiveSink(name string, w, h int) (medialink.Sink, error)
 	}
 	m.mu.Unlock()
 	if ok {
-		if p.w == w && p.h == h {
+		// IMMORTAL SENDER: reuse the kept-alive sender REGARDLESS of a source-resolution change, so
+		// its DX11 shared texture + handle never change. Resolume registered its GL/DX interop against
+		// this handle once, early; forcing it to re-register on a saturated card is the mid-set crash.
+		// A source-res change is absorbed downstream - the native decoder's video processor scales the
+		// new source into this fixed texture (in!=out already works), and the CPU/foreign path drops a
+		// mismatched frame (stale picture) instead of relinking. Geometry is pinned at the FIRST open
+		// for the whole session; keptSink carries the sender's OWN dims, not the new source's.
+		if p.w != w || p.h != h {
+			m.log.Info(source, "receive sink reopened at a new source resolution - keeping the immortal Spout sender (decode scales into it; handle unchanged)",
+				map[string]any{"sender": name, "senderW": p.w, "senderH": p.h, "sourceW": w, "sourceH": h})
+		} else {
 			m.log.Info(source, "receive sink reopened - reusing kept-alive Spout sender (shared handle unchanged)",
-				map[string]any{"sender": name, "w": w, "h": h})
-			return &keptSink{m: m, inner: p.inner, name: name, w: w, h: h, blank: p.blank}, nil
+				map[string]any{"sender": name, "w": p.w, "h": p.h})
 		}
-		m.log.Info(source, "receive sink dims changed - replacing kept-alive sender",
-			map[string]any{"sender": name, "oldW": p.w, "oldH": p.h, "w": w, "h": h})
-		_ = p.inner.Close()
+		return &keptSink{m: m, inner: p.inner, name: name, w: p.w, h: p.h, blank: p.blank}, nil
 	}
 	inner, err := m.openSink(name, w, h)
 	if err != nil {
@@ -804,7 +811,11 @@ func (s *spoutSink) SharedTexture() (uint64, uint32, int, int, string, bool) {
 
 func (s *spoutSink) Write(f *medialink.Frame) error {
 	want := s.w * s.h * 4
-	if f.Kind != medialink.KindVideo || len(f.Payload) < want {
+	// EXACT match only: the sender geometry is immortal (pinned at first open), so a frame at any
+	// other size must NOT be published - wrapping it at s.w stride would garble it, and a differently
+	// sized SendImage would relink the sender (new texture => Resolume re-registers interop => crash).
+	// Drop it instead: the picture goes stale on its last good frame, which the composition rides out.
+	if f.Kind != medialink.KindVideo || len(f.Payload) != want {
 		// Undecoded/foreign frame - skip, never fatal. But a *sustained* stream of these means the
 		// Spout sender never materializes (it's created on the first real SendImage), so surface it
 		// once: this is the "route up, frames received, but no Spout source" failure.
