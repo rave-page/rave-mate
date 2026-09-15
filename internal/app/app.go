@@ -83,6 +83,7 @@ import (
 	"rave.page/mate/internal/session/sinks/pngsink"
 	"rave.page/mate/internal/session/sinks/recorder"
 	"rave.page/mate/internal/session/sources/midifbsrc"
+	"rave.page/mate/internal/session/sources/mixxxsrc"
 	"rave.page/mate/internal/session/sources/nmlsrc"
 	"rave.page/mate/internal/session/sources/nowplayingsrc"
 	"rave.page/mate/internal/session/sources/prodjlinksrc"
@@ -432,6 +433,11 @@ func run(parent context.Context, serviceMode bool) error {
 			DBPath: rb.DBPath, DBKey: rb.DBKey, DBPoll: rb.DBPoll, MemoryRead: rb.MemoryRead,
 		})
 	}, func() bool { return cfg.Features.Rekordbox.Enabled })
+	// Mixxx live now-playing: polls mixxxdb.sqlite set-log playlists for the newest played track
+	// (master-only; Mixxx's DB has no per-deck data). In-proc; enable-gate drives lifecycle.
+	agg.AddSourceFn(func() session.Source {
+		return mixxxsrc.New(log, cfg.Features.Mixxx.DBPath)
+	}, func() bool { return cfg.Features.Mixxx.Enabled })
 	// Icecast set-capture receiver: Traktor broadcasts a live set to this local Icecast
 	// source endpoint. Runs in a child process - the TCP listener, source-protocol parsing,
 	// and capture-file writing are isolated; the daemon gets metadata observations, capture

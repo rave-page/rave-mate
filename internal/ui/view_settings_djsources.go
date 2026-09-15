@@ -155,6 +155,38 @@ func (u *UI) rekordboxLiveCard() fyne.CanvasObject {
 	return featureCard("Rekordbox (live now-playing)", "Real-time or recently-played track from rekordbox software.", toggle, st, body)
 }
 
+// mixxxCard configures the Mixxx source: master now-playing from Mixxx's library DB
+// (mixxxdb.sqlite set-log/history poll). Master-only + delayed - honest trade-offs surfaced.
+func (u *UI) mixxxCard() fyne.CanvasObject {
+	f := &u.svc.Cfg.Features.Mixxx
+	dbPath := newEntry()
+	dbPath.SetPlaceHolder("(auto-detect mixxxdb.sqlite)")
+	dbPath.SetText(f.DBPath)
+	dbPath.OnChanged = func(s string) { f.DBPath = s; u.saveCfg() }
+
+	st := u.newStatus(func(s *cardStatus) {
+		if !f.Enabled {
+			s.set(colMuted, "off")
+			return
+		}
+		src, ok := u.sourceInfo(session.SourceMixxx)
+		switch {
+		case ok && src.Receiving:
+			s.set(colBrandMint, "receiving")
+		case ok && src.Running:
+			s.set(colBrandMint, "polling")
+		default:
+			s.set(colBrandAmber, "not running")
+		}
+	})
+	toggle := u.sessionToggle(&f.Enabled)
+	body := container.NewVBox(
+		container.NewBorder(nil, nil, widget.NewLabel("mixxxdb.sqlite"), nil, filePickerRow(dbPath, ".sqlite")),
+		mutedLabel("Reads Mixxx's library DB (mixxxdb.sqlite). Master now-playing only — Mixxx exposes no per-deck data. Delayed (DB poll). Blank = auto-detect. Toggle off/on to apply a path change."),
+	)
+	return featureCard("Mixxx", "Master now-playing from Mixxx's library DB (mixxxdb.sqlite).", toggle, st, body)
+}
+
 // rekordboxMidiCard generates an importable rekordbox MIDI mapping CSV matching the same CC
 // layout the app's own MIDI source decodes - so one controller mapping drives both rekordbox's
 // decks and rave-mate. No silent install: the user imports it once via rekordbox MIDI LEARN.

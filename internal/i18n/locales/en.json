@@ -2956,6 +2956,10 @@
         "cacheUsage": "Cache usage",
         "cacheUsageVal": "{size} · {count} file(s)"
       },
+      "mixxx": {
+        "folder": "mixxxdb.sqlite path",
+        "note": "Reads Mixxx's library DB (mixxxdb.sqlite). Master now-playing only — Mixxx exposes no per-deck data. Delayed (DB poll). Blank = auto-detect."
+      },
       "recorder": {
         "confirmAfter": "Confirm after (seconds)",
         "note": "A track must play this long before it's logged (filters quick previews). Auto-records across a live stream."
@@ -3348,6 +3352,10 @@
       "recorder": {
         "desc": "Capture an automatic tracklist with per-track timestamps (Publish tab).",
         "title": "Session recorder"
+      },
+      "mixxx": {
+        "desc": "Master now-playing from Mixxx's library DB (mixxxdb.sqlite).",
+        "title": "Mixxx"
       },
       "rekordbox": {
         "desc": "Real-time or recently-played track from rekordbox software.",
@@ -3838,6 +3846,7 @@
       "mediaeditor": "Media / poster editor",
       "medialink": "Share Spout senders (media link)",
       "midi": "MIDI input",
+      "mixxx": "Mixxx",
       "nml": "Traktor collection/history (NML)",
       "notifications": "Desktop notifications",
       "obs": "OBS control",

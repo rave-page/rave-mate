@@ -46,6 +46,7 @@ func (u *UI) toggleRegistry() []setToggle {
 		{id: "serato", label: i18n.T("settings.toggle.serato"), get: func() bool { return f.Serato.Enabled }, set: func(b bool) { f.Serato.Enabled = b }},
 		{id: "virtualdj", label: i18n.T("settings.toggle.virtualdj"), get: func() bool { return f.VirtualDJ.Enabled }, set: func(b bool) { f.VirtualDJ.Enabled = b }},
 		{id: "rekordbox", label: i18n.T("settings.toggle.rekordbox"), get: func() bool { return f.Rekordbox.Enabled }, set: func(b bool) { f.Rekordbox.Enabled = b }},
+		{id: "mixxx", label: i18n.T("settings.toggle.mixxx"), get: func() bool { return f.Mixxx.Enabled }, set: func(b bool) { f.Mixxx.Enabled = b }},
 		// Recording
 		{id: "recorder", label: i18n.T("settings.toggle.recorder"), get: func() bool { return f.Recorder.Enabled }, set: func(b bool) { f.Recorder.Enabled = b }},
 		{id: "setcapture", label: i18n.T("settings.toggle.setcapture"), module: "setcapture", get: func() bool { return f.SetCapture.Enabled }, set: func(b bool) { f.SetCapture.Enabled = b }},
@@ -139,7 +140,7 @@ func settingsSections() []setSection {
 	sd := func(id string) string { return i18n.T("settings.section." + id + ".desc") }
 	return []setSection{
 		{"account", st("account"), sd("account"), []string{"uilang", "account", "api"}},
-		{"djsources", st("djsources"), sd("djsources"), []string{"traktor", "traktorqml", "traktormap", "midi", "nml", "prodjlink", "serato", "virtualdj", "rekordbox", "rekordboxkey", "rekordboxmidi"}},
+		{"djsources", st("djsources"), sd("djsources"), []string{"traktor", "traktorqml", "traktormap", "midi", "nml", "prodjlink", "serato", "virtualdj", "rekordbox", "rekordboxkey", "rekordboxmidi", "mixxx"}},
 		{"recording", st("recording"), sd("recording"), []string{"recorder", "setcapture", "audiorecord", "obs", "obssync", "fingerprint"}},
 		{"streaming", st("streaming"), sd("streaming"), []string{"streambridge", "studio", "peers", "accountbridge", "webcam", "medialink", "timecode", "ablelink"}},
 		{"libmedia", st("libmedia"), sd("libmedia"), []string{"library", "mediaeditor", "transcode", "gridfix", "gridfixmodel"}},
@@ -694,6 +695,11 @@ func (u *UI) cardBlocks(id string) (string, string, []setBlock) {
 		return i18n.T("settings.card.rekordbox.title"), i18n.T("settings.card.rekordbox.desc"), []setBlock{
 			sbToggle(i18n.T("settings.body.rekordbox.dbPoll"), "set:rb-dbpoll", rf.DBPoll),
 			sbToggle(i18n.T("settings.body.rekordbox.memRead"), "set:rb-memread", rf.MemoryRead)}
+	case "mixxx":
+		mf := &f.Mixxx
+		return i18n.T("settings.card.mixxx.title"), i18n.T("settings.card.mixxx.desc"), []setBlock{
+			sbPathRowPH(i18n.T("settings.body.mixxx.folder"), "set:mixxx-dbpath", mf.DBPath, "file", ""),
+			sbNote(i18n.T("settings.body.mixxx.note"))}
 	case "rekordboxkey":
 		return i18n.T("settings.card.rekordboxkey.title"), i18n.T("settings.card.rekordboxkey.desc"), []setBlock{
 			sbForm("settings-rbkey-save",
@@ -1458,6 +1464,7 @@ func (u *UI) settingsStatus() map[string]stv {
 	set("serato", srcStat(f.Serato.Enabled, "serato"))
 	set("virtualdj", srcStat(f.VirtualDJ.Enabled, "virtualdj"))
 	set("rekordbox", srcStat(f.Rekordbox.Enabled, "rekordbox"))
+	set("mixxx", srcStat(f.Mixxx.Enabled, "mixxx"))
 	set("rekordboxkey", stOff(tr("settings.status.rekordboxkey.saveTest")))
 	set("rekordboxmidi", stOff(tr("settings.status.rekordboxmidi.generateImport")))
 
@@ -1962,6 +1969,8 @@ func (u *UI) applySet(id, val string) {
 		f.Rekordbox.DBPoll = b
 	case "rb-memread":
 		f.Rekordbox.MemoryRead = b
+	case "mixxx-dbpath":
+		f.Mixxx.DBPath = v
 	// Recorder / SetCapture / AudioRecord
 	case "rec-confirm":
 		toInt(&f.Recorder.ConfirmSeconds, 1, 100000)

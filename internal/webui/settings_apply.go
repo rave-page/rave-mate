@@ -75,6 +75,8 @@ func settingSource(id string) string {
 		return session.SourceVirtualDJ
 	case "rb-dbpoll", "rb-memread":
 		return session.SourceRekordbox
+	case "mixxx-dbpath":
+		return session.SourceMixxx
 	}
 	return ""
 }
@@ -188,6 +190,7 @@ var sourceToggleKey = map[string]string{
 	session.SourceSeratoLive:   "serato",
 	session.SourceVirtualDJ:    "virtualdj",
 	session.SourceRekordbox:    "rekordbox",
+	session.SourceMixxx:        "mixxx",
 }
 
 // scheduleSourceRestart debounces a rebuild-restart of a session source (nml/serato/

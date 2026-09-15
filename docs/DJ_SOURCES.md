@@ -46,6 +46,7 @@ loadedAt`. Channel: `fader, eqHigh, eqMid, eqLow, filter, cue`. Master: `bpm, ph
 | VirtualDJ tracklist (`virtualdj.history`) | **live (delayed)** | master `title, artist` | History tracklist file poll. Title/artist only, laggy fallback. |
 | Rekordbox DB (`rekordbox.db`) | **live (delayed)** | master `title, artist, bpm, key` | master.db `djmdSongHistory` poll. Reuses the SQLCipher key; **~60s lag** (rekordbox marks "played" ~1min in). |
 | Rekordbox memory (`rekordbox.mem`) | **live (Windows; offset-seeded)** | deck `title, artist, bpm, isPlaying` | Reads the rekordbox process memory for real-time data. **Offsets are operator-seeded placeholders** → self-disables with a clear log until seeded per rekordbox version (cf. grufkork/rkbx_link). |
+| Mixxx (`mixxx`) | **live (delayed)** | master `title, artist, album, genre, bpm, key` | `mixxxdb.sqlite` set-log poll; ~3s; **master-only, no per-deck** (Mixxx's DB exposes no deck state). Seeds the startup track (never re-asserts a past session as fresh). |
 | Pro DJ Link (`prodjlink`) | **live** | deck `bpm, isPlaying`; +`title, artist, key` via resolver | Pioneer CDJ/XDJ UDP broadcasts (50002). Status carries only a rekordbox track id → resolved to text from master.db. Needs hardware on the LAN. |
 | Icecast (`icecast`) | **live** | master `title, artist` | Traktor broadcast → local listener; master-only, ~10s delay, hijacks broadcast. |
 | macOS Now Playing (`nowplaying`) | _planned_ | master `title, artist` | macOS MediaRemote; master-only. |
@@ -54,7 +55,7 @@ loadedAt`. Channel: `fader, eqHigh, eqMid, eqLow, filter, cue`. Master: `bpm, ph
 "Planned" sources are registered (disabled) so the Session tab advertises what each would
 add - implementing one is a drop-in (write the `Source`, flip its gate in `app.go`).
 
-## Cross-DJ-software sources (Serato / VirtualDJ / Rekordbox)
+## Cross-DJ-software sources (Serato / VirtualDJ / Rekordbox / Mixxx)
 
 Beyond Traktor, rave-mate reads now-playing + collections from the other major DJ apps. All
 off by default (opt-in per source card in Settings → DJ sources); collection read is also
@@ -76,6 +77,13 @@ differently, so the cards surface the **trade-offs** plainly:
   now-playing adds **db-poll** (safe, ~60s lag) and **memory-read** (real-time, Windows-only,
   offsets must be seeded per version). The **Pro DJ Link** source covers networked CDJ/XDJ
   hardware, with track text resolved from master.db. `…/sources/rekordboxsrc`.
+- **Mixxx** - fully local, read-only. Live now-playing polls `mixxxdb.sqlite`'s set-log/history
+  playlists (Auto-DJ `hidden=1` / set-log `hidden=2`) for the newest played track, enriched from
+  `library` (+ `track_locations` for the path). **Master-only** - Mixxx's DB carries no per-deck
+  state, so per-deck is honestly not offered. Delayed (~3s DB poll). Read-only + WAL-live-lock
+  tolerant (copies the db + sidecars on a busy DB). Seeds the startup track without emitting so a
+  past session isn't announced as fresh. `internal/mixxx`, `…/sources/mixxxsrc` (set-log query
+  technique from erikrichardlarson/unbox).
 - **MIDI setup** - `internal/rekordboxmap` generates an importable rekordbox MIDI map on the
   **same CC layout** as our `midi.custom` map, so one controller mapping drives both rekordbox
   and rave-mate (Settings → "Rekordbox MIDI mapping"; user imports once - no silent install).

@@ -101,7 +101,10 @@ const (
 	// v35 removed Twitch.AutoConnect (dead - never read anywhere; the twitch feature now runs
 	// as an always-listening child that connects whenever enabled + signed in, so chat/alerts
 	// are captured with no UI open). Old configs with the key load fine (unknown-field ignore).
-	configVersion = 35
+	// v36 added the Mixxx live now-playing source (Mixxx: enabled + optional dbPath): polls
+	// mixxxdb.sqlite set-log/history playlists for the newest played track (master-only; Mixxx's
+	// DB has no per-deck data). Additive, off by default - old configs load unchanged.
+	configVersion = 36
 
 	// DefaultMIDIChannels is the out-of-box MIDI-mixer channel/deck count (decks A..D).
 	DefaultMIDIChannels = 4
@@ -185,6 +188,7 @@ type Features struct {
 	Serato         SeratoFeature     `json:"serato"`         // Serato collection + live now-playing (History sessions)
 	VirtualDJ      VirtualDJFeature  `json:"virtualDj"`      // VirtualDJ collection + live now-playing (NetCtl/OS2L/tracklist)
 	Rekordbox      RekordboxFeature  `json:"rekordbox"`      // Rekordbox live now-playing (db-poll + memory-read)
+	Mixxx          MixxxFeature      `json:"mixxx"`          // Mixxx live now-playing (mixxxdb.sqlite set-log poll; master-only)
 	Recorder       RecorderFeature   `json:"recorder"`       // confirmed-play tracklist recorder sink
 	NowPlayingFile FileSinkFeature   `json:"nowPlayingFile"` // now_playing.{json,txt} for OBS
 	OverlayWeb     OverlayWebFeature `json:"overlayWeb"`     // live multi-deck browser overlay (OBS Browser source)
@@ -1543,6 +1547,14 @@ type RekordboxFeature struct {
 	MemoryRead bool   `json:"memoryRead"` // read process memory (real-time, fragile, Windows-only)
 }
 
+// MixxxFeature configures live now-playing from Mixxx. It polls Mixxx's library DB
+// (mixxxdb.sqlite) set-log/history playlists for the newest played track - master now-playing
+// only; Mixxx's DB exposes no per-deck state. Delayed (a ~3s DB poll). Fully local, read-only.
+type MixxxFeature struct {
+	Enabled bool   `json:"enabled"`
+	DBPath  string `json:"dbPath"` // "" = auto-detect mixxxdb.sqlite
+}
+
 // MIDIFeature configures the MIDI-in source. Port names are matched as substrings against
 // the OS input-port list (e.g. a loopMIDI virtual port). Empty = that decoder is off.
 type MIDIFeature struct {
@@ -2665,6 +2677,7 @@ func Default() Config {
 			Serato:         SeratoFeature{Enabled: false, NowPlaying: true},                 // opt-in; auto-detect _Serato_
 			VirtualDJ:      VirtualDJFeature{Enabled: false, NetCtl: true, Tracklist: true}, // opt-in; auto-detect db
 			Rekordbox:      RekordboxFeature{Enabled: false, DBPoll: true},                  // opt-in; live now-playing
+			Mixxx:          MixxxFeature{Enabled: false},                                    // opt-in; master-only, mixxxdb.sqlite poll
 			Recorder:       RecorderFeature{Enabled: true, ConfirmSeconds: 30},
 			NowPlayingFile: FileSinkFeature{Enabled: false},   // opt-in; for OBS
 			OverlayWeb:     OverlayWebFeature{Enabled: false}, // opt-in; browser overlay for OBS

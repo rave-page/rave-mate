@@ -142,7 +142,8 @@ func (u *UI) buildSettings() fyne.CanvasObject {
 		u.accountCard(), u.apiCard(u.svc.Cfg.APIBaseURL))
 	section("DJ sources", "Live deck/mixer data - every enabled source fuses on the Live tab (Decks card). Controller mappings (Traktor/Rekordbox) live here too.",
 		u.traktorCard(), u.traktorQmlCard(), u.traktorMappingCard(), u.midiCard(), u.nmlCard(), u.proDjLinkCard(),
-		u.seratoCard(), u.virtualdjCard(), u.rekordboxLiveCard(), u.rekordboxKeyCard(), u.rekordboxMidiCard())
+		u.seratoCard(), u.virtualdjCard(), u.rekordboxLiveCard(), u.rekordboxKeyCard(), u.rekordboxMidiCard(),
+		u.mixxxCard())
 	section("Recording", "Tracklists, set capture, OBS recording + fingerprinting (Publish tab).",
 		u.recorderCard(), u.setCaptureCard(), u.audioRecordCard(), u.obsCard(), u.obsSyncCard(), u.fingerprintCard())
 	section("Streaming & remote", "Publish live sets; let the web app or paired peers drive this box. House timecode for external gear.",
