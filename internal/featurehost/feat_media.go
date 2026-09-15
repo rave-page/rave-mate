@@ -116,6 +116,12 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 		Log: rt.Log, Router: f.router,
 		Cfg:      liveCfg,
 		SameHost: nil, // the daemon proxy applies the same-host guard (peerMgr is daemon-side)
+		Headroom: func() gpumem.Headroom {
+			if !liveCfg().VramGovernorEnabled() {
+				return gpumem.Headroom{}
+			}
+			return gpumem.ReadHeadroom(gpuSampler)
+		},
 	})
 
 	f.cam = webcam.New(rt.Log, f.bus, in.Self, in.Label, func() config.WebcamFeature {

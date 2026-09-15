@@ -827,6 +827,12 @@ func run(parent context.Context, serviceMode bool) error {
 		Log: log, Router: mediaRouter,
 		Cfg:      func() config.MediaLinkFeature { return cfg.Features.MediaLink },
 		SameHost: func(peer string) bool { return peerIsLocalhost(peerMgr, peer) },
+		Headroom: func() gpumem.Headroom {
+			if !mediaLinkCfg().VramGovernorEnabled() {
+				return gpumem.Headroom{}
+			}
+			return gpumem.ReadHeadroom(gpuGovSampler)
+		},
 	})
 
 	// medialink P3: timecode plane. Elects one TC master across paired instances (media.tc

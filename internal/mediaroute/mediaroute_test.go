@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/gpumem"
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/medialink"
 )
@@ -272,6 +273,69 @@ func TestReceiveSinkDimsChangeKeepsImmortalSender(t *testing.T) {
 	if hnd != sf.sinks[0].handle {
 		t.Fatalf("shared handle changed: %#x vs %#x", hnd, sf.sinks[0].handle)
 	}
+}
+
+func TestSenderCreateGatedUnderVRAMPressure(t *testing.T) {
+	sf := &sinkFactory{shared: true}
+	m := New(Options{
+		Log: logbus.New(16), Router: newFakeRouter(),
+		Cfg:      func() config.MediaLinkFeature { return config.MediaLinkFeature{} }, // governor default ON
+		OpenSink: sf.open,
+		Headroom: func() gpumem.Headroom { return gpumem.Headroom{Present: true, FreeMB: 100, BudgetMB: 12000} },
+	})
+	if _, err := m.openReceiveSink(linkPrefix+"OBS", 8, 4); err == nil {
+		t.Fatal("fresh sender must be refused under VRAM pressure")
+	}
+	if sf.opens != 0 {
+		t.Fatalf("opens=%d, want 0 (no new sender/interop created on a full card)", sf.opens)
+	}
+}
+
+func TestSenderCreateGateFailsOpen(t *testing.T) {
+	sf := &sinkFactory{shared: true}
+	off := false
+	// governor explicitly disabled => never gated even at 0 free
+	m := New(Options{
+		Log: logbus.New(16), Router: newFakeRouter(),
+		Cfg:      func() config.MediaLinkFeature { return config.MediaLinkFeature{VramGovernor: &off} },
+		OpenSink: sf.open,
+		Headroom: func() gpumem.Headroom { return gpumem.Headroom{Present: true, FreeMB: 0} },
+	})
+	if _, err := m.openReceiveSink(linkPrefix+"X", 8, 4); err != nil {
+		t.Fatalf("governor disabled must not gate: %v", err)
+	}
+	// nil Headroom seam => fail open
+	m2 := New(Options{Log: logbus.New(16), Router: newFakeRouter(),
+		Cfg: func() config.MediaLinkFeature { return config.MediaLinkFeature{} }, OpenSink: sf.open})
+	if _, err := m2.openReceiveSink(linkPrefix+"Y", 8, 4); err != nil {
+		t.Fatalf("nil headroom seam must fail open: %v", err)
+	}
+}
+
+func TestParkedReuseNotGatedUnderPressure(t *testing.T) {
+	sf := &sinkFactory{shared: true}
+	free := uint64(5000)
+	m := New(Options{
+		Log: logbus.New(16), Router: newFakeRouter(),
+		Cfg:      func() config.MediaLinkFeature { return config.MediaLinkFeature{} },
+		OpenSink: sf.open,
+		Headroom: func() gpumem.Headroom { return gpumem.Headroom{Present: true, FreeMB: free, BudgetMB: 12000} },
+	})
+	name := linkPrefix + "OBS"
+	s1, err := m.openReceiveSink(name, 8, 4) // headroom high => created
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s1.Close() // park
+	free = 100     // now under pressure
+	s2, err := m.openReceiveSink(name, 8, 4)
+	if err != nil {
+		t.Fatalf("parked reuse must not be gated under pressure: %v", err)
+	}
+	if sf.opens != 1 {
+		t.Fatalf("opens=%d, want 1 (reused the immortal parked sender, no new interop)", sf.opens)
+	}
+	_ = s2
 }
 
 func TestReceiveSinkTTLReaped(t *testing.T) {

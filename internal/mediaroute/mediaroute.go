@@ -23,6 +23,7 @@ import (
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/debuglog"
 	"rave.page/mate/internal/framedebug"
+	"rave.page/mate/internal/gpumem"
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/testcard"
@@ -61,6 +62,9 @@ type Options struct {
 	Router   Router
 	Cfg      func() config.MediaLinkFeature
 	SameHost func(peer string) bool // §3 same-PC guard; nil = no guard
+	// Headroom reports primary-adapter VRAM headroom for the sender-creation gate (governor). nil =
+	// no gating (fail open). Same wiring as the mfenc.DecHeadroom seam.
+	Headroom func() gpumem.Headroom
 
 	// Test seams (default: videoshare Spout backend).
 	ListSenders func() []string
@@ -97,6 +101,7 @@ type Manager struct {
 	router   Router
 	cfg      func() config.MediaLinkFeature
 	sameHost func(string) bool
+	headroom func() gpumem.Headroom
 
 	listSenders  func() []string
 	senderSize   func(string) (int, int, bool)
@@ -128,7 +133,7 @@ type Manager struct {
 // New builds the manager (inert until Start).
 func New(o Options) *Manager {
 	m := &Manager{
-		log: o.Log, router: o.Router, cfg: o.Cfg, sameHost: o.SameHost,
+		log: o.Log, router: o.Router, cfg: o.Cfg, sameHost: o.SameHost, headroom: o.Headroom,
 		listSenders: o.ListSenders, senderSize: o.SenderSize, senderShare: o.SenderShare,
 		grabFrame: o.GrabFrame, newFrameSnd: o.NewFrameSender,
 		newSharedSnd: o.NewSharedSender, openSource: o.OpenSource, openSink: o.OpenSink,
@@ -520,11 +525,39 @@ func (m *Manager) openReceiveSink(name string, w, h int) (medialink.Sink, error)
 		}
 		return &keptSink{m: m, inner: p.inner, name: name, w: p.w, h: p.h, blank: p.blank}, nil
 	}
+	// Governor gate: a NEW sender registers a NEW GL/DX interop (Resolume opens the shared texture).
+	// On a saturated card that registration FAILS and can wedge Resolume. Under low free VRAM refuse
+	// the new sender - the source does not appear (missing beats a crash) and the route retries when
+	// headroom returns. Existing routes (the parked-reuse path above) are never gated.
+	if h, floor, blocked := m.senderCreateGate(); blocked {
+		m.log.Warn(source, "receive sink NOT opened - free VRAM below floor; refusing a new Spout sender (a fresh GL/DX interop registration would fail on a full card and can crash Resolume). Source appears when VRAM recovers.",
+			map[string]any{"sender": name, "freeMB": h.FreeMB, "floorMB": floor})
+		return nil, fmt.Errorf("mediaroute: refusing new sender %q under VRAM pressure (free %d MB < floor %d MB)", name, h.FreeMB, floor)
+	}
 	inner, err := m.openSink(name, w, h)
 	if err != nil {
 		return nil, err
 	}
 	return &keptSink{m: m, inner: inner, name: name, w: w, h: h}, nil
+}
+
+// senderCreateFloorMB is the free-VRAM floor below which a NEW sender (a fresh interop registration)
+// is refused; matches the decode rebuild floor - a sender + its shared texture needs comparable
+// headroom to come up.
+const senderCreateFloorMB = 768
+
+// senderCreateGate reports whether a NEW sender creation must be refused for lack of VRAM. Fails
+// open: no headroom seam, governor disabled, or headroom unknown => never blocks.
+func (m *Manager) senderCreateGate() (gpumem.Headroom, uint64, bool) {
+	if m.headroom == nil || m.cfg == nil || !m.cfg().VramGovernorEnabled() {
+		return gpumem.Headroom{}, 0, false
+	}
+	floor := uint64(senderCreateFloorMB)
+	if r := m.cfg().ResolvedVramReserveMB(); r > 0 {
+		floor = uint64(r)
+	}
+	h := m.headroom()
+	return h, floor, h.Present && h.FreeMB < floor
 }
 
 // closeKept is keptSink.Close: destroy on an explicit stop, else publish ONE transparent frame and
