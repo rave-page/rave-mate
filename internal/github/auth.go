@@ -60,6 +60,12 @@ type Auth struct {
 
 	mu  sync.Mutex
 	tok Token
+	// github federation: when THIS instance has no local link but a paired instance does,
+	// fedLogin/fedVia make SignedIn()/Login() answer as if linked (World Sync lights up). The
+	// TOKEN never federates - Token() still errors while federated-only, so any local-gist
+	// write is impossible; federated publishing goes through the peerGistStore seam instead.
+	fedLogin string
+	fedVia   string
 }
 
 // NewAuth builds an auth client; clientID resolves the (public) OAuth app id.
@@ -92,18 +98,63 @@ func (a *Auth) Load() bool {
 	return true
 }
 
-// SignedIn reports whether a token is held.
+// SignedIn reports a usable GitHub link from any consumer's view: a LOCAL token OR an armed
+// federation (so World Sync lights up like a local link). Auth flows use LocalSignedIn.
 func (a *Auth) SignedIn() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.tok.valid() || a.fedLogin != ""
+}
+
+// LocalSignedIn reports ONLY a locally-held token (auth flows + the federation watcher; a local
+// link always wins over federation).
+func (a *Auth) LocalSignedIn() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.tok.valid()
 }
 
-// Login returns the linked GitHub username ("" when signed out).
+// Login returns the linked GitHub username. Without a local token an armed federation answers
+// with the serving peer's login (the gist raw-URL owner segment - the gists live on that peer).
 func (a *Auth) Login() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if !a.tok.valid() && a.fedLogin != "" {
+		return a.fedLogin
+	}
 	return a.tok.Login
+}
+
+// Via names the serving peer while federated ("" = local link or none).
+func (a *Auth) Via() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.tok.valid() && a.fedLogin != "" {
+		return a.fedVia
+	}
+	return ""
+}
+
+// Federated reports whether an armed federation is serving this box (no local token).
+func (a *Auth) Federated() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return !a.tok.valid() && a.fedLogin != ""
+}
+
+// SetFederated arms federation with the serving peer's login + name. No token is passed - the
+// token never crosses the link.
+func (a *Auth) SetFederated(login, via string) {
+	a.mu.Lock()
+	a.fedLogin, a.fedVia = strings.TrimSpace(login), strings.TrimSpace(via)
+	a.mu.Unlock()
+}
+
+// ClearFederated drops the federation (serving peer gone/unlinked, or local link won).
+func (a *Auth) ClearFederated() {
+	a.mu.Lock()
+	a.fedLogin, a.fedVia = "", ""
+	a.mu.Unlock()
 }
 
 // Logout clears the in-memory + on-disk token.
@@ -116,7 +167,9 @@ func (a *Auth) Logout() {
 	}
 }
 
-// Token returns the access token ("" error when signed out).
+// Token returns the LOCAL access token, or an error when there is no local token. Federation
+// never populates it, so a federated-only instance always errors here - every federated write
+// must go through the peerGistStore seam, never a local gist call.
 func (a *Auth) Token() (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

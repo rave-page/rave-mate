@@ -932,6 +932,9 @@ func run(parent context.Context, serviceMode bool) error {
 	// late-bound below (nil endpoint = "peer control unavailable" until wired).
 	var remoteCtlRef *remotectl.Endpoint
 	vrcFed := &peerVrcMembers{endpoint: func() *remotectl.Endpoint { return remoteCtlRef }, peers: peerMgr}
+	// github federation: gist publishing served through a paired peer's link when this instance
+	// is unlinked (endpoint + serving node late-bound; nil until remotectl + the watcher wire below).
+	ghPeerGists := &peerGistStore{endpoint: func() *remotectl.Endpoint { return remoteCtlRef }}
 	worldSync := vrcperm.New(vrcperm.Deps{
 		Log:  log,
 		Cfg:  func() *config.WorldSyncFeature { return &cfg.Features.WorldSync },
@@ -945,10 +948,15 @@ func run(parent context.Context, serviceMode bool) error {
 			cfg:   func() *config.WorldSyncFeature { return &cfg.Features.WorldSync },
 		},
 		Gists: func() vrcperm.GistStore {
-			if !ghAuth.SignedIn() {
-				return nil
+			// local link writes with its own token; else a peer's link serves the write
+			// (github federation) - the token never crosses. Nil = neither, so publishing waits.
+			if ghAuth.LocalSignedIn() {
+				return ghGists
 			}
-			return ghGists
+			if ghAuth.Federated() {
+				return ghPeerGists
+			}
+			return nil
 		},
 		Owner: ghAuth.Login,
 		Members: func() vrcperm.MemberSource {
@@ -1339,6 +1347,13 @@ func run(parent context.Context, serviceMode bool) error {
 	remotectl.RegisterTwitch(remoteCtl, twitchW)
 	debuglog.Go(log, "twitch-federation", func() {
 		runTwitchFederationWatcher(ctx, log, twitchW, bus, peerMgr, func() *remotectl.Endpoint { return remoteCtl })
+	})
+	// github (World Sync) federation: serve THIS instance's gist link to paired peers (the token
+	// never crosses - only gist ops do, and no auth verb is exposed), and ARM the consuming side:
+	// with no local link, a peer holding one publishes world feeds through its account.
+	remotectl.RegisterGitHub(remoteCtl, ghServer{Auth: ghAuth, Gists: ghGists})
+	debuglog.Go(log, "github-federation", func() {
+		runGitHubFederationWatcher(ctx, log, ghAuth, ghPeerGists, peerMgr, func() *remotectl.Endpoint { return remoteCtl })
 	})
 	remotectl.RegisterLibrary(remoteCtl, lib)
 	// Remote cue/beatgrid/drop editing: a paired controller pulls a track's audio + edits

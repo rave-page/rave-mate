@@ -1117,7 +1117,12 @@ func (u *UI) worldSyncBlocks() []setBlock {
 	line := i18n.T("settings.body.worldsync.linkLine")
 	row := sbBtnRow(nbtn(i18n.T("settings.body.worldsync.linkDeviceCode"), "primary", "settings-gh-device", ""),
 		nbtn(i18n.T("settings.body.worldsync.pasteToken"), "outline", "settings-gh-pat", ""))
-	if gh.SignedIn() {
+	switch {
+	case gh.Federated():
+		// served by a paired instance: hint + the local link controls stay (a LOCAL link always
+		// overrides federation, holding the token - and the gists - on this instance).
+		line = i18n.T("settings.body.worldsync.linkedViaPeer", i18n.A{"name": gh.Login(), "peer": gh.Via()})
+	case gh.LocalSignedIn():
 		line = i18n.T("settings.body.worldsync.linkedAs", i18n.A{"name": gh.Login()})
 		row = sbBtnRow(nbtn(i18n.T("settings.body.common.unlink"), "destructive", "settings-gh-unlink", ""))
 	}
