@@ -296,6 +296,7 @@ pub const Coll = struct {
     empty: []const u8 = "",
     isEmpty: bool = false,
     more: []const u8 = "",
+    moreBtn: c.Btn = .{}, // "load more" paging control; empty until total > shown
     batch: k.Batch = .{},
 };
 
@@ -368,8 +369,9 @@ pub fn renderColl(h: *Html, st: Coll) !void {
     try h.raw("</div>");
     if (st.isEmpty) {
         try c.emptyState(h, st.empty);
-    } else if (st.more.len != 0) {
-        try k.pageSub(h, st.more);
+    } else {
+        if (st.more.len != 0) try k.pageSub(h, st.more);
+        if (st.moreBtn.label.len != 0) try c.btnOf(h, st.moreBtn);
     }
     // selection bar: playlist add + verified-grid marking; in cue-edit mode the checked
     // rows are the mass-apply set for the assigned patterns

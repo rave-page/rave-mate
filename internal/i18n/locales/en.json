@@ -1157,6 +1157,7 @@
       "importSeratoAuto": "Serato (auto-detect)",
       "playlist": "Playlist"
     },
+    "loadMore": "Load more (+{remaining} of {total})",
     "meta": {
       "album": "Album",
       "artist": "Artist",

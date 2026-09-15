@@ -425,11 +425,19 @@ func libFixtures() map[string]libState {
 	uniDetail.Meta = []uiKV{newKV("Путь", "C:\\Музыка\\трек.flac"), newKV("キー", "5A")}
 	uni.Body.Detail = uniDetail
 
+	// collection paging: total exceeds the shown cap -> count text + "load more" button
+	collMore := populated
+	collMoreColl := coll
+	collMoreColl.More = "Showing first 300 of 1200"
+	collMoreColl.MoreBtn = uiBtn{Label: "Load more (+900 of 1200)", Variant: "outline", Act: "lib-collmore"}
+	collMore.Body.Coll = collMoreColl
+
 	return map[string]libState{
 		"empty":       base(emptyBrowse),
 		"unavailable": unavailable,
 		"loading":     loading,
 		"populated":   populated,
+		"collMore":    collMore,
 		"cueEdit":     cueEdit,
 		"results":     results,
 		"tagfix":      tagfix,

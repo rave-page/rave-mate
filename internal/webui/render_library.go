@@ -70,6 +70,7 @@ type libSt struct {
 	kindFilter, sortBy, nameFilter, view string
 	collSearch, collSort                 string
 	collDesc                             bool
+	collShowN                            int // collection "load more" paging cap; 0 = default (libMaxRows)
 	collGenre, collLabel, keySel         map[string]bool
 	collSel                              map[string]bool      // add-to-playlist multi-select
 	collAnchor, batchAnchor              string               // last plain-clicked row (Shift-range anchor)
@@ -676,8 +677,13 @@ func libCollHTML(st libCollSt) string {
 	b.WriteString(`</div>`)
 	if st.IsEmpty {
 		b.WriteString(emptyState(st.Empty))
-	} else if st.More != "" {
-		b.WriteString(`<p class=page-sub>` + html.EscapeString(st.More) + `</p>`)
+	} else {
+		if st.More != "" {
+			b.WriteString(`<p class=page-sub>` + html.EscapeString(st.More) + `</p>`)
+		}
+		if st.MoreBtn.Label != "" {
+			b.WriteString(st.MoreBtn.html())
+		}
 	}
 	// selection bar: playlist add + verified-grid marking; in cue-edit mode the checked
 	// rows are the mass-apply set for the assigned patterns

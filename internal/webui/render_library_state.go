@@ -555,6 +555,7 @@ type libCollSt struct {
 	Empty         string         `json:"empty"`
 	IsEmpty       bool           `json:"isEmpty"`
 	More          string         `json:"more,omitempty"`
+	MoreBtn       uiBtn          `json:"moreBtn"` // "load more" paging control; empty until total > shown
 	Batch         libBatchSt     `json:"batch"`
 }
 
@@ -624,9 +625,13 @@ func (u *UI) libCollectionState(s *libSt) libCollSt {
 	// filtered + sorted view (memoized) + on-disk existence swept off-thread (was os.Stat/row)
 	shown := u.libCollView(s)
 	total := len(shown)
-	shownPaths := make([]string, 0, libMaxRows)
+	n := s.collShowN // effective render cap; grows by libMaxRows per "load more"
+	if n <= 0 {
+		n = libMaxRows
+	}
+	shownPaths := make([]string, 0, min(n, total))
 	for i, ti := range shown {
-		if i >= libMaxRows {
+		if i >= n {
 			break
 		}
 		shownPaths = append(shownPaths, s.tracks[ti].Path)
@@ -661,7 +666,7 @@ func (u *UI) libCollectionState(s *libSt) libCollSt {
 	vs := u.gfVerified()
 	ceOn := u.ceActiveFor("library")
 	for i, ti := range shown {
-		if i >= libMaxRows {
+		if i >= n {
 			break
 		}
 		t := s.tracks[ti]
@@ -686,8 +691,9 @@ func (u *UI) libCollectionState(s *libSt) libCollSt {
 	}
 	st.IsEmpty = total == 0
 	st.Empty = i18n.T("library.coll.empty")
-	if total > libMaxRows {
-		st.More = i18n.T("library.showingFirst", i18n.A{"shown": fmt.Sprint(libMaxRows), "total": fmt.Sprint(total)})
+	if total > n {
+		st.More = i18n.T("library.showingFirst", i18n.A{"shown": fmt.Sprint(n), "total": fmt.Sprint(total)})
+		st.MoreBtn = newBtn(i18n.T("library.loadMore", i18n.A{"remaining": fmt.Sprint(total - n), "total": fmt.Sprint(total)}), "outline", "lib-collmore")
 	}
 	// selection bar: playlist add + verified-grid marking; in cue-edit mode the checked
 	// rows are the mass-apply set for the assigned patterns

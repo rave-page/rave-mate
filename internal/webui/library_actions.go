@@ -105,7 +105,9 @@ func init() {
 	onPrefix("lib-unmark:", func(u *UI, m actMsg) { u.libMark(m.arg("lib-unmark:"), false) })
 
 	// collection
-	onExact("lib-coll-search", func(u *UI, m actMsg) { u.libSearchDebounced(func(s *libSt) { s.collSearch = m.Val }) })
+	onExact("lib-coll-search", func(u *UI, m actMsg) {
+		u.libSearchDebounced(func(s *libSt) { s.collSearch, s.collShowN = m.Val, 0 }) // new query -> restart paging
+	})
 	onPrefix("lib-coll-sort:", func(u *UI, m actMsg) {
 		u.libSetColl(false, func(s *libSt) { s.collSort = m.arg("lib-coll-sort:") })
 	})
@@ -123,6 +125,15 @@ func init() {
 	})
 	onExact("lib-nodrops", func(u *UI, m actMsg) {
 		u.libSetColl(false, func(s *libSt) { s.collNoDrops = !s.collNoDrops })
+	})
+	// collection paging: reveal the next libMaxRows of the (already in-memory) filtered set
+	onExact("lib-collmore", func(u *UI, m actMsg) {
+		u.libSet(func(s *libSt) {
+			if s.collShowN <= 0 {
+				s.collShowN = libMaxRows
+			}
+			s.collShowN += libMaxRows
+		})
 	})
 	onExact("lib-more", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.moreOpen = !s.moreOpen }) })
 	// popover item: close the menu, then run the wrapped action
@@ -437,6 +448,7 @@ func (u *UI) libSetColl(rebuildPl bool, mut func(*libSt)) {
 	s := u.lib()
 	s.mu.Lock()
 	mut(s)
+	s.collShowN = 0 // any collection control change (sort/dir/facet/clear) restarts paging
 	s.ctlTouch()
 	s.mu.Unlock()
 	u.libRun(s, func() {
@@ -541,6 +553,7 @@ func (u *UI) libKeyHarmonic(cam string) {
 	s := u.lib()
 	s.mu.Lock()
 	s.keySel = sel
+	s.collShowN = 0 // new harmonic key filter -> restart paging
 	s.ctlTouch()
 	s.mu.Unlock()
 	u.libPrimeColl(u.patchMain) // fresh view off the lane, then one repaint
