@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -31,6 +32,38 @@ func TestMediaLinkDevicePrefAdditive(t *testing.T) {
 	}
 }
 
+func TestRememberedReceives(t *testing.T) {
+	var m MediaLinkFeature
+	if !m.RememberReceive("peerA", "spout:VRCSender1", "VRCSender1") {
+		t.Fatal("first remember must report a change")
+	}
+	if m.RememberReceive("peerA", "spout:VRCSender1", "VRCSender1") {
+		t.Fatal("duplicate remember must be idempotent (no change)")
+	}
+	m.RememberReceive("peerA", "spout:webcam", "webcam")
+	if len(m.RememberedReceives) != 2 {
+		t.Fatalf("want 2 remembered, got %d", len(m.RememberedReceives))
+	}
+	if !m.ForgetReceive("peerA", "spout:VRCSender1") {
+		t.Fatal("forget of present must report a change")
+	}
+	if m.ForgetReceive("peerA", "spout:VRCSender1") {
+		t.Fatal("forget of absent must be a no-op")
+	}
+	if len(m.RememberedReceives) != 1 || m.RememberedReceives[0].SourceID != "spout:webcam" {
+		t.Fatalf("wrong remaining set: %+v", m.RememberedReceives)
+	}
+	// survives a JSON round-trip
+	b, _ := json.Marshal(m)
+	var back MediaLinkFeature
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(back.RememberedReceives, m.RememberedReceives) {
+		t.Fatalf("round trip: %+v != %+v", back.RememberedReceives, m.RememberedReceives)
+	}
+}
+
 func TestMediaLinkDevicePrefRoundTrip(t *testing.T) {
 	in := MediaLinkFeature{DevicePolicy: "pin", EncoderDevice: "0x00000000_0x0000c34f", Encoder: " h264_mf_native "}
 	if p, a := in.DevicePref(); p != "pin" || a != "0x00000000_0x0000c34f" {
@@ -47,7 +80,7 @@ func TestMediaLinkDevicePrefRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(b, &back); err != nil {
 		t.Fatal(err)
 	}
-	if back != in {
+	if !reflect.DeepEqual(back, in) {
 		t.Fatalf("round trip: %+v != %+v", back, in)
 	}
 }

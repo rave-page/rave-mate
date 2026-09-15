@@ -1025,6 +1025,14 @@ func run(parent context.Context, serviceMode bool) error {
 		mediaRoutesCtl = mediaRoutes
 		webcamCtl = webcamMgr
 	} // else: child mode (proxies set above) OR child-spawn failed -> ctls stay nil = plane disabled
+	// Remember activated remote sources + auto-reactivate them when the source PC advertises them
+	// again (restart/reconnect/offline-then-back). Wraps whichever ReceiveControl is live (in-proc
+	// or child proxy), so all UI paths persist intent; a daemon-side ticker resumes them.
+	if mediaRoutesCtl != nil {
+		rr := &rememberingReceives{ReceiveControl: mediaRoutesCtl, log: log, cfg: &cfg, save: func() { _ = cfg.Save() }}
+		mediaRoutesCtl = rr
+		debuglog.Go(log, "receive-resume", func() { runReceiveResume(ctx, rr) })
+	}
 
 	// VR perf/debug telemetry collector - receives vr.perf samples from any instance (incl. this one),
 	// for the UI monitor + `rave-mate ctl vrperf`. Always on (cheap; works even with no local VR), so a

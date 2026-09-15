@@ -475,6 +475,18 @@ type MediaLinkFeature struct {
 	// changes across a source-resolution change (decode scales into it). 0 = auto (first-observed
 	// source height, capped 2160); >0 = explicit cap.
 	SenderMaxHeight int `json:"senderMaxHeight,omitempty"`
+	// RememberedReceives are remote peer sources the user activated: the receiver auto-reactivates
+	// each one whenever the source PC advertises it again (restart/reconnect), so a set-up of
+	// remote webcam + VRChat Spout comes back by itself. Keyed by the peer's stable NodeID + the
+	// stable source ID ("spout:<name>"). An explicit Stop removes the entry.
+	RememberedReceives []RememberedReceive `json:"rememberedReceives,omitempty"`
+}
+
+// RememberedReceive is one auto-reactivated remote video source (see MediaLinkFeature).
+type RememberedReceive struct {
+	Peer     string `json:"peer"`           // remote node id (stable)
+	SourceID string `json:"sourceId"`       // stable source id ("spout:<name>")
+	Name     string `json:"name,omitempty"` // display only
 }
 
 // ZeroCopyCapture reports whether zero-copy Spout→encoder capture is enabled. Env
@@ -563,6 +575,35 @@ func (m MediaLinkFeature) ResolvedSenderMaxHeight() int {
 		return 4320
 	}
 	return m.SenderMaxHeight
+}
+
+// RememberReceive adds (peer, sourceID) to the auto-reactivate set (idempotent). Returns true if it
+// changed the set (caller then persists).
+func (m *MediaLinkFeature) RememberReceive(peer, sourceID, name string) bool {
+	for _, r := range m.RememberedReceives {
+		if r.Peer == peer && r.SourceID == sourceID {
+			return false
+		}
+	}
+	m.RememberedReceives = append(m.RememberedReceives, RememberedReceive{Peer: peer, SourceID: sourceID, Name: name})
+	return true
+}
+
+// ForgetReceive removes (peer, sourceID) from the auto-reactivate set. Returns true if it changed.
+func (m *MediaLinkFeature) ForgetReceive(peer, sourceID string) bool {
+	out := m.RememberedReceives[:0]
+	changed := false
+	for _, r := range m.RememberedReceives {
+		if r.Peer == peer && r.SourceID == sourceID {
+			changed = true
+			continue
+		}
+		out = append(out, r)
+	}
+	if changed {
+		m.RememberedReceives = out
+	}
+	return changed
 }
 
 // MediaSubprocess reports whether the media plane runs in the isolated child (#44). Default (key
