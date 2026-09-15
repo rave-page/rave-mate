@@ -135,6 +135,13 @@ func init() {
 		}
 		return "edv-vsize", strconv.Itoa(h)
 	}
+	mpOnSrcResolved = func(u *UI, host string) {
+		if host != "editor" {
+			return
+		}
+		u.edvSyncPlayerVars()          // CSS-crop path: refresh reframe class + --edv-ar from real dims
+		u.mpPatchVideo(u.mpSnap(host)) // surface path: recompute the surface hole + its aspect-ratio
+	}
 }
 
 // edvPrevH resolves the realtime render-height cap: session override, else the

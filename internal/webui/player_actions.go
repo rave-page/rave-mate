@@ -215,6 +215,12 @@ var mpTrimSnap func(u *UI, host string)
 // and the persisted height cap in px ("" = CSS default). Registered by the editor.
 var mpVidGrip func(u *UI, host string) (grip, maxH string)
 
+// mpOnSrcResolved, when set, is called after a host's source probe resolves (dimensions now
+// known). The editor uses it to re-push its video fragment: source load renders #main once,
+// synchronously, while the probe is still async - so the first paint has zero source dims and
+// the preview keeps a stale/absent size until something re-renders. Registered by the editor.
+var mpOnSrcResolved func(u *UI, host string)
+
 // mpLoud mirrors the transcode.loudtl worker JSON (was libLoud).
 type mpLoud struct {
 	I    float64   `json:"i"`
@@ -1462,6 +1468,9 @@ func (u *UI) mpLoadSrc(parent context.Context, host string, gen, idx int, path s
 				m.src = &v
 			}
 		})
+		if err == nil && mpOnSrcResolved != nil {
+			mpOnSrcResolved(u, host) // dims known now - host re-pushes its correctly-sized video fragment
+		}
 	})
 }
 
