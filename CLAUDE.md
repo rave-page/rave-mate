@@ -45,10 +45,11 @@ Minimize tokens. Drop filler ("simply", "just", "in order to", "make sure that")
   producer that can outrun its consumer MUST drop or block - never accumulate. The daemon
   carries a Go memory limit (`setMemoryLimitGuard`, `app.go`) + a media RSS watchdog
   (`medialink.memWatchdog`) + a concurrent-route cap - do not remove them.
-- **UI is transitioning Fyne → Go-driven HTML/CSS webview (`internal/webui`).** Fyne
-  (`fyne.io/fyne/v2`) is still the default renderer; the webview is opt-in via
-  `features.ui.renderer="webview"` and coexists behind that flag until it reaches parity,
-  then Fyne is retired. Both satisfy the `frontend` seam in `app.go`; only one is
+- **UI is the Go-driven HTML/CSS webview (`internal/webui`), the DEFAULT; Fyne is legacy fallback.**
+  The **webview is the default renderer** (empty/absent `features.ui.renderer`, or `="webview"`);
+  Fyne (`fyne.io/fyne/v2`) is selected only by an explicit `features.ui.renderer="fyne"` or when the
+  WebView2 runtime / shell child is unavailable at runtime. Fyne stays compiled-in as that fallback
+  until the webview reaches full parity, then it is retired. Both satisfy the `frontend` seam in `app.go`; only one is
   constructed. The webview reuses the rave.page **design-system sources** (copied CSS +
   Orbitron into `internal/webui/assets/ds`, never a prebuilt web deployment). Go renders
   every view and drives the DOM through the webview binding - there is **no web server** and
@@ -186,7 +187,10 @@ internal/
               injected from main.
   app/        Lifecycle orchestrator: wires config → modules + worker supervisor → tray
               → window, graceful shutdown. Run (signals) + RunCtx (external ctx, for SCM)
-  ui/         Fyne: theme.go (corporate identity), fonts (embedded Orbitron),
+  webui/      DEFAULT renderer: Go-driven HTML/CSS over WebView2 in a Zig-owned shell child
+              (render_*.go = per-view HTML; assets/ds = copied design-system CSS + Orbitron).
+              Byte-exact golden ref for the native/zigui migration (Zig owns the GUI going fwd).
+  ui/         LEGACY Fyne fallback: theme.go (corporate identity), fonts (embedded Orbitron),
               tray, window, per-tab views (dashboard, traktor, logs, settings)
   logbus/     In-mem ring buffer + subscriber fan-out (mirrors web failedMediaLogger /
               sseDebugLogger). Every service logs here; the Logs tab renders it live.
@@ -351,9 +355,10 @@ Formerly-shared code (secureseal, auth, logbus, selfupdate, branding) lives in
 
 ### Concurrency
 
-Services own their goroutines + are stopped via `context.Context` cancel. UI updates
-from non-UI goroutines go through `fyne.Do` / the app's event channel - never touch
-widgets off the main thread.
+Services own their goroutines + are stopped via `context.Context` cancel. UI updates from
+non-UI goroutines are marshalled to the UI thread: the webview through its render/dispatch
+loop; the legacy Fyne path via `fyne.Do` / the app's event channel - never touch widgets off
+the main thread.
 
 ### Design tokens (corporate identity)
 

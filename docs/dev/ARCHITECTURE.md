@@ -1,7 +1,9 @@
 # Architecture
 
-One Go daemon; standard layout (`cmd/` entrypoints, `internal/` everything else). The UI is
-native Fyne. Features are config-gated modules with live start/stop.
+One Go daemon; standard layout (`cmd/` entrypoints, `internal/` everything else). The default UI
+is a Go-driven HTML/CSS webview (`internal/webui`) over WebView2 in a Zig-owned shell child; the
+native Fyne renderer (`internal/ui`) remains a runtime fallback. Features are config-gated modules
+with live start/stop.
 
 ## Big picture
 
@@ -14,7 +16,7 @@ OS / devices ──► feature modules ◄────────┘
         │
         ├─ featurehost: crashy/cgo features run as supervised child processes
         ├─ worker: job subprocesses (ffmpeg probe/transcode), pooled + reaped
-        └─ ui: Fyne tabs bound to Services handles (all may be nil)
+        └─ ui: webui (default: HTML/CSS→WebView2) / Fyne (fallback) bound to Services handles
 ```
 
 ## Key packages (internal/)
@@ -40,8 +42,11 @@ OS / devices ──► feature modules ◄────────┘
 - `session` (+ `session/sources/*`, `session/sinks/*`, `session/aggregator`) - the DJ-data hub:
   sources emit normalized Observations; the Merger fuses per-field by priority+TTL; sinks
   consume the unified state. Canonical field names = Traktor wire keys.
-- `ui` - Fyne views; `theme.go` = design tokens (single brand truth), `kit_*.go` = component
-  kit, `help.go` = ? tooltips.
+- `webui` - DEFAULT renderer: Go-driven HTML/CSS → WebView2 in a Zig-owned shell child
+  (`render_*.go` per-view HTML; `assets/ds` = design-system CSS + Orbitron). Byte-exact golden
+  reference for the `native/zigui` migration (Zig owns the GUI going forward).
+- `ui` - LEGACY Fyne fallback views; `theme.go` = design tokens (single brand truth), `kit_*.go`
+  = component kit, `help.go` = ? tooltips.
 - `logbus` - in-memory ring + fan-out; everything logs here; Logs tab renders live.
 - `api`/`apiclient` - rave.page API: generated client (never hand-edit) + redacted-logging
   adapter.

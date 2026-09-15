@@ -5,9 +5,10 @@ small, fast and auditable.
 
 ## Philosophy
 
-- **Go-driven UI, no JS framework.** UI is transitioning from a native Fyne renderer to a
-  Go-driven HTML/CSS webview (`internal/webui`) - Go renders every view and drives the DOM;
-  no web server, no JS framework. Brand identity comes from design tokens, not grafted web tech.
+- **Go-driven UI, no JS framework.** The default renderer is a Go-driven HTML/CSS webview
+  (`internal/webui`) - Go renders every view and drives the DOM; no web server, no JS framework.
+  The native Fyne renderer remains a runtime fallback until the webview reaches parity, then
+  retires. Brand identity comes from design tokens, not grafted web tech.
 - **Stdlib-first, minimal deps.** Every new direct dependency needs a justification row in
   `SUPPLY_CHAIN.md` and must pass the **7-day soak**: pin an exact version at least 7 days old,
   never `go get pkg@latest`. Prefer re-implementing small things over importing.

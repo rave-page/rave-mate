@@ -2,8 +2,13 @@
 
 ## Prerequisites
 
-- Go (version in `go.mod`), a C toolchain (Fyne/cgo: MinGW-w64 on Windows, gcc + GL/X11 dev
-  packages on Linux: `libgl1-mesa-dev xorg-dev libxkbcommon-dev`), git.
+- Go (version in `go.mod`), a C toolchain (cgo — needed by both the WebView2 default renderer
+  and the Fyne fallback: MinGW-w64 on Windows, gcc + GL/X11 dev packages on Linux:
+  `libgl1-mesa-dev xorg-dev libxkbcommon-dev`), git.
+- **Zig** (native UI/DSP/enc/vfx libs + the `rave-shell.exe` window host): build them first with
+  `bash scripts/build-zig.sh` (POSIX; `scripts/build-zig.ps1` on PowerShell). The `zigui`/`shellembed`
+  tags below link + embed these; a stale/missing `.a` is not in Go's test cache key and surfaces as a
+  bogus "v2 render failed" — rebuild before tagged tests.
 - No external shared module: rave-mate is self-contained (formerly-shared code lives in
   `internal/shared`). Builds standalone with `GOWORK=off`.
 - Optional feature SDKs:
@@ -17,7 +22,9 @@
 | Task | Command |
 |---|---|
 | Build (current OS) | `make build` |
-| Everything-on Windows exe | `go build -tags "spout vr" -ldflags "-s -w -H windowsgui -extldflags=-static" -o dist/rave-mate.exe ./cmd/rave-mate` |
+| Everything-on Windows exe (recommended) | `scripts/build-local.ps1` — runs `build-zig.sh` then builds with the full-feature tags below |
+| Full-feature Windows exe (manual) | `bash scripts/build-zig.sh && CGO_ENABLED=1 go build -tags "spout vr abletonlink zigdsp zigui zigvr encembed shellembed" -ldflags "-s -w -H windowsgui -linkmode external -extldflags '-static -static-libgcc -static-libstdc++'" -o dist/rave-mate.exe ./cmd/rave-mate` |
+| Fyne-fallback-only exe (no webview) | `go build -tags "spout vr" -ldflags "-s -w -H windowsgui -extldflags=-static" -o dist/rave-mate.exe ./cmd/rave-mate` |
 | Run | `go run ./cmd/rave-mate` |
 | Headless service | `go run ./cmd/rave-mate --service` |
 | Tests / vet / fmt | `make test` / `make vet` / `make fmt` |
@@ -29,6 +36,12 @@
 
 `-extldflags=-static` matters on Windows: without it the exe needs MinGW DLLs
 (`libgcc_s_seh-1.dll`, `libstdc++-6.dll`) and fails on a clean machine.
+
+**Renderer tags matter.** The default UI is the webview, hosted by `rave-shell.exe`; `zigui` links
+the Zig render layer and `shellembed` embeds the shell exe. A build **without** those tags (e.g. plain
+`-tags "spout vr"`) has no shell child and **silently falls back to Fyne** — the wrong surface to
+verify UI on. Tell them apart at runtime with `ctl snapshot`: the webview prints HTML DOM
+(`div`/`a`/`span`), Fyne prints widgets (`button {id} "text"`).
 
 ## Verifying changes on the running app
 
