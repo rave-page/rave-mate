@@ -47,12 +47,29 @@ small, fast and auditable.
 
 ## UI contributions
 
-- Colors/spacing/fonts come from `internal/ui/theme.go` design tokens - never hardcode hex/px.
-- Reuse the kit (`internal/ui/kit_*.go`: buttons, search fields, segmented, tooltips) and
-  helpers (`featureCard`, `cardWithHelp`, `formGrid`) before inventing new widgets.
-- Every non-obvious control gets a `?` help tooltip (`help.go`).
-- UI updates from goroutines go through `fyne.Do`; spawn goroutines via `goUI` (panic-guarded).
-- Tray app semantics: closing the window hides it; only tray Quit exits.
+The default renderer is the **webview** (`internal/webui`); Fyne (`internal/ui`) is
+the legacy fallback. Do visual work on the webview and verify there.
+
+- **Read the design docs first.** Rules: `docs/dev/DESIGN.md`. Perception research
+  behind them: `docs/dev/PRINCIPLES.md`. Capability map: `internal/webui/CAPABILITIES.md`.
+  They bind like this file.
+- **Recipe-first.** Colors/spacing/fonts come from the design tokens in
+  `internal/webui/assets/ds/colors_and_type.css` — never hardcode hex/px. Reuse the
+  `.rp-*` recipes (`assets/ds/styles.css`) + their Go helpers (`components.go`:
+  `emptyState`, the select builders; `uiBtn`/`btnRow`) before inventing markup. One
+  capability → one recipe (grep `CAPABILITIES.md` first); a hand-rolled sibling is a
+  defect.
+- **Chips vs badges; one primary.** A control pill is `.rp-chip`, a state label is
+  `.rp-badge`; exactly one filled primary (`.rp-btn--primary`/`--go`) per surface.
+- **Every non-obvious control gets a `?` help tooltip**, and a stable id/label so
+  `ctl snapshot`/`click`/`read` can drive it (a11y + test contract).
+- **Concurrency.** Webview updates marshal through the render/dispatch loop; the
+  legacy Fyne path uses `fyne.Do` + `goUI` (panic-guarded). No widget/DOM touch off
+  the main thread.
+- **Tray app semantics:** closing the window hides it; only tray Quit exits.
+- **Verify on the running app.** `ctl screenshot-all` sweeps every tab — eyeball it,
+  fix `⚠OVERFLOW` and obvious issues (even pre-existing); page-audit composition
+  changes per `DESIGN.md`. Say what you verified in the PR.
 
 ## Security
 

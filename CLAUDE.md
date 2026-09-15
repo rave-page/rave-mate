@@ -103,6 +103,42 @@ Minimize tokens. Drop filler ("simply", "just", "in order to", "make sure that")
 - **Root `.md` hygiene → `.devnotes/`.** This repo is PUBLIC: keep only user/contributor-facing docs in root (`README`, `CONTRIBUTING`, `SECURITY`, `SUPPLY_CHAIN`, `CLAUDE.md`, `AGENTS.md`). Longer-form user docs → `docs/`. Every other `.md` — `*_SUMMARY`/`*_PLAN`/`*_RESEARCH`/`*_DESIGN`/migration notes, any agent work-product — goes in `.devnotes/` (git-tracked, not user-facing). Never leave agent notes in the base dir; write new ones straight to `.devnotes/`.
 - **Commit after each patch / feature / phase.** Once a logical unit passes `go build ./... && go vet ./... && go test ./...` (and golangci-lint if present), commit it (never push) - don't batch many features into one commit. Pushing and PRs happen only when the user explicitly asks.
 
+## Design & UX (research-grounded, binding)
+
+Full rules `docs/dev/DESIGN.md`; perception research `docs/dev/PRINCIPLES.md`;
+capability map `internal/webui/CAPABILITIES.md`. Ported + adapted from rave.page's
+design system + its perception-research run (2026-09-15), fitted to the Go-webview
+**recipe** kit (`.rp-*` in `assets/ds` + helpers in `components.go`) and the desktop
+control-surface domain. "Kit-first" reads as **recipe-first**. These bind every
+agent doing visual work in `internal/webui` (and the Zig render layer that mirrors
+it). Summary:
+
+- **Recipe-first.** New pattern → extend a `.rp-*` recipe (+ a `components.go`
+  helper), then consume it. A third hand-rolled/inline-styled variant is a defect.
+- **Chips vs badges (P16).** Control pill = `.rp-chip`; state/label = `.rp-badge`
+  (no per-call colour, no control look). A non-clickable fact is text, not a pill.
+- **Colour = intent (P4).** One accent hue per surface; category = position
+  (lane/section), state = a scarce status token — never rainbow rows, never a 2nd
+  accent for "new".
+- **Type.** Display face (Orbitron) for headings/labels/numerals; a readable body
+  face for body/inputs/tables/logs (display faces are not text faces). `tabular-nums`
+  for numeric columns. (Current CSS drift + tokens-to-add tracked in `DESIGN.md`.)
+- **Four chunks (P1) + one primary (P16).** ≤ 4 groups at a glance, rest behind one
+  disclosure; ≤ 4-control strips; exactly one filled primary
+  (`.rp-btn--primary`/`--go`) per surface; destructive never beside it.
+- **Default live/relevant (P2).** Open on what is true+actionable now; every list
+  has a real `.rp-empty` (`emptyState`), never a bare blank.
+- **Density as a shape (P7); motion scarce (P5).** Draw levels/VRAM/fps/waveforms
+  as shapes not counter walls; ≤ 1 continuous motion cue, gated by
+  `prefers-reduced-motion` + the activity governor (`UIAnimAllowed`).
+- **Media never autoplays (P11); reachable 3 ways (P15).** Previews load on press,
+  text mirrors media; every control reachable by mouse, keyboard AND `ctl`.
+- **One capability, one component.** Read `CAPABILITIES.md` + grep before adding a
+  UI capability; a sibling for the same job is a defect.
+- **Gates.** golden tests + `ctl screenshot-all` visual audit (the CLAUDE.md hard
+  rule), plus the page audit in `DESIGN.md` for composition changes. When a defect
+  traces to a rule, fix the rule (dated Decision-log entry), then the code.
+
 ## Commands
 
 From `rave-mate/`:
