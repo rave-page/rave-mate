@@ -96,8 +96,15 @@ func (u *UI) fbMut(fn func(*fbSt)) fbSt {
 func init() {
 	// A committed trim edit on the "flipbook" mp host refreshes the animated preview.
 	mpTrimDone = func(u *UI, host string) {
-		if host == "flipbook" {
-			u.fbKickPreview()
+		if host != "flipbook" {
+			return
+		}
+		u.fbKickPreview()
+		// The crop reference + poster frame track the in-point: a stale t=0 frame misleads the crop.
+		if fb := u.fbSnap(); fb.source != "" && edvIsVideo(fb.source) {
+			if ip := u.fbInPoint(); fb.framePath == "" || ip != fb.frameT {
+				u.fbFrame(ip)
+			}
 		}
 	}
 	// Silent emoji source: no peaks/loudness workers, no wave chips/captions, muted element.
@@ -318,8 +325,9 @@ func (u *UI) fbTransportHTML(t mpSt) string {
 	switch {
 	case tr.loaded && tr.playing:
 		playLbl, playVar = "⏸ "+i18n.T("player.pause"), "outline"
-	case tr.loaded && tr.paused:
-		playLbl = "▶ " + i18n.T("player.resume")
+	case tr.loaded && tr.paused && t.vid.cur > 0: // "Resume" only once playback has progressed - a
+		playLbl = "▶ " + i18n.T("player.resume") // fresh preload=metadata load is paused at 0 = Play
+
 	}
 	play := uiBtn{Label: playLbl, Variant: playVar, Act: "mp-play:" + t.host}
 	stop := uiBtn{Label: "⏹", Variant: "outline", Act: "mp-stop:" + t.host}

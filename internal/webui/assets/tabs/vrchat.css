@@ -40,6 +40,7 @@
 /* crop tool reuses the editor's .edv-fbox/.edv-fimg/.edv-shade/.edv-crop recipe (editor.css); only
    the overlay container id differs (#fb-fovl vs the editor's #edv-fovl). */
 #fb-fovl { position:absolute; inset:0; pointer-events:none; }
+#fb-frame .edv-fbox { max-width:480px; } /* reference picture, not a viewer - keep the strip + controls on screen */
 
 /* flipbook result (runtime-patched into #vrc-emote-result) */
 .vrc-note.over { color:var(--rp-hot,#FF3E8A); }

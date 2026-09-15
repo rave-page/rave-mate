@@ -2228,6 +2228,9 @@ func (u *UI) mpHandle(host, which, val string) {
 		u.mpKickMeasure(host) // drag settled - refresh the plan's exact-measure lookup
 		u.mpSyncMonitor(host)
 		u.mpSyncVidTrim(t)
+		if mpTrimDone != nil { // a handle drag is a committed trim too (mpApplyTrim covers Set/clear/auto)
+			mpTrimDone(u, host)
+		}
 	}
 }
 
