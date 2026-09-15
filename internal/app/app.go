@@ -733,9 +733,13 @@ func run(parent context.Context, serviceMode bool) error {
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,
 		Encoder: encFac, Decoder: decFac,
-		EncodeMaxHeight: cfg.Features.MediaLink.MaxHeight,
-		EncodePolicy:    mediaEncodePolicy(mediaLinkCfg),
-		EncodeDevice:    mediaEncodeDevice(log, mediaLinkCfg),
+		EncodeMaxHeight:  cfg.Features.MediaLink.MaxHeight,
+		EncodePolicy:     mediaEncodePolicy(mediaLinkCfg),
+		EncodeDevice:     mediaEncodeDevice(log, mediaLinkCfg),
+		Headroom:         func() (uint64, bool) { h := gpumem.ReadHeadroom(gpuGovSampler); return h.FreeMB, h.Present },
+		GovernorEnabled:  func() bool { return mediaLinkCfg().VramGovernorEnabled() },
+		GovernorFloorMB:  uint64(mediaLinkCfg().ResolvedVramReserveMB()),
+		GovernorBaseKbps: func() int { return mediaLinkCfg().Bitrate() },
 	})
 	// #44: the media plane (medialink+mediaroute+webcam) runs isolated in a memory-capped featurehost
 	// child by DEFAULT (MediaLink.Subprocess tri-state; explicit false = legacy in-proc). TCPlane +

@@ -238,6 +238,16 @@ type Options struct {
 	// TTL-cached in encoderscan). Returns the adapter LUID key + its DXGI ordinal; ("", -1) = the
 	// engine's own default device, which emits no device flags at all. nil = always default.
 	EncodeDevice func() (luid string, index int)
+
+	// VRAM congestion governor (recv side): the DJ-PC emits MetaRate backpressure to trim the
+	// sender's bitrate (then fps; resolution last-resort) when primary-adapter free VRAM drops.
+	// All nil/zero = no governor (fail open). Headroom returns (freeMB, present); GovernorEnabled
+	// gates it live; GovernorFloorMB is the free-VRAM floor to protect (0 = default); Governor
+	// BaseKbps is the route's healthy bitrate ceiling (config.Bitrate).
+	Headroom         func() (freeMB uint64, present bool)
+	GovernorEnabled  func() bool
+	GovernorFloorMB  uint64
+	GovernorBaseKbps func() int
 }
 
 // RouteManager owns the media listener + negotiation. Create with New, attach sources/sinks, then
@@ -269,6 +279,11 @@ type RouteManager struct {
 	encMaxHeight int                           // encoder downscale ceiling (Options.EncodeMaxHeight; 0 = native)
 	encPolicy    func() (prefer, pin string)   // sender-side codec preference + encoder pin (live)
 	encDevice    func() (luid string, idx int) // sender-side encode-device resolver (live)
+
+	headroom    func() (freeMB uint64, present bool) // recv-side VRAM governor input (nil = no governor)
+	governorOn  func() bool                          // governor live enable (nil = on when headroom present)
+	govFloorMB  uint64                               // free-VRAM floor the governor protects (0 = default)
+	govBaseKbps func() int                           // route base bitrate ceiling (config.Bitrate)
 
 	sampler procstat.Sampler // daemon RSS sampler for the media memory watchdog
 
@@ -320,6 +335,8 @@ func New(opts Options) *RouteManager {
 		encoders:  opts.Encoders, decoders: opts.Decoders,
 		encFac: opts.Encoder, decFac: opts.Decoder, encMaxHeight: opts.EncodeMaxHeight,
 		encPolicy: opts.EncodePolicy, encDevice: opts.EncodeDevice,
+		headroom: opts.Headroom, governorOn: opts.GovernorEnabled,
+		govFloorMB: opts.GovernorFloorMB, govBaseKbps: opts.GovernorBaseKbps,
 		sources: map[string]sourceReg{}, sinks: map[string]sinkReg{},
 		remoteAdvert: map[string]Advert{}, pendingAns: map[string]*pendingAnswer{},
 		pendingOff: map[string]*pendingOffer{}, active: map[string]*activeRoute{},
@@ -1207,6 +1224,16 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 	}
 	if rio.caps.sync {
 		go rm.guard("syncProbe", func() { rm.syncProbe(rctx, rio, peer) })
+	}
+	// Recv-side VRAM congestion governor: emit MetaRate backpressure (bitrate first, then fps) when
+	// the DJ-PC card fills, so the sender trims output before the decode/publish pipeline is forced
+	// to hold/freeze. Compressed video only, and only with a known base bitrate + headroom seam.
+	if ans.Codec.CompressedVideo() && rm.headroom != nil {
+		base := 0
+		if rm.govBaseKbps != nil {
+			base = rm.govBaseKbps()
+		}
+		go rm.guard("rateGovernor", func() { rm.rateGovernor(rctx, rio, ans.Stream, base, int(srcDesc.FPS)) })
 	}
 	if jb != nil {
 		done := make(chan struct{})
