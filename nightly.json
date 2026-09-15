@@ -1,13 +1,13 @@
 {
-  "version": "nightly-0463541",
-  "build": 330,
-  "commit": "0463541",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-330-20260915-0463541.exe",
-  "sha256": "54d6bbfc3134183e700895d0915bbdae198ccaeaf03b3d7974ce8c6f0927d533",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-330-20260915-0463541.exe",
-  "installer_sha256": "00234c63aef853874a7bc284da72ff943c7cdf76217b5cae526e274c222af4cc",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-330-20260915-0463541",
-  "linux_sha256": "a3e2772178864eb9d5f6fa2ec1fd5e2fc09b8cf12fffde3a00c5a8417409818b",
+  "version": "nightly-b5e7df3",
+  "build": 331,
+  "commit": "b5e7df3",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-331-20260915-b5e7df3.exe",
+  "sha256": "aa0005ad62429133fa1f01dcfb60841d68202f3cda95f0d994406c4bcd81bad2",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-331-20260915-b5e7df3.exe",
+  "installer_sha256": "74cd1fd60b7178223d52651758a4a82c9ed332226fe323b3082fec1772c01776",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-331-20260915-b5e7df3",
+  "linux_sha256": "2327db07027ce42d2a72476fd3dfdd261648770bbebf6ccbcb8db5906b47adf7",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-09-15T22:13:01Z",
-  "notes": "docs(CLAUDE): push development after each verified-green unit"
+  "released": "2026-09-15T22:49:20Z",
+  "notes": "fix(mediaroute): register the first subscriber before starting fanout; isolate recorder names in tests"
 }
