@@ -163,3 +163,34 @@ Dated changes to the rules themselves. An entry here overrides older prose above
   hex, inline `style=`, opacity-on-text, `.rp-chip` used for state / `.rp-badge` used
   as a control) is a candidate addition once the current tree is clean — deferred to
   avoid false positives on legacy views.
+- **2026-09-16 — Live surface regrouped into four chunks (P1).** The Live tab was 11
+  flat full-width sections. It now groups into four named chunks + the ambient bottom
+  strip: **STREAM & PICTURE** (auto-live landmark + OBS cockpit), **DECKS** (the deck
+  grid is the single now-playing truth), **SIGNALS** (signal sources + the Link phrase
+  row folded beside), **SYSTEM** (connection status + net/timing/perf graphs, behind
+  one disclosure, collapsed by default — least glance-critical, P1/P2). Chunk titles are
+  resolved Go-side (`live.group.*`) and carried on `liveState` (wire fields 35-38) so
+  the Zig renderer gets the localized name. Fragment ids are unchanged, so every ~1 Hz
+  tick still lands. `render_live.go liveHTML` + `native/zigui/src/live.zig render` are
+  the byte-exact pair (golden gate).
+- **2026-09-16 — now-playing LCD retired (P8).** `#live-np` duplicated the audible deck
+  tile. The deck grid is now the single now-playing truth: the LCD is no longer rendered
+  or ticked (removed from `liveHTML`, `live.zig`, `liveTickIDs`, `liveTickLegacy`,
+  `tick.zig runLive`). Wire id 12 (`LiveNP`) + the `LiveState.NP` field + `liveNPHTML`
+  are kept RESERVED and still parity-tested (`assertFrag "np"`); a clean removal of the
+  message + field is a follow-up. Strip duplicates removed too: the recorder file and the
+  system-headroom figure each appeared twice (transport rec-state + strip; SYSTEM perf
+  well + strip) — the strip is now ambient overflow only (Twitch login / OBS / capture /
+  DMX / timecode).
+- **2026-09-16 — one filled primary on Live (P16).** The tab had two filled primaries
+  (`tc-start` `rp-btn--go` + every cockpit stream button `rp-btn--primary`). Now exactly
+  one: **arm/stop recording** (`arec-toggle` → `rp-btn--primary`) — capturing the set is
+  the highest-stakes, one-way action here; streaming is auto (OBS-driven) and timecode is
+  secondary, so both are `rp-btn--outline`. Mirrored in `live.zig`.
+- **2026-09-16 — disclosure recipe added (`.rp-disclosure`).** New capability: a
+  collapsible titled group, used for the Live SYSTEM chunk to keep the least-critical
+  content out of the first glance (P1/P2). Recipe in `assets/ds/styles.css`
+  (`.rp-disclosure` + `.rp-disclosure__sum`), consumed inline over the recipe as a
+  native `<details>/<summary>` (semantic, keyboard- and `ctl`-reachable; not a banned
+  browser dialog). Sub-headings within a chunk use `.sec-sub` (a lighter `.sec-title`).
+  Added to `CAPABILITIES.md`.

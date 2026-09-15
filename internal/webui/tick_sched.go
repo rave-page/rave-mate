@@ -47,7 +47,7 @@ type logsTickSt struct {
 // cockpit, link, net/tim, perf) simply never come back when their service is absent; sending a
 // prev slot for them regardless costs one entry and keeps this list a plain constant.
 var liveTickIDs = []string{
-	"live-tc", "live-rec-state", "live-np", "live-status", "live-decks", "live-signals",
+	"live-tc", "live-rec-state", "live-status", "live-decks", "live-signals",
 	"live-cockpit", "live-ablelink", "live-net", "live-tim", "live-perf2", "live-strip",
 }
 
@@ -62,7 +62,7 @@ var logsTickIDs = []string{"log-view"}
 func (u *UI) liveTickState() liveTickSt {
 	st := liveTickSt{TC: u.tcText()}
 	st.Live.Transport = u.liveTransportState()
-	st.Live.NP = u.liveNPState()
+	// #live-np (the LCD) is retired - the deck grid is the now-playing truth (P8); no np resolution on the hot path.
 	st.Live.Status = u.liveStatusState()
 	st.Live.Decks = u.liveDecksState()
 	st.Live.Strip = u.liveStripState()

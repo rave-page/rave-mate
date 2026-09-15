@@ -1182,3 +1182,27 @@ body {
     background-clip: text;
     color: transparent;
 }
+
+/* Disclosure: a collapsible titled group. Keeps a low-priority chunk (Live SYSTEM) out of the
+   first glance (P1/P2); the summary carries .sec-title for the display-face heading. */
+.rp-disclosure {
+    margin: 24px 0 16px;
+    border-top: 1px solid var(--rp-border, rgba(255, 255, 255, 0.08));
+    padding-top: 12px;
+}
+.rp-disclosure__sum {
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 4px;
+}
+.rp-disclosure__sum::-webkit-details-marker { display: none; }
+.rp-disclosure__sum::before {
+    content: "\25B8"; /* ▸ */
+    color: var(--rp-muted, #B98AA0);
+    font-size: 10px;
+}
+.rp-disclosure[open] > .rp-disclosure__sum::before { content: "\25BE"; } /* ▾ */

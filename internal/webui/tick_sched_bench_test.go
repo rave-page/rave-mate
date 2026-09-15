@@ -47,7 +47,6 @@ func legacyLiveFrags(st liveTickSt, zig bool) []zigui.Frag {
 	if l.Transport.HasRec {
 		add("live-rec-state", htmlEscape(l.Transport.RecState))
 	}
-	frag("live-np", "np", wireLiveNP(l.NP), liveNPHTML(l.NP))
 	frag("live-status", "status", wireLiveStatus(l.Status), liveStatusFragHTML(l.Status))
 	frag("live-decks", "decks", wireLiveDecks(l.Decks), liveDecksFragHTML(l.Decks))
 	if l.HasSignals {

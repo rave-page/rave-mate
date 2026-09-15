@@ -40,10 +40,12 @@ func liveFixtures() map[string]liveState {
 				{Cls: "deckbig", Name: "DECK C", Title: "–", Meta: "-"},
 				{Cls: "deckbig", Name: "DECK D", Title: "–", Meta: "-"},
 			}},
-			Signals: liveSignalsSt{Rows: []liveKV{}},
-			Cockpit: liveCockpitSt{Rows: []liveCockpitRow{}},
-			Link:    liveLinkSt{Sources: []liveSRow{}},
-			Strip:   liveStripSt{},
+			Signals:     liveSignalsSt{Rows: []liveKV{}},
+			Cockpit:     liveCockpitSt{Rows: []liveCockpitRow{}},
+			Link:        liveLinkSt{Sources: []liveSRow{}},
+			Strip:       liveStripSt{},
+			GroupStream: "Stream & picture", GroupDecks: "Decks",
+			GroupSignals: "Signals", GroupSystem: "System",
 		}
 	}
 
@@ -125,6 +127,7 @@ func liveFixtures() map[string]liveState {
 	escaping.CockpitTitle = `C&ockpit"`
 	escaping.LinkTitle = `Li&nk<>`
 	escaping.NetTitle, escaping.TimTitle, escaping.PerfTitle = `Ne&t"`, `Ti&ming<>`, `Pe&rf'`
+	escaping.GroupStream, escaping.GroupDecks, escaping.GroupSignals, escaping.GroupSystem = `St&ream <"pic">`, `De&cks'`, `Si&g<>`, `Sy&stem"`
 	escaping.Transport = liveTransportSt{
 		StreamHint: `hint & <"quoted"> 'x'`, StreamLabel: `ST&REAM<>`, DotVar: "warning", State: `Pa&used "x"`,
 		MetaOnly: `meta & <only>`, PauseLabel: `Pa&use"`, PauseHint: `p<h>&"'`, Paused: true,

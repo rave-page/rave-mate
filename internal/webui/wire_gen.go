@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash         uint32 = 0x3cd83938
+	wireSchemaHash         uint32 = 0xf18c6b82
 	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -354,6 +354,10 @@ func (v liveState) encodeWire(w *zigui.WireWriter) {
 	if v.PerfTipS != nil {
 		w.OptStruct(34, func() { v.PerfTipS.encodeWire(w) })
 	}
+	w.Str(35, v.GroupStream)
+	w.Str(36, v.GroupDecks)
+	w.Str(37, v.GroupSignals)
+	w.Str(38, v.GroupSystem)
 }
 
 func (v moCamRow) encodeWire(w *zigui.WireWriter) {
@@ -5874,6 +5878,10 @@ func (v liveState) hashWire(h *zigui.WireHasher) {
 	if v.PerfTipS != nil {
 		v.PerfTipS.hashWire(h)
 	}
+	h.Str(35, v.GroupStream)
+	h.Str(36, v.GroupDecks)
+	h.Str(37, v.GroupSignals)
+	h.Str(38, v.GroupSystem)
 }
 
 func (v liveState) wireEq(o *liveState) bool {
@@ -5989,6 +5997,18 @@ func (v liveState) wireEq(o *liveState) bool {
 		return false
 	}
 	if v.PerfTipS != nil && !v.PerfTipS.wireEq(o.PerfTipS) {
+		return false
+	}
+	if v.GroupStream != o.GroupStream {
+		return false
+	}
+	if v.GroupDecks != o.GroupDecks {
+		return false
+	}
+	if v.GroupSignals != o.GroupSignals {
+		return false
+	}
+	if v.GroupSystem != o.GroupSystem {
 		return false
 	}
 	return true
@@ -6178,6 +6198,34 @@ func (v liveState) deltaWire(w *zigui.WireWriter, prev *liveState) {
 		w.OptStruct(34, func() { v.PerfTipS.encodeWire(w) })
 	case !v.PerfTipS.wireEq(prev.PerfTipS):
 		w.OptStruct(34, func() { v.PerfTipS.deltaWire(w, prev.PerfTipS) })
+	}
+	if v.GroupStream != prev.GroupStream {
+		if v.GroupStream == "" {
+			w.Clear(35)
+		} else {
+			w.Str(35, v.GroupStream)
+		}
+	}
+	if v.GroupDecks != prev.GroupDecks {
+		if v.GroupDecks == "" {
+			w.Clear(36)
+		} else {
+			w.Str(36, v.GroupDecks)
+		}
+	}
+	if v.GroupSignals != prev.GroupSignals {
+		if v.GroupSignals == "" {
+			w.Clear(37)
+		} else {
+			w.Str(37, v.GroupSignals)
+		}
+	}
+	if v.GroupSystem != prev.GroupSystem {
+		if v.GroupSystem == "" {
+			w.Clear(38)
+		} else {
+			w.Str(38, v.GroupSystem)
+		}
 	}
 }
 

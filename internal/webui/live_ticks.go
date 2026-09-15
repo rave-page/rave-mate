@@ -122,7 +122,6 @@ func (u *UI) liveTickLegacy(js *strings.Builder, st liveTickSt) {
 	if st.Live.Transport.HasRec {
 		u.tickPatch(js, "live-rec-state", htmlEscape(st.Live.Transport.RecState))
 	}
-	u.tickPatch(js, "live-np", liveFrag("np", st.Live.NP, wireLiveNP, liveNPHTML))
 	u.tickPatch(js, "live-status", liveFrag("status", st.Live.Status, wireLiveStatus, liveStatusFragHTML))
 	u.tickPatch(js, "live-decks", liveFrag("decks", st.Live.Decks, wireLiveDecks, liveDecksFragHTML))
 	if st.Live.HasSignals {

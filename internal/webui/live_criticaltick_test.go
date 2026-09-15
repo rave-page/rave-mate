@@ -43,7 +43,7 @@ func liveTickUI(t *testing.T) (*UI, func() string) {
 
 // nonCriticalIDs are the Live fragments the governor's reason for closing the gate (don't repaint
 // rave-mate's own graphs over a live encoder) still covers - they must stay frozen while streaming.
-var nonCriticalIDs = []string{"live-np", "live-decks", "live-status", "live-strip", "live-net", "live-perf2"}
+var nonCriticalIDs = []string{"live-decks", "live-status", "live-strip", "live-net", "live-perf2"}
 
 // TestLiveLandmarkPatchesWhileStreaming: with a stream live (the general tick withheld) the Live tab
 // must still patch its landmark, and must NOT repaint the non-critical fragments. Pre-fix,
@@ -98,7 +98,7 @@ func TestLiveGeneralTickPatchesNonCriticalWhenGateOpen(t *testing.T) {
 	if !strings.Contains(ev, "window.__patch('live-stream-state'") {
 		t.Fatalf("general tick did not patch the landmark: %q", ev)
 	}
-	if !strings.Contains(ev, "window.__patch('live-np'") {
+	if !strings.Contains(ev, "window.__patch('live-status'") {
 		t.Fatalf("general tick did not patch a non-critical fragment - the tab is dead: %q", ev)
 	}
 }
