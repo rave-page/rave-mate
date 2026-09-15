@@ -34,8 +34,10 @@ const subWait = 2 * time.Second
 // going black mid-run and cheap enough to leave on permanently (one log line per route).
 const routeTelemetryEvery = 10 * time.Second
 
-// mfBridge implements medialink.Source (+KeyframeSource, PipelineReporter) over an
-// mfenc encoder-child session.
+// mfBridge implements medialink.Source (+KeyframeSource, RateControlSource, PipelineReporter) over
+// an mfenc encoder-child session.
+var _ medialink.RateControlSource = (*mfBridge)(nil)
+
 type mfBridge struct {
 	log    *logbus.Bus
 	enc    *mfenc.ProcSession
@@ -618,6 +620,25 @@ func (b *mfBridge) RequestKeyframe() {
 	b.mu.Unlock()
 	if !fresh {
 		b.enc.ForceKeyframe()
+	}
+}
+
+// SetRateHint implements medialink.RateControlSource: the receiver's VRAM governor caps our output.
+// Ladder order (RateHint doc): BITRATE is the live lever we honour now (b.enc.SetBitrate, no reopen)
+// and clears most congestion; FPS then RESOLUTION are best-effort and reserved for the Zig live
+// control ops (logged so a hint is never silently dropped). A mid-route ffmpeg substitute gets the
+// hint too.
+func (b *mfBridge) SetRateHint(h medialink.RateHint) {
+	if sub := b.sub.Load(); sub != nil {
+		sub.SetRateHint(h) // substituted: the hint must reach the engine actually running
+		return
+	}
+	if h.MaxBitrateKbps > 0 && b.enc != nil {
+		b.enc.SetBitrate(h.MaxBitrateKbps)
+	}
+	if h.MaxFPS > 0 || h.MaxHeight > 0 {
+		b.log.Debug(source, "rate hint: fps/resolution caps not yet live (reserved for the Zig control ops); applied bitrate only", map[string]any{
+			"maxFPS": h.MaxFPS, "maxHeight": h.MaxHeight, "maxBitrateKbps": h.MaxBitrateKbps})
 	}
 }
 

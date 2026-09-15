@@ -33,7 +33,10 @@ type ptsEntry struct {
 	tc  medialink.Timecode
 }
 
-// encoder implements medialink.Source (+KeyframeSource, PipelineReporter) over the ffmpeg child.
+// encoder implements medialink.Source (+KeyframeSource, RateControlSource, PipelineReporter) over
+// the ffmpeg child.
+var _ medialink.RateControlSource = (*encoder)(nil)
+
 type encoder struct {
 	log    *logbus.Bus
 	ffmpeg string
@@ -108,6 +111,17 @@ func (e *encoder) RequestKeyframe() {
 	if e.runStop != nil {
 		e.lastKick = now
 		e.runStop()
+	}
+}
+
+// SetRateHint implements medialink.RateControlSource for the ffmpeg substitute. ffmpeg's CLI has no
+// live bitrate/fps channel (both are spawn-time -b:v / -r), so honouring a hint means a child
+// respawn - deferred; the native encoder is the primary rate-control path. Logged so a hint reaching
+// the fallback is never silently dropped.
+func (e *encoder) SetRateHint(h medialink.RateHint) {
+	if h.MaxBitrateKbps > 0 || h.MaxFPS > 0 || h.MaxHeight > 0 {
+		e.log.Debug(source, "rate hint on the ffmpeg substitute is reserved (live change needs a respawn) - ignored", map[string]any{
+			"maxBitrateKbps": h.MaxBitrateKbps, "maxFPS": h.MaxFPS, "maxHeight": h.MaxHeight})
 	}
 }
 

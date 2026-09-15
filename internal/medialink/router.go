@@ -1010,6 +1010,15 @@ func (rm *RouteManager) sendControl(cancel context.CancelFunc, rio *routeIO, src
 					ks.RequestKeyframe() // PLI-style recovery (§2.5); sources without it just resync on the next keyframe
 				}
 			}
+		case MetaRate:
+			// Receiver congestion backpressure (§2.5): its VRAM governor asks us to cap output so
+			// fewer bytes reach a pressured decode/publish pipeline. Apply what the encoder can;
+			// a source without RateControlSource ignores it.
+			if h, err := DecodeRate(f); err == nil {
+				if rc, ok := src.(RateControlSource); ok {
+					rc.SetRateHint(h)
+				}
+			}
 		}
 	}
 }

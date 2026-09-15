@@ -25,6 +25,12 @@ const (
 	// Caps granted sync - a P1 peer never receives them).
 	MetaSync      MetaType = "sync"  // clock-sync request (§2.3 tier 2)
 	MetaSyncReply MetaType = "syncr" // clock-sync response
+
+	// MetaRate is the receiver→sender congestion backpressure (§2.5 sibling of the PLI NACK): the
+	// receiver's VRAM governor asks the sender to CAP its output so fewer bytes reach a congested
+	// decode/publish pipeline. Additive under the §2.1 v1 rule; a peer without a RateControlSource
+	// simply ignores it (parsers accept it, so an older sender degrades cleanly).
+	MetaRate MetaType = "rate"
 )
 
 // metaStream is the reserved control stream id for meta-frames (RTP SSRC-0 analogue).
@@ -57,6 +63,22 @@ type NACK struct {
 	From       uint32   `json:"from"`   // first missing seq (inclusive)
 	To         uint32   `json:"to"`     // last missing seq (inclusive)
 	FrameLevel bool     `json:"pli,omitempty"`
+}
+
+// RateHint is the receiver's congestion backpressure to the sender (MetaRate): CAP output to these
+// ceilings so a VRAM-pressured decode/publish pipeline sees fewer bytes. A zero field = "no cap on
+// that axis / clear it".
+//
+// Ladder order (governor policy): reduce BITRATE first, then FRAMERATE - these usually clear
+// congestion on their own and keep the picture full-resolution. Cut RESOLUTION (MaxHeight) only as
+// a LAST resort, since it re-plans the encode pipeline and is the most visible degradation. The
+// sender applies what it can (bitrate is live on the native encoder; fps/height are best-effort).
+type RateHint struct {
+	Type           MetaType `json:"t"`              // always MetaRate
+	Stream         uint16   `json:"stream"`         // 0 = the whole route
+	MaxBitrateKbps int      `json:"br,omitempty"`   // 0 = no bitrate cap (reduced FIRST)
+	MaxFPS         int      `json:"fps,omitempty"`  // 0 = no fps cap (reduced SECOND)
+	MaxHeight      int      `json:"maxh,omitempty"` // 0 = no downscale (LAST resort)
 }
 
 // SyncPing is the NTP-style (RFC 5905 on-wire semantics, pairwise, §2.3 tier 2) clock probe:
@@ -126,3 +148,6 @@ func DecodeSyncPing(f *Frame) (SyncPing, error) { return decodeMeta[SyncPing](f,
 
 // DecodeSyncPong decodes a MetaSyncReply frame (errNotMeta if it isn't one).
 func DecodeSyncPong(f *Frame) (SyncPong, error) { return decodeMeta[SyncPong](f, MetaSyncReply) }
+
+// DecodeRate decodes a MetaRate frame (errNotMeta if it isn't one).
+func DecodeRate(f *Frame) (RateHint, error) { return decodeMeta[RateHint](f, MetaRate) }
