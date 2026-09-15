@@ -17,7 +17,7 @@ const (
 	netCtlPoll       = 500 * time.Millisecond
 	netCtlBackoff    = 5 * time.Second
 	netCtlTimeout    = 800 * time.Millisecond
-	defaultNetCtlURL = "http://127.0.0.1:8082" // VirtualDJ Network Control plugin default
+	defaultNetCtlURL = "http://127.0.0.1:80" // VirtualDJ Network Control plugin default port (matches config.ResolvedNetCtlURL)
 )
 
 // netCtlTarget maps a vdjscript deck reference to the scope its readings populate.
@@ -38,6 +38,8 @@ func (s *Source) runNetCtl(ctx context.Context, emit func(session.Observation)) 
 		{ref: "master", scope: session.Scope{Kind: session.ScopeMaster}},
 		{ref: "1", scope: session.Scope{Kind: session.ScopeDeck, ID: "A"}},
 		{ref: "2", scope: session.Scope{Kind: session.ScopeDeck, ID: "B"}},
+		{ref: "3", scope: session.Scope{Kind: session.ScopeDeck, ID: "C"}}, // VDJscript deck addressing accepts numeric 1..4
+		{ref: "4", scope: session.Scope{Kind: session.ScopeDeck, ID: "D"}},
 	}
 	last := map[string]string{} // scope key → "artist|title" (the Loaded boundary)
 	down := false
@@ -102,7 +104,7 @@ func (s *Source) pollNetCtl(ctx context.Context, c *http.Client, base string, tg
 	if err != nil {
 		return nil, false, err
 	}
-	playStr, err := s.queryNetCtl(ctx, c, base, "deck "+tg.ref+" is playing")
+	playStr, err := s.queryNetCtl(ctx, c, base, "deck "+tg.ref+" play") // VDJscript: `play` in query context returns true/false ("is playing" is not a valid verb)
 	if err != nil {
 		return nil, false, err
 	}

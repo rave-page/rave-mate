@@ -41,7 +41,7 @@ loadedAt`. Channel: `fader, eqHigh, eqMid, eqLow, filter, cue`. Master: `bpm, ph
 | MIDI custom (`midi.custom`) | **live** | deck `isPlaying`; channel `fader, eq*, filter, cue` | Our RavePage-State.tsi CC map. `fader` drives now-playing. See `MIDI_MAPPING.md`. |
 | MIDI Denon (`midi.denon`) | **live (best-effort)** | deck A/B `title, artist` | Traktor's stock DN-HC4500 map reused for LCD text. Validate per hardware. |
 | Serato (`serato`) | **live** | deck `title, artist, album, genre, bpm, key` | Local files only (no account/internet). Collection = `_Serato_/database V2` + crates; now-playing = newest `History/Sessions/*.session`, ~1–2s lag. See "Cross-DJ-software" below. |
-| VirtualDJ NetCtl (`virtualdj.netctl`) | **live** | master `title, artist, bpm, key, isPlaying` | Network Control plugin HTTP poll (~500ms). Full metadata, but needs VirtualDJ **Pro 2023+** + one-time manual plugin install. |
+| VirtualDJ NetCtl (`virtualdj.netctl`) | **live** | deck A–D + master `title, artist, bpm, key, isPlaying` | Network Control plugin HTTP poll (~500ms); polls decks 1–4 + master (per-deck, like Traktor). Full metadata, but needs VirtualDJ **Pro 2023+** + one-time manual plugin install. |
 | VirtualDJ OS2L (`virtualdj.os2l`) | **live** | master `bpm` (beat/phase) | We host an mDNS+TCP OS2L server VDJ auto-connects to - **zero config**, but **no track text** (BPM/beat only). |
 | VirtualDJ tracklist (`virtualdj.history`) | **live (delayed)** | master `title, artist` | History tracklist file poll. Title/artist only, laggy fallback. |
 | Rekordbox DB (`rekordbox.db`) | **live (delayed)** | master `title, artist, bpm, key` | master.db `djmdSongHistory` poll. Reuses the SQLCipher key; **~60s lag** (rekordbox marks "played" ~1min in). |

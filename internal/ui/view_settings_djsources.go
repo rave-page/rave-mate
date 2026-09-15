@@ -115,7 +115,7 @@ func (u *UI) virtualdjCard() fyne.CanvasObject {
 		link,
 		os2l,
 		tracklist,
-		mutedLabel("Three ways to read the live set, pick any:\n• Network Control = full track title/artist/BPM/key, but needs VirtualDJ Pro 2023+ and a one-time manual plugin install (link above).\n• OS2L = VirtualDJ auto-connects with zero setup, but only carries live BPM/beat - no track name.\n• Tracklist = reads VDJ's history file (title/artist only, delayed).\nCollection reading works regardless. Toggle off/on to apply changes."),
+		mutedLabel("Three ways to read the live set, pick any:\n• Network Control = full track title/artist/BPM/key, but needs VirtualDJ Pro 2023+ and a one-time manual plugin install (link above).\n• OS2L = VirtualDJ auto-connects with zero setup, but only carries live BPM/beat - no track name. If auto-discovery doesn't connect, set VDJ's manual os2lDirectIp=\"host:port\" option to this PC.\n• Tracklist = reads VDJ's history file (title/artist only, delayed).\nCollection reading works regardless. Toggle off/on to apply changes."),
 	)
 	return featureCard("VirtualDJ", "Collection + live now-playing (Network Control / OS2L / tracklist).", toggle, st, body)
 }

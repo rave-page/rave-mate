@@ -63,7 +63,7 @@ func (s *Source) Capabilities() []session.Capability {
 			session.FieldKey, session.FieldIsPlaying, session.FieldElapsedTime}
 		caps = append(caps,
 			session.Capability{Scope: session.ScopeMaster, Fields: fields},
-			session.Capability{Scope: session.ScopeDeck, IDs: []string{"A", "B"}, Fields: fields},
+			session.Capability{Scope: session.ScopeDeck, IDs: []string{"A", "B", "C", "D"}, Fields: fields},
 		)
 	}
 	if s.cfg.OS2L {
