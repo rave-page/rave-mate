@@ -121,6 +121,7 @@ type UI struct {
 	fragH   map[string]uint64 // last-pushed HTML hash per fragment id (scheduler surfaces; tick_sched.go)
 	fragGen uint64            // ++ on every frags/fragH drop; a batch built across a drop is discarded
 	// --- end phaseb-sched ---
+	liveLinkAnim bool // client rAF 'link' phrase-bar loop is running (armed by pushAbleLink; the streaming-critical tick freezes it once, P5). Guarded by fragMu.
 	// --- phaseb-retain ---
 	rcMu sync.Mutex     // guards rc (built lazily on the first retained send)
 	rc   *retainedChans // this UI's retained-doc delta channels (patch_chan.go); nil = never used
@@ -658,6 +659,10 @@ func (u *UI) livePushOnce() {
 		// #peers-media, only while a route exists and the Peers tab is the one on screen - not a
 		// tab repaint, and no cache is disabled.
 		u.mediaRouteTick()
+		// Live-landmark exemption (same rationale, Live tab): the stream-up dot + recorder state are
+		// the "is the picture live / am I recording" answers, and they froze for the whole stream
+		// (this branch returns before the general Live tick). Scoped to the Live tab, hash-deduped.
+		u.liveCriticalTick()
 		return
 	}
 	if fn := liveTicks[u.activeTab()]; fn != nil {

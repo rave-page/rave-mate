@@ -494,7 +494,13 @@ func linkPhraseBarStr(fill, cap string) string {
 // advances smoothly at display refresh between the ~1 Hz ticks: phase (beats) + tempo drive a
 // local phase = (phase + tempo/60·dt) mod quantum → fill width + beat number. rate 0
 // (disabled/unavailable) = static snap + loop stop. Called each tick after the panel patch.
-func (u *UI) pushAbleLink() {
+func (u *UI) pushAbleLink() { u.pushAbleLinkR(false) }
+
+// pushAbleLinkR is pushAbleLink with an explicit freeze: forceStatic pins rate 0 regardless of the
+// live tempo (the P5 streaming freeze - the general tick's push is gated shut while a stream runs,
+// so the client loop would otherwise interpolate the whole set on its last-known rate). It records
+// whether the client loop is now animating (liveLinkAnim) so liveCriticalTick knows a freeze is owed.
+func (u *UI) pushAbleLinkR(forceStatic bool) {
 	if u.shell == nil || u.svc.AbleLink == nil {
 		return
 	}
@@ -508,9 +514,10 @@ func (u *UI) pushAbleLink() {
 	tmpl := i18n.T("live.ablelink.phraseBeat", i18n.A{"beat": "\x00", "quantum": fmt.Sprint(int(q))})
 	pre, post, _ := strings.Cut(tmpl, "\x00")
 	rate := 0.0
-	if st.Available && st.Enabled && st.Tempo > 0 {
+	if !forceStatic && st.Available && st.Enabled && st.Tempo > 0 {
 		rate = 1.0
 	}
+	u.setLinkAnim(rate > 0)
 	u.enqueueEval("rtlink", fmt.Sprintf(
 		"window.__rt&&window.__rt('link','live-link',{fill:'live-link-fill',cap:'live-link-cap',phase:%.4f,tempo:%.4f,q:%.2f,rate:%.1f,pre:%s,post:%s})",
 		st.Phase, st.Tempo, q, rate, jsQuote(pre), jsQuote(post)))

@@ -21,7 +21,9 @@
 
 /* progress */
 .pbar { position: relative; height: 22px; border-radius: 8px; background: rgba(255,255,255,.06); overflow: hidden; border: 1px solid rgba(255,255,255,.08); }
-.pbar-fill { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, var(--rp-base,#F70864), var(--rp-hot,#FF3E8A)); transition: width .3s; }
+.pbar-fill { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, var(--rp-base,#F70864), var(--rp-hot,#FF3E8A)); }
+/* P5: the phrase-bar width only animates when motion is welcome; the static fill stands alone. */
+@media (prefers-reduced-motion: no-preference) { .pbar-fill { transition: width .3s; } }
 .pbar-cap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 11px 'JetBrains Mono', ui-monospace, monospace; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
 
 /* status row (dot + label + sub-line) */

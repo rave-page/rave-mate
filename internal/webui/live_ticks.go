@@ -30,6 +30,10 @@ func init() {
 			u.liveTickLegacy(&js, st)
 		}
 		// --- end phaseb-sched ---
+		// #live-stream-state (the auto-live landmark) is inside #live-transport, which is not a tick
+		// fragment, so it otherwise repaints only on a full render (P3). Single owner (frags cache);
+		// liveCriticalTick keeps the same id fresh while the governor withholds this tick.
+		u.tickPatch(&js, "live-stream-state", liveStreamStateHTML(st.Live.Transport))
 		u.flushTick(&js)
 		if u.svc.AbleLink != nil {
 			u.pushAbleLink() // feed the client rAF phrase-bar interpolator (after the panel patch)
