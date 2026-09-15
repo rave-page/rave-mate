@@ -112,6 +112,7 @@ type ProcDecSession struct {
 	resolve     func() (uint64, uint32, int, int, bool)
 	dstRecycles int
 	dstLastMove time.Time
+	dstHeld     bool // in a VRAM-hold episode (recycle refused for lack of headroom): log its start once
 	recycle     func(reason string)
 
 	done       chan struct{} // closed by Close: stops the destination watchdog
@@ -434,7 +435,24 @@ func (d *ProcDecSession) recycleDest(why string) {
 	if d.closed.Load() {
 		return
 	}
+	// VRAM-headroom gate: a close()+reopen cannot re-allocate device/VP/decoder/DXVA-pool on a
+	// saturated card - it frees a healthy resident pipeline and then fails to rebuild, cascading to
+	// the ffmpeg CPU path (a NEW shared texture => Resolume re-registers interop => the crash). Under
+	// low free VRAM HOLD the resident pipeline instead; the picture freezes on its last frame and
+	// publish resumes when headroom returns. Fails open (headroom unknown => behave as before).
+	if h := DecHeadroom(); !recycleAllowed(h, DecRebuildFloorMB) {
+		d.dstMu.Lock()
+		first := !d.dstHeld
+		d.dstHeld = true
+		d.dstMu.Unlock()
+		if first {
+			Warnf("mfenc: native decode destination %q recycle HELD - free VRAM %d MB < rebuild floor %d MB (%s); holding the resident pipeline, not reopening on a full card",
+				d.dstName, h.FreeMB, DecRebuildFloorMB, why)
+		}
+		return
+	}
 	d.dstMu.Lock()
+	d.dstHeld = false
 	if time.Since(d.dstLastMove) < decWatchEvery {
 		d.dstMu.Unlock()
 		return // one recycle per tick however many detectors fired

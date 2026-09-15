@@ -11,9 +11,11 @@ import (
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/encoderscan"
 	"rave.page/mate/internal/eventbus"
+	"rave.page/mate/internal/gpumem"
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/mediapipe"
 	"rave.page/mate/internal/mediaroute"
+	"rave.page/mate/internal/mfenc"
 	"rave.page/mate/internal/webcam"
 )
 
@@ -80,6 +82,20 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 	mediapipe.ZeroCopyDecode = func() bool { return liveCfg().ZeroCopyDecode() }
 	// zigmedia inc 3: adapter-affinity re-placement. Still default OFF - see config.ZigAffinity.
 	mediapipe.ZeroCopyAffinity = func() bool { return liveCfg().ZeroCopyAffinity() }
+	// VRAM congestion governor: gate decode recycling on primary-adapter headroom so a reopen never
+	// frees a resident pipeline it can't rebuild on a full card (=> ffmpeg => new shared texture =>
+	// Resolume re-registers interop => E_OUTOFVIDEOMEMORY crash). Fails open when the governor is off
+	// or headroom is unknown. One sampler for the child; read only when a recycle is about to fire.
+	gpuSampler := gpumem.NewSampler()
+	mfenc.DecHeadroom = func() gpumem.Headroom {
+		if !liveCfg().VramGovernorEnabled() {
+			return gpumem.Headroom{}
+		}
+		return gpumem.ReadHeadroom(gpuSampler)
+	}
+	if r := liveCfg().ResolvedVramReserveMB(); r > 0 {
+		mfenc.DecRebuildFloorMB = uint64(r)
+	}
 	devSel := encoderscan.NewDeviceSelector(func() (string, string) { return liveCfg().DevicePref() }, nil)
 	f.router = medialink.New(medialink.Options{
 		Self: in.Self, Bus: mediaBusAdapter{f.bus}, Secrets: f.secrets, Clock: f.clock,

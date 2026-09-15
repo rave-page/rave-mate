@@ -717,6 +717,19 @@ func run(parent context.Context, serviceMode bool) error {
 	mediapipe.ZeroCopyDecode = func() bool { return mediaLinkCfg().ZeroCopyDecode() }
 	// zigmedia inc 3: adapter-affinity re-placement. Still default OFF - see config.ZigAffinity.
 	mediapipe.ZeroCopyAffinity = func() bool { return mediaLinkCfg().ZeroCopyAffinity() }
+	// VRAM congestion governor (in-proc media path): gate decode recycling on primary-adapter
+	// headroom so a reopen never frees a resident pipeline it can't rebuild on a full card (=> ffmpeg
+	// => new shared texture => Resolume re-registers interop => crash). Fails open when off/unknown.
+	gpuGovSampler := gpumem.NewSampler()
+	mfenc.DecHeadroom = func() gpumem.Headroom {
+		if !mediaLinkCfg().VramGovernorEnabled() {
+			return gpumem.Headroom{}
+		}
+		return gpumem.ReadHeadroom(gpuGovSampler)
+	}
+	if r := mediaLinkCfg().ResolvedVramReserveMB(); r > 0 {
+		mfenc.DecRebuildFloorMB = uint64(r)
+	}
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,
 		Encoder: encFac, Decoder: decFac,
