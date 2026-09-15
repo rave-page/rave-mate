@@ -191,6 +191,7 @@ func vrcEmotesFixture() vrcEmotesSt {
 		Hint:        "Generates a flipbook sheet VRChat accepts as an animated emoji.",
 		SourceLabel: "Source clip", NameLabel: "Emoji name", FramesLabel: "Frames", FPSLabel: "FPS",
 		TrimStart: "Trim start", TrimEnd: "Trim end", OutDirLabel: "Output folder",
+		Browse: "Browse",
 		FrameOpts: []vrcFrameOptSt{
 			{Frames: 4, Grid: 2, Res: 512},
 			{Frames: 16, Grid: 4, Res: 256, Sel: true},

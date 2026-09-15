@@ -32,6 +32,9 @@ type pickReq struct {
 	target string   // the act to apply the path to
 }
 
+// pickSelfPatch: targets that update their own field via eval and must not trigger a full re-render.
+var pickSelfPatch = map[string]bool{"vrc-emote-source": true, "vrc-emote-outdir": true}
+
 func init() {
 	onPrefix("pick-dir:", func(u *UI, m actMsg) { u.runPick("dir", "", m.arg("pick-dir:")) })
 	onPrefix("pick-file:", func(u *UI, m actMsg) { u.runPick("file", "", m.arg("pick-file:")) })
@@ -130,7 +133,9 @@ func (u *UI) pickApply(idTx, path string) {
 		return
 	}
 	u.onActMsg(actMsg{Act: r.target, Val: path, tok: r.tok})
-	u.patchMain() // path inputs outside the modal (settings/library toolbars) show the chosen value
+	if !pickSelfPatch[r.target] {
+		u.patchMain() // path inputs outside the modal (settings/library toolbars) show the chosen value
+	}
 }
 
 // redispatch re-enters the action pipeline exactly as a page event would (covers the set:/toggle:

@@ -10,6 +10,22 @@
   border:1px solid rgba(255,255,255,.08); white-space:pre-wrap; word-break:break-word; color:var(--rp-fg,#fafafa); font-size:13px; min-height:1.2em; }
 .vrc-note { font-size:12px; color:var(--rp-muted,#9aa); margin-top:6px; }
 
+/* flipbook generator - path row (input + Browse) + crop fields gated by the Crop toggle */
+.vrc-pathrow { display:flex; gap:8px; align-items:center; }
+.vrc-pathrow .field-input { flex:1 1 auto; min-width:0; }
+.vrc-pathrow .rp-btn { flex:0 0 auto; }
+.vrc-crop-in { width:70px; }
+.vrc-crop:not(:has(input[name=crop]:checked)) .vrc-crop-fields { display:none; }
+
+/* flipbook result (runtime-patched into #vrc-emote-result) */
+.vrc-note.over { color:var(--rp-hot,#FF3E8A); }
+.vrc-busy { opacity:.8; }
+.vrc-result { display:flex; gap:12px; align-items:flex-start; margin-top:8px; }
+.vrc-sheet { width:128px; height:128px; object-fit:contain; flex:0 0 auto; border-radius:8px; image-rendering:pixelated;
+  background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); }
+.vrc-result-body { display:flex; flex-direction:column; gap:6px; min-width:0; flex:1 1 auto; }
+.vrc-path { font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--rp-muted,#9aa); word-break:break-all; }
+
 /* camera-path 3-D preview = shared .cpv-view (campath.css) */
 .vrc-cp-info { font-size:12px; color:var(--rp-muted,#9aa); margin:8px 0; line-height:1.5; }
 

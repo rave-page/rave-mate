@@ -4132,8 +4132,18 @@
         "trimStart": "Trim start (s)"
       },
       "generate": "Generate sprite sheet",
-      "hint": "Generate a 1024² animated-emoji sprite sheet (named <name>_<N>frames_<fps>fps.png). Enter absolute file paths - native pickers are a webview follow-up.",
-      "pingpong": "Bake ping-pong (forward then reversed)"
+      "hint": "Generate an animated-emoji sprite sheet (named <name>_<N>frames_<fps>fps.png). More frames = lower per-frame resolution - 16 is a good default. Browse for a source clip; custom emoji need VRC+.",
+      "pingpong": "Bake ping-pong (forward then reversed)",
+      "result": {
+        "copyPath": "Copy path",
+        "failed": "Generation failed",
+        "ffmpegMissing": "ffmpeg not found - install it and set its path in Settings to generate sprite sheets.",
+        "generating": "Generating sprite sheet…",
+        "openFolder": "Open output folder",
+        "savedHint": "Upload on the VRChat website (Gallery ▸ Emoji) with Sprite Sheet Mode enabled. Custom emoji need VRC+.",
+        "savedTitle": "Sprite sheet saved",
+        "upload": "Open upload page"
+      }
     },
     "empty": {
       "addPlaceholders": "Add {placeholders} to your bio first.",

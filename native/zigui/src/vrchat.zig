@@ -84,6 +84,7 @@ pub const Emotes = struct {
     trimStart: []const u8 = "",
     trimEnd: []const u8 = "",
     outDirLabel: []const u8 = "",
+    browse: []const u8 = "",
     frameOpts: []const FrameOpt = &.{},
     outDir: []const u8 = "",
     pingpong: []const u8 = "",
@@ -335,8 +336,9 @@ pub fn renderEmotes(h: *Html, s: Emotes) !void {
     try c.hint(h, "info", s.hint);
     try h.raw("<form data-act=vrc-emote-gen><label class=field><span class=field-label>");
     try h.esc(s.sourceLabel);
-    try h.raw("</span><input class=field-input name=source placeholder=\"C:\\path\\clip.mp4\"></label>" ++
-        "<label class=field><span class=field-label>");
+    try h.raw("</span><div class=vrc-pathrow><input id=vrc-emote-source class=field-input name=source placeholder=\"C:\\path\\clip.mp4\"><button class=\"rp-btn rp-btn--ghost\" type=button data-act=\"pick-file:vrc-emote-source\">");
+    try h.esc(s.browse);
+    try h.raw("</button></div></label><label class=field><span class=field-label>");
     try h.esc(s.nameLabel);
     try h.raw("</span><input class=field-input name=name placeholder=\"emoji name\"></label>");
     try c.fpairOpen(h);
@@ -371,23 +373,24 @@ pub fn renderEmotes(h: *Html, s: Emotes) !void {
     try c.fpairClose(h);
     try h.raw("<label class=field><span class=field-label>");
     try h.esc(s.outDirLabel);
-    try h.raw("</span><input class=field-input name=outdir value=\"");
+    try h.raw("</span><div class=vrc-pathrow><input id=vrc-emote-outdir class=field-input name=outdir value=\"");
     try h.esc(s.outDir);
-    try h.raw("\"></label><label class=row><span class=row-label>");
+    try h.raw("\"><button class=\"rp-btn rp-btn--ghost\" type=button data-act=\"pick-dir:vrc-emote-outdir\">");
+    try h.esc(s.browse);
+    try h.raw("</button></div></label><label class=row><span class=row-label>");
     try h.esc(s.pingpong);
     try h.raw("</span><span class=switch><input type=checkbox name=pingpong value=1><span class=switch-track></span></span></label>" ++
-        "<label class=row><span class=row-label>");
+        "<div class=vrc-crop><label class=row><span class=row-label>");
     try h.esc(s.crop);
     try h.raw("</span><span class=switch><input type=checkbox name=crop value=1><span class=switch-track></span></span></label>" ++
-        "<div class=btn-row><input class=field-input name=cropx placeholder=\"x\" style=\"width:70px\">" ++
-        "<input class=field-input name=cropy placeholder=\"y\" style=\"width:70px\">" ++
-        "<input class=field-input name=cropw placeholder=\"w\" style=\"width:70px\">" ++
-        "<input class=field-input name=croph placeholder=\"h\" style=\"width:70px\"></div>" ++
+        "<div class=\"btn-row vrc-crop-fields\"><input class=\"field-input vrc-crop-in\" name=cropx placeholder=\"x\">" ++
+        "<input class=\"field-input vrc-crop-in\" name=cropy placeholder=\"y\">" ++
+        "<input class=\"field-input vrc-crop-in\" name=cropw placeholder=\"w\">" ++
+        "<input class=\"field-input vrc-crop-in\" name=croph placeholder=\"h\"></div></div>" ++
         "<button class=\"rp-btn rp-btn--go\" type=submit>");
     try h.esc(s.generate);
     try h.raw("</button></form><div id=vrc-emote-result></div><div class=btn-row>");
-    try pathBtn(h, s.openFolder, "outline", "open-url", s.outDir);
-    try c.btn(h, s.openUpload, "explore", "open-url", s.uploadUrl);
+    try pathBtn(h, s.openFolder, "ghost", "open-url", s.outDir);
     try h.raw("</div></div>");
 }
 

@@ -1120,7 +1120,7 @@ var schema = []msg{
 	},
 	{
 		name: "VrcEmotes", goT: "vrcEmotesSt", zigT: "vrchat.Emotes",
-		fs: []field{s(1, "Hint", "hint"), s(2, "SourceLabel", "sourceLabel"), s(3, "NameLabel", "nameLabel"), s(4, "FramesLabel", "framesLabel"), s(5, "FPSLabel", "fpsLabel"), s(6, "TrimStart", "trimStart"), s(7, "TrimEnd", "trimEnd"), s(8, "OutDirLabel", "outDirLabel"), li(9, "FrameOpts", "frameOpts", "VrcFrameOpt"), s(10, "OutDir", "outDir"), s(11, "PingPong", "pingpong"), s(12, "Crop", "crop"), s(13, "Generate", "generate"), s(14, "OpenFolder", "openFolder"), s(15, "OpenUpload", "openUpload"), s(16, "UploadURL", "uploadUrl")},
+		fs: []field{s(1, "Hint", "hint"), s(2, "SourceLabel", "sourceLabel"), s(3, "NameLabel", "nameLabel"), s(4, "FramesLabel", "framesLabel"), s(5, "FPSLabel", "fpsLabel"), s(6, "TrimStart", "trimStart"), s(7, "TrimEnd", "trimEnd"), s(8, "OutDirLabel", "outDirLabel"), li(9, "FrameOpts", "frameOpts", "VrcFrameOpt"), s(10, "OutDir", "outDir"), s(11, "PingPong", "pingpong"), s(12, "Crop", "crop"), s(13, "Generate", "generate"), s(14, "OpenFolder", "openFolder"), s(15, "OpenUpload", "openUpload"), s(16, "UploadURL", "uploadUrl"), s(17, "Browse", "browse")},
 	},
 	{
 		name: "VrcPathItem", goT: "vrcPathItemSt", zigT: "vrchat.PathItem",

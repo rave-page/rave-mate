@@ -99,6 +99,7 @@ type vrcEmotesSt struct {
 	TrimStart   string          `json:"trimStart"`
 	TrimEnd     string          `json:"trimEnd"`
 	OutDirLabel string          `json:"outDirLabel"`
+	Browse      string          `json:"browse"`
 	FrameOpts   []vrcFrameOptSt `json:"frameOpts,omitempty"`
 	OutDir      string          `json:"outDir"`
 	PingPong    string          `json:"pingpong"`
@@ -376,6 +377,7 @@ func (u *UI) vrcEmotesState() vrcEmotesSt {
 		TrimStart:   i18n.T("vrchat.emotes.field.trimStart"),
 		TrimEnd:     i18n.T("vrchat.emotes.field.trimEnd"),
 		OutDirLabel: i18n.T("vrchat.emotes.field.outputDir"),
+		Browse:      i18n.T("common.browse"),
 		FrameOpts:   opts,
 		OutDir:      f.ResolvedFlipbookDir(),
 		PingPong:    i18n.T("vrchat.emotes.pingpong"),
@@ -611,28 +613,25 @@ func vrcEmotesRenderHTML(st vrcEmotesSt) string {
 	b.WriteString(`<div class="rp-card vrc-card">`)
 	b.WriteString(hint("info", st.Hint))
 	b.WriteString(`<form data-act=vrc-emote-gen>`)
-	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(st.SourceLabel) + `</span><input class=field-input name=source placeholder="C:\path\clip.mp4"></label>`)
+	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(st.SourceLabel) + `</span><div class=vrc-pathrow><input id=vrc-emote-source class=field-input name=source placeholder="C:\path\clip.mp4"><button class="rp-btn rp-btn--ghost" type=button data-act="pick-file:vrc-emote-source">` + html.EscapeString(st.Browse) + `</button></div></label>`)
 	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(st.NameLabel) + `</span><input class=field-input name=name placeholder="emoji name"></label>`)
 	b.WriteString(fpair(`<label class=field><span class=field-label>`+html.EscapeString(st.FramesLabel)+`</span><select class="field-input select-input" name=frames>`+
 		vrcFrameOptionsHTML(st.FrameOpts)+`</select></label>`,
 		`<label class=field><span class=field-label>`+html.EscapeString(st.FPSLabel)+`</span><input class=field-input name=fps type=number value=20 min=1 max=120></label>`))
 	b.WriteString(fpair(`<label class=field><span class=field-label>`+html.EscapeString(st.TrimStart)+`</span><input class=field-input name=trimStart placeholder="optional"></label>`,
 		`<label class=field><span class=field-label>`+html.EscapeString(st.TrimEnd)+`</span><input class=field-input name=trimEnd placeholder="optional"></label>`))
-	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(st.OutDirLabel) + `</span><input class=field-input name=outdir value="` + html.EscapeString(st.OutDir) + `"></label>`)
+	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(st.OutDirLabel) + `</span><div class=vrc-pathrow><input id=vrc-emote-outdir class=field-input name=outdir value="` + html.EscapeString(st.OutDir) + `"><button class="rp-btn rp-btn--ghost" type=button data-act="pick-dir:vrc-emote-outdir">` + html.EscapeString(st.Browse) + `</button></div></label>`)
 	b.WriteString(`<label class=row><span class=row-label>` + html.EscapeString(st.PingPong) + `</span>` +
 		`<span class=switch><input type=checkbox name=pingpong value=1><span class=switch-track></span></span></label>`)
-	b.WriteString(`<label class=row><span class=row-label>` + html.EscapeString(st.Crop) + `</span>` +
-		`<span class=switch><input type=checkbox name=crop value=1><span class=switch-track></span></span></label>`)
-	b.WriteString(`<div class=btn-row>` +
-		`<input class=field-input name=cropx placeholder="x" style="width:70px">` +
-		`<input class=field-input name=cropy placeholder="y" style="width:70px">` +
-		`<input class=field-input name=cropw placeholder="w" style="width:70px">` +
-		`<input class=field-input name=croph placeholder="h" style="width:70px"></div>`)
+	b.WriteString(`<div class=vrc-crop><label class=row><span class=row-label>` + html.EscapeString(st.Crop) + `</span><span class=switch><input type=checkbox name=crop value=1><span class=switch-track></span></span></label>` +
+		`<div class="btn-row vrc-crop-fields">` +
+		`<input class="field-input vrc-crop-in" name=cropx placeholder="x">` +
+		`<input class="field-input vrc-crop-in" name=cropy placeholder="y">` +
+		`<input class="field-input vrc-crop-in" name=cropw placeholder="w">` +
+		`<input class="field-input vrc-crop-in" name=croph placeholder="h"></div></div>`)
 	b.WriteString(`<button class="rp-btn rp-btn--go" type=submit>` + html.EscapeString(st.Generate) + `</button></form>`)
 	b.WriteString(`<div id=vrc-emote-result></div>`)
-	b.WriteString(`<div class=btn-row>` +
-		vrcPathBtn(st.OpenFolder, "outline", "open-url", st.OutDir) +
-		btn(st.OpenUpload, "explore", "open-url", st.UploadURL) + `</div>`)
+	b.WriteString(`<div class=btn-row>` + vrcPathBtn(st.OpenFolder, "ghost", "open-url", st.OutDir) + `</div>`)
 	b.WriteString(`</div>`)
 	return b.String()
 }
