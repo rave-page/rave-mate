@@ -101,7 +101,7 @@ Minimize tokens. Drop filler ("simply", "just", "in order to", "make sure that")
   Deeper states (settings sections, dialogs) via `ctl click` + `ctl screenshot`.
 - **Clean up scratch artefacts.** Delete one-off scripts/dumps; keep the tree clean.
 - **Root `.md` hygiene → `.devnotes/`.** This repo is PUBLIC: keep only user/contributor-facing docs in root (`README`, `CONTRIBUTING`, `SECURITY`, `SUPPLY_CHAIN`, `CLAUDE.md`, `AGENTS.md`). Longer-form user docs → `docs/`. Every other `.md` — `*_SUMMARY`/`*_PLAN`/`*_RESEARCH`/`*_DESIGN`/migration notes, any agent work-product — goes in `.devnotes/` (git-tracked, not user-facing). Never leave agent notes in the base dir; write new ones straight to `.devnotes/`.
-- **Commit after each patch / feature / phase.** Once a logical unit passes `go build ./... && go vet ./... && go test ./...` (and golangci-lint if present), commit it (never push) - don't batch many features into one commit. Pushing and PRs happen only when the user explicitly asks.
+- **Commit after each patch / feature / phase, then push `development`.** Once a logical unit passes `go build ./... && go vet ./... && go test ./...` (and golangci-lint if present), commit it - don't batch many features into one commit - and **push `development` once the unit is verified green** (owner standing rule, 2026-09-15: "we always push on development"; CI/Nightly going green is a follow-up to close yourself, not a question to ask). Never force-push. PRs, and anything toward protected `master`, only when the user explicitly asks.
 
 ## Design & UX (research-grounded, binding)
 
