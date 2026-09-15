@@ -1,15 +1,18 @@
 // Package seratosrc adapts the Serato decoder (internal/serato) into a session Source.
 // It loads the collection (database V2 + crates) for libsync and, when now-playing is
-// enabled, polls the newest History session file by mtime and emits the CURRENT track on
-// EACH deck to the merger. Serato logs a per-deck history entry per played track; the live
-// track on a deck is its latest entry with no endtime. Observations target a deck scope
+// enabled, emits the CURRENT track on EACH deck to the merger. Now-playing is read
+// SQLite-first, binary-fallback: Serato 4.x writes live history to master.sqlite (V4 path),
+// so each poll reads it first; Serato ≤3.x wrote binary History\Sessions\*.session files, the
+// fallback when no V4 DB exists. Either way Serato logs a per-deck entry per played track; the
+// live track on a deck is its latest entry with no endtime. Observations target a deck scope
 // (1→A …) with isPlaying set, so concurrent decks surface independently (else master when
-// Serato writes no deck number). Delayed (file-poll) but metadata-rich; no mixer/fader state.
+// Serato writes no deck number). Delayed (poll) but metadata-rich; no mixer/fader state.
 package seratosrc
 
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"time"
@@ -30,9 +33,15 @@ type Source struct {
 	dir        string
 	nowPlaying bool
 
-	lastFile string            // last polled session path
-	lastMod  time.Time         // last polled session mtime
+	lastFile string            // last polled binary session path
+	lastMod  time.Time         // last polled binary session mtime
 	lastKey  map[string]string // per-scope (deck/master) last-emitted track key (Loaded boundary)
+
+	v4Path      string    // resolved Serato 4 master.sqlite (cached; "" = none)
+	v4Resolved  bool      // v4Path resolution done
+	lastV4Mod   time.Time // last read master.sqlite mtime (change-detect gate)
+	lastV4File  string    // last read master.sqlite path
+	v4ErrLogged bool      // V4 read error already logged (throttle)
 }
 
 // New builds the source; seratoDir "" resolves to serato.DefaultDir().
@@ -79,8 +88,12 @@ func (s *Source) Start(ctx context.Context, emit func(session.Observation)) erro
 	}
 }
 
-// poll re-reads the newest session when its file changed and emits the latest played entry.
+// poll reads current now-playing: Serato 4 SQLite first, then the binary session fallback.
 func (s *Source) poll(emit func(session.Observation)) {
+	if s.pollV4(emit) {
+		return // V4 DB present: authoritative for Serato 4 (binary .session isn't written)
+	}
+	// Binary fallback (Serato ≤3.x): re-read the newest session when its file changed.
 	path, mod, err := serato.NewestSession(s.dir)
 	if err != nil {
 		return // no sessions yet - silent; Serato may not be running
@@ -101,10 +114,65 @@ func (s *Source) poll(emit func(session.Observation)) {
 		s.log.Warn(session.SourceSerato, "parse session failed", map[string]any{"path": path, "err": err.Error()})
 		return
 	}
+	s.emitByDeck(emit, tracks)
+}
 
-	// Per-deck current track: Serato appends a history entry per played track carrying its
-	// deck; the live track on a deck is its latest entry, playing iff endtime is unset.
-	// Emit one deck-scoped observation per deck so concurrent decks surface independently.
+// pollV4 reads the Serato 4 master.sqlite (change-detected by mtime) and emits per-deck. Returns
+// true when a V4 DB exists (poll fully handled - don't read the binary format, which Serato 4
+// doesn't write), false when none is found (caller falls back to the binary session). A read
+// error is logged once and still returns true: a transient lock resolves on the next poll (the
+// mtime gate only advances on success), and there's no valid binary source to fall to on V4.
+func (s *Source) pollV4(emit func(session.Observation)) bool {
+	path := s.v4DBPath()
+	if !serato.HasV4DB(path) {
+		return false
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return false // vanished between HasV4DB and Stat: let the binary path try
+	}
+	mod := fi.ModTime()
+	if path == s.lastV4File && !mod.After(s.lastV4Mod) {
+		return true // unchanged since last poll
+	}
+	tracks, err := serato.ReadLatestV4Session(path)
+	if err != nil {
+		if !s.v4ErrLogged {
+			s.log.Debug(session.SourceSerato, "read serato 4 db failed", map[string]any{"path": path, "err": err.Error()})
+			s.v4ErrLogged = true
+		}
+		return true // present but unreadable this tick; retry next poll (gate not advanced)
+	}
+	s.v4ErrLogged = false
+	s.lastV4File, s.lastV4Mod = path, mod
+	s.emitByDeck(emit, tracks)
+	return true
+}
+
+// v4DBPath resolves + caches the Serato 4 master.sqlite path: <dir>\Library\master.sqlite when
+// the configured Serato dir points at the library root, else the per-OS default. "" when none.
+func (s *Source) v4DBPath() string {
+	if s.v4Resolved {
+		return s.v4Path
+	}
+	s.v4Resolved = true
+	if s.dir != "" {
+		if cand := filepath.Join(s.dir, "Library", "master.sqlite"); serato.HasV4DB(cand) {
+			s.v4Path = cand
+			return s.v4Path
+		}
+	}
+	if p, err := serato.DefaultV4DBPath(); err == nil {
+		s.v4Path = p
+	}
+	return s.v4Path
+}
+
+// emitByDeck emits one deck-scoped observation per active deck (concurrent decks surface
+// independently), or a single master observation when no deck numbers are present. Serato logs
+// a per-deck entry per played track; the live track on a deck is its latest entry, playing iff
+// endtime is unset.
+func (s *Source) emitByDeck(emit func(session.Observation), tracks []serato.Track) {
 	byDeck := currentByDeck(tracks)
 	if len(byDeck) > 0 {
 		decks := make([]int, 0, len(byDeck))

@@ -70,7 +70,9 @@ func writeSession(t *testing.T, entries ...[]byte) (*Source, string) {
 	if err := os.WriteFile(filepath.Join(sess, "1.session"), buf, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return New(logbus.New(16), dir, true), dir
+	s := New(logbus.New(16), dir, true)
+	s.v4Resolved, s.v4Path = true, "" // force the binary path: don't read this host's real Serato 4 DB
+	return s, dir
 }
 
 // collect runs one poll and indexes the emitted observations by scope key.
