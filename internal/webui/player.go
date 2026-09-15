@@ -562,7 +562,14 @@ func (u *UI) mpReadoutLine(t mpSt) string { return mpRenderHov(u.mpHovState(t)) 
 
 // ── transport (patched fragment) ────────────────────────────────────────────────
 
-func (u *UI) mpTransportHTML(t mpSt) string { return mpRenderTp(u.mpTpState(t)) }
+func (u *UI) mpTransportHTML(t mpSt) string {
+	if mpTpCompose != nil { // host opt-in: a minimal transport (flipbook) replaces the full row
+		if h, ok := mpTpCompose(u, t); ok {
+			return h
+		}
+	}
+	return mpRenderTp(u.mpTpState(t))
+}
 
 // mpTrimDemoted: in library collection/playlist context trim/cut is an occasional
 // operation - it hides behind the ⋯ menu until edit mode is on.

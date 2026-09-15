@@ -79,8 +79,10 @@ type mpVidSt struct {
 	URL      string `json:"url"`
 	MSE      string `json:"mse"` // "" = plain src; else data-mse index URL
 	Muted    bool   `json:"muted"`
-	Ev       string `json:"ev"`     // element→Go transport mirror handler
-	OnMeta   string `json:"onmeta"` // Ev + volume/first-frame nudge
+	Poster   string `json:"poster"`  // "" = no poster attr; else a still shown until the first frame decodes
+	Preload  string `json:"preload"` // "" = "none" (default); "metadata"/"auto" load the first frame/duration up front
+	Ev       string `json:"ev"`      // element→Go transport mirror handler
+	OnMeta   string `json:"onmeta"`  // Ev + volume/first-frame nudge
 	OnErr    string `json:"onerr"`
 	DataIn   string `json:"dataIn"`   // trim IN local secs ("" = omit; drives loop-from-IN)
 	DataOut  string `json:"dataOut"`  // trim OUT local secs ("" = none; element stops there)
@@ -331,6 +333,12 @@ func (u *UI) mpVidState(t mpSt) mpVidSt {
 	if mpVidSurface != nil { // host opt-in: the picture is a native render surface, not this element
 		st.Surf, st.SurfAR = mpVidSurface(u, t.host)
 	}
+	if mpVidPoster != nil { // host opt-in: still poster + eager metadata preload (no black-on-load)
+		st.Poster, st.Preload = mpVidPoster(u, t.host)
+	}
+	if mpSkipAudio != nil && mpSkipAudio(u, t.host) { // silent source (emoji clip): keep the element muted
+		st.Muted = true
+	}
 	// element events → Go transport mirror (throttled to 1 Hz / state flips). The OUT-marker
 	// stop runs element-side first (sub-frame latency; the pause flip then rides the send).
 	// isConnected guard: a patched-out element fires a dying pause/timeupdate on DOM removal -
@@ -382,6 +390,11 @@ func (u *UI) mpWaveState(t mpSt) mpWaveSt {
 		ov = u.ceSnapOverlay(t.host, t.media[0].path)
 	}
 	st.SVG = mpWaveSVG(&t, u.mpPlayheadAxis(&t), ov, u.mpWaveLoudViz(&t))
+	// A silent-source host (emoji flipbook) runs no audio analysis: no enc/loud chips, no
+	// peaks/loudness captions - the clean video timeline (axis + handles + playhead) stands alone.
+	if mpSkipAudio != nil && mpSkipAudio(u, t.host) {
+		return st
+	}
 	if m := t.activeMedia(); m != nil {
 		st.HasChips = true
 		st.Enc = mpEncChipState(m)
@@ -878,22 +891,11 @@ func mpFullHTMLOf(st mpFullSt) string {
 	return `<div id=mp-` + html.EscapeString(st.Host) + `-root class=mplayer>` + mpInnerHTMLOf(st.Inner) + `</div>`
 }
 
-func mpInnerHTMLOf(st mpInnerSt) string {
-	host := st.Host
+// mpWaveboxHTML emits the wavebox: the patched SVG target plus the interaction lanes layered on
+// top (lanes stay OUTSIDE the patched #mp-<host>-wave so pointer capture survives a repaint). One
+// implementation shared by mpInnerHTMLOf and the flipbook creator's slim player composition.
+func mpWaveboxHTML(host string, st mpInnerSt) string {
 	var b strings.Builder
-
-	// what's loaded (publish: the set / loose capture name; library shows it in the inspector)
-	if st.Title != "" {
-		b.WriteString(`<div class=mp-title data-label="player media" data-value=` + attrQ(st.Title) + `>` +
-			html.EscapeString(st.Title) + `</div>`)
-	}
-
-	// embedded video (own patch target so the async fMP4-index resolve can swap
-	// plain-src → MSE before playback starts)
-	b.WriteString(`<div id=mp-` + host + `-vid>` + mpVidHTMLOf(st.Vid) + `</div>`)
-
-	// wavebox: patched SVG inside, interaction lanes on top (lanes stay OUTSIDE the
-	// patched region so pointer capture survives repaints)
 	cls := "mp-wavebox"
 	if st.Dual {
 		cls += " mp-wavebox--dual"
@@ -910,6 +912,26 @@ func mpInnerHTMLOf(st mpInnerSt) string {
 			` data-acthover=` + attrQ("mp-hov:"+host) + ` title=` + attrQ(st.LaneFull) + `></div>`)
 	}
 	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func mpInnerHTMLOf(st mpInnerSt) string {
+	host := st.Host
+	var b strings.Builder
+
+	// what's loaded (publish: the set / loose capture name; library shows it in the inspector)
+	if st.Title != "" {
+		b.WriteString(`<div class=mp-title data-label="player media" data-value=` + attrQ(st.Title) + `>` +
+			html.EscapeString(st.Title) + `</div>`)
+	}
+
+	// embedded video (own patch target so the async fMP4-index resolve can swap
+	// plain-src → MSE before playback starts)
+	b.WriteString(`<div id=mp-` + host + `-vid>` + mpVidHTMLOf(st.Vid) + `</div>`)
+
+	// wavebox: patched SVG inside, interaction lanes on top (lanes stay OUTSIDE the
+	// patched region so pointer capture survives repaints)
+	b.WriteString(mpWaveboxHTML(host, st))
 
 	// zoom + hover readout row (compact; how-to lives in the tooltip)
 	zinfo := ""
@@ -957,6 +979,14 @@ func mpVidHTMLOf(st mpVidSt) string {
 	if st.Muted {
 		muted = " muted"
 	}
+	poster := ""
+	if st.Poster != "" {
+		poster = ` poster=` + attrQ(st.Poster)
+	}
+	preload := st.Preload
+	if preload == "" {
+		preload = "none" // default: no eager load (existing hosts render byte-identical)
+	}
 	trim := ""
 	if st.DataIn != "" {
 		trim = ` data-in=` + attrQ(st.DataIn)
@@ -984,8 +1014,8 @@ func mpVidHTMLOf(st mpVidSt) string {
 			` data-surface-color=000000 data-surface-clock=` + attrQ("mp-vid-"+st.Host) +
 			` style=` + attrQ("aspect-ratio:"+st.SurfAR) + `></div>` + grip
 	}
-	return box + `><video id=` + attrQ("mp-vid-"+st.Host) + ` class=` + cls + src +
-		` preload=none playsinline` + muted + trim +
+	return box + `><video id=` + attrQ("mp-vid-"+st.Host) + ` class=` + cls + src + poster +
+		` preload=` + preload + ` playsinline` + muted + trim +
 		` ontimeupdate=` + attrQ(st.Ev) + ` onplay=` + attrQ(st.Ev) + ` onpause=` + attrQ(st.Ev) +
 		` onseeked=` + attrQ(st.Ev) + ` onended=` + attrQ(st.Ev) + ` onloadedmetadata=` + attrQ(st.OnMeta) +
 		` onerror=` + attrQ(st.OnErr) + `></video>` + grip + `</div>`

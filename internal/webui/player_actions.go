@@ -219,6 +219,23 @@ var mpTrimDone func(u *UI, host string)
 // and the persisted height cap in px ("" = CSS default). Registered by the editor.
 var mpVidGrip func(u *UI, host string) (grip, maxH string)
 
+// mpVidPoster, when set, gives a host a still poster + preload strategy for its <video>:
+// returns (posterURL, preload). "" poster = no poster attr; "" preload = the "none" default.
+// The flipbook uses it so its emoji clip loads a first-frame poster (no black-on-load) and
+// eager metadata (real duration) without autoplay (P11). Called per render; must be cheap.
+var mpVidPoster func(u *UI, host string) (poster, preload string)
+
+// mpSkipAudio, when true for a host, opts it out of ALL audio analysis: no peaks worker, no
+// transcode.loudtl, no loudness measure, no enc/loud wave chips or captions - and the element
+// stays muted. For a silent source (the emoji flipbook: GIFs / screen grabs) those workers only
+// fail noisily ("Waveform unavailable"). Registered by the flipbook.
+var mpSkipAudio func(u *UI, host string) bool
+
+// mpTpCompose, when set, lets a host replace the transport row with its own composition: returns
+// (html, true) to use it, ("", false) to fall through to the standard transport. The flipbook
+// uses it for a minimal Play/Stop + clock strip (no seek slider, no volume, no open-externally).
+var mpTpCompose func(u *UI, t mpSt) (string, bool)
+
 // mpOnSrcResolved, when set, is called after a host's source probe resolves (dimensions now
 // known). The editor uses it to re-push its video fragment: source load renders #main once,
 // synchronously, while the probe is still async - so the first paint has zero source dims and
@@ -349,6 +366,9 @@ func (u *UI) mpPlanFor(t *mpSt, i int) *mpPlan {
 func (u *UI) mpKickMeasure(host string) {
 	if u.svc.Store == nil {
 		return
+	}
+	if mpSkipAudio != nil && mpSkipAudio(u, host) {
+		return // silent source: no loudness plan to measure
 	}
 	t := u.mpSnap(host)
 	gen := t.gen
@@ -1147,9 +1167,12 @@ func (u *UI) mpKickAnalyses(host string) {
 	}
 	u.mpLoadCancel[host] = cancel
 	u.mpLoadMu.Unlock()
+	skipAudio := mpSkipAudio != nil && mpSkipAudio(u, host)
 	for i := range t.media {
-		u.mpLoadPeaks(ctx, host, t.gen, i, t.media[i].path)
-		u.mpLoadLoud(ctx, host, t.gen, i, t.media[i].path)
+		if !skipAudio { // silent source: peaks + loudness would only fail noisily
+			u.mpLoadPeaks(ctx, host, t.gen, i, t.media[i].path)
+			u.mpLoadLoud(ctx, host, t.gen, i, t.media[i].path)
+		}
 		u.mpLoadSrc(ctx, host, t.gen, i, t.media[i].path)
 		if t.media[i].kind == "video" {
 			u.mpLoadFrag(host, t.gen, i, t.media[i].path)

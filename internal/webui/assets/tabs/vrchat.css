@@ -18,6 +18,12 @@
 .fb-srcrow .rp-btn { flex:0 0 auto; margin-left:auto; }
 .fb-stage { display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap; }
 .fb-player { flex:1 1 320px; min-width:0; }
+/* slim flipbook player: cap the video + timeline so the crop tool + filmstrip stay on-screen
+   (the editor chrome is dropped in fbPlayerHTML; this keeps the stage from dwarfing the tools). */
+.fb-player .mp-video { max-height:180px; }
+.fb-player .mp-svg { height:96px; }
+.fb-player .mp-wavebox { margin-top:6px; }
+.fb-tp { margin-top:4px; }
 .fb-side { flex:0 0 auto; display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
 .fb-eyebrow { font-family:Orbitron,sans-serif; font-size:11px; letter-spacing:.08em; text-transform:uppercase;
   color:var(--rp-muted,#9aa); }

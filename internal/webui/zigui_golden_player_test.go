@@ -244,6 +244,37 @@ func TestZigPlayerGolden(t *testing.T) {
 	}
 }
 
+// TestZigPlayerVidPoster pins the new Poster/Preload vid fields (flipbook: first-frame poster +
+// eager metadata) across BOTH the JSON and the wire (V2) decode paths - the existing mpFixtures
+// never set them, so this is the only coverage of the new attributes.
+func TestZigPlayerVidPoster(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	fx := map[string]mpVidSt{
+		"default":       {Host: "publish", Kind: "video", URL: "u", Ev: "e()"}, // Preload "" → preload=none
+		"posterMeta":    {Host: "flipbook", Kind: "video", URL: "u", Poster: "http://p/i?a=1&b=2", Preload: "metadata", Muted: true},
+		"preloadNoPost": {Host: "flipbook", Kind: "video", URL: "u", Preload: "auto"},
+	}
+	for name, st := range fx {
+		t.Run(name, func(t *testing.T) {
+			want := mpVidHTMLOf(st)
+			if got, ok := zigui.RenderPlayerVid(stateJSON(st)); ok {
+				assertBytesEqual(t, "vid/json", want, got)
+			} else if want != "" {
+				t.Fatalf("vid/json: zig render failed but Go rendered %d bytes", len(want))
+			}
+			if doc := wireMpVid(st); doc != nil {
+				if got, ok := zigui.RenderPlayerVidV2(doc); ok {
+					assertBytesEqual(t, "vid/wire", want, got)
+				} else if want != "" {
+					t.Fatalf("vid/wire: zig render failed but Go rendered %d bytes", len(want))
+				}
+			}
+		})
+	}
+}
+
 // TestZigPlayerLoudnessGolden sweeps the SHARED loudness block (components.go loudSt, phase
 // B-1a) through the #mp-<host>-export patch target, which used to embed it as raw markup.
 // The base state is a REAL dual-export snapshot, so the block sits in its production frame

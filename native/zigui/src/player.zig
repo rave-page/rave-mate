@@ -65,6 +65,8 @@ pub const Vid = struct {
     url: []const u8 = "",
     mse: []const u8 = "", // "" = plain src
     muted: bool = false,
+    poster: []const u8 = "", // "" = no poster attr
+    preload: []const u8 = "", // "" = "none" default; "metadata"/"auto" load first frame/duration
     ev: []const u8 = "",
     onmeta: []const u8 = "",
     onerr: []const u8 = "",
@@ -387,7 +389,13 @@ pub fn renderVid(h: *Html, s: Vid) !void {
         try h.raw(" src=");
         try h.attrQ(s.url);
     }
-    try h.raw(" preload=none playsinline");
+    if (s.poster.len != 0) {
+        try h.raw(" poster=");
+        try h.attrQ(s.poster);
+    }
+    try h.raw(" preload=");
+    try h.raw(if (s.preload.len != 0) s.preload else "none"); // "" → "none" (existing hosts byte-identical)
+    try h.raw(" playsinline");
     if (s.muted) try h.raw(" muted");
     if (s.dataIn.len != 0) {
         try h.raw(" data-in=");
@@ -738,6 +746,10 @@ test "video element: MSE variant replaces plain src" {
     try renderVid(&h, .{ .host = "editor", .kind = "video", .url = "u", .grip = "edv-vsize", .boxH = "620" });
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, "<div class=mp-videobox style=\"height:620px;max-height:none\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, "</video><div class=mp-vgrip data-actsize=\"edv-vsize\"></div></div>") != null);
+    h.b.clearRetainingCapacity();
+    // poster + eager preload (flipbook): poster attr before preload, preload from the field
+    try renderVid(&h, .{ .host = "flipbook", .kind = "video", .url = "u", .poster = "http://p/i?a=1&b=2", .preload = "metadata", .muted = true });
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, " src=\"u\" poster=\"http://p/i?a=1&amp;b=2\" preload=metadata playsinline muted ") != null);
     h.b.clearRetainingCapacity();
     try renderVid(&h, .{ .kind = "" });
     try std.testing.expectEqualStrings("", h.b.items);

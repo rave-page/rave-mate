@@ -100,6 +100,29 @@ func init() {
 			u.fbKickPreview()
 		}
 	}
+	// Silent emoji source: no peaks/loudness workers, no wave chips/captions, muted element.
+	mpSkipAudio = func(u *UI, host string) bool { return host == "flipbook" }
+	// First-frame poster (no black-on-load) + eager metadata (real duration, no autoplay).
+	mpVidPoster = func(u *UI, host string) (poster, preload string) {
+		if host != "flipbook" {
+			return "", ""
+		}
+		fb := u.fbSnap()
+		if fb.framePath != "" {
+			return u.imgURL(fb.framePath, 960), "metadata"
+		}
+		if fb.source != "" && edvIsVideo(fb.source) {
+			u.fbFrame(u.fbInPoint()) // extract the poster frame; it re-patches #mp-flipbook-vid on arrival
+		}
+		return "", "metadata"
+	}
+	// Minimal transport for the flipbook: Play/Stop + clock, no seek slider/volume/open-externally.
+	mpTpCompose = func(u *UI, t mpSt) (string, bool) {
+		if t.host != "flipbook" {
+			return "", false
+		}
+		return u.fbTransportHTML(t), true
+	}
 	// Source Browse target (pickSelfPatch: no patchMain - we self-patch #vrc-emotes).
 	onExact("vrc-emote-source", func(u *UI, m actMsg) { u.fbSetSource(m.Val) })
 	// Output-folder Browse target: persist FlipbookDir, then re-render the card footer.
@@ -174,11 +197,13 @@ func (u *UI) fbSetSource(path string) {
 		u.mpMut("flipbook", func(t *mpSt) {
 			t.reset()
 			t.name = filepath.Base(path)
+			// dur seeds the axis so the in/out lanes map to real seconds; fbProbe updates it when the
+			// probe lands (0 here on a fresh pick). No peaksLoading: mpSkipAudio runs no peaks worker.
 			t.media = []mpMedia{{path: path, kind: "video", size: fileSize(path),
-				presetID: "remux", peaksLoading: true}}
+				dur: fb.dur, presetID: "remux"}}
 			t.pinned, t.edit = true, true
 		})
-		u.mpKickAnalyses("flipbook")
+		u.mpKickAnalyses("flipbook") // src probe only (mpSkipAudio drops peaks + loudness)
 	}
 	u.fbProbe(path, fb.srcGen)
 	u.fbKickPreview()
@@ -213,6 +238,15 @@ func (u *UI) fbProbe(path string, gen int) {
 			}
 			changed = true
 		})
+		if changed && si.DurationSec > 0 {
+			// seed the player axis with the real duration (peaks are skipped for silent clips, so
+			// this probe is the ONLY dur source) - the in/out lanes now map to real seconds.
+			u.mpMut("flipbook", func(t *mpSt) {
+				for i := range t.media {
+					t.media[i].dur = si.DurationSec
+				}
+			})
+		}
 		if changed {
 			if u.fbSnap().cropOn { // dims known: extract the crop frame (only if the tool is showing)
 				u.fbFrame(u.fbInPoint())
@@ -250,6 +284,51 @@ func (u *UI) fbKeptLine(fb fbSt) string {
 	})
 }
 
+// fbPlayerHTML is the flipbook's slim player composition: it reuses mp's SUB-fragments (video,
+// the shared wavebox with draggable in/out lanes, a minimal transport, the trim readout) with the
+// SAME ids mp's self-patching targets, but drops the editor chrome (typed IN/OUT + Set/Auto-trim,
+// the ENCODE/EXPORT block, zoom row, volume, loudness/encode chips) - none of which fits an emoji
+// sheet. Rides through the card as the RAW Player field. host is always "flipbook".
+func (u *UI) fbPlayerHTML(t mpSt) string {
+	host := t.host
+	inner := mpInnerSt{
+		Host:    host,
+		Edit:    true, // the in/out lanes + handle triangles need edit mode
+		Wave:    u.mpWaveState(t),
+		LaneIn:  i18n.T("player.label.dragSetIn"),
+		LaneMid: i18n.T("player.label.clickSeekPan"),
+		LaneOut: i18n.T("player.label.dragSetOut"),
+	}
+	var b strings.Builder
+	b.WriteString(`<div id=mp-` + host + `-root class="mplayer fb-player">`)
+	b.WriteString(`<div id=mp-` + host + `-vid>` + mpVidHTMLOf(u.mpVidState(t)) + `</div>`)
+	b.WriteString(mpWaveboxHTML(host, inner)) // shared with mpInnerHTMLOf
+	b.WriteString(`<div id=mp-` + host + `-tp>` + u.fbTransportHTML(t) + `</div>`)
+	b.WriteString(`<div id=mp-` + host + `-ro>` + mpROHTMLOf(mpROState(t)) + `</div>`)
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// fbTransportHTML is the flipbook's minimal transport (patched into #mp-flipbook-tp by the mp
+// transport machinery via mpTpCompose): Play + Stop + the current/total clock. The timeline lane
+// handles seeking, so there is no seek slider; a silent clip needs no volume or open-externally.
+func (u *UI) fbTransportHTML(t mpSt) string {
+	tr := u.mpEng(&t)
+	playLbl, playVar := "▶ "+i18n.T("player.play"), "go"
+	switch {
+	case tr.loaded && tr.playing:
+		playLbl, playVar = "⏸ "+i18n.T("player.pause"), "outline"
+	case tr.loaded && tr.paused:
+		playLbl = "▶ " + i18n.T("player.resume")
+	}
+	play := uiBtn{Label: playLbl, Variant: playVar, Act: "mp-play:" + t.host}
+	stop := uiBtn{Label: "⏹", Variant: "outline", Act: "mp-stop:" + t.host}
+	tx := u.mpTimeText(t)
+	return `<div class="mp-tp fb-tp">` + play.html() + stop.html() +
+		`<span class="mp-time" id=mp-` + t.host + `-time data-label=` + attrQ("player time") +
+		` data-value=` + attrQ(tx) + `>` + htmlEscape(tx) + `</span></div>`
+}
+
 // vrcEmotesState resolves the creator card from u.fb + config (+ the mp player markup).
 func (u *UI) vrcEmotesState() vrcEmotesSt {
 	f := &u.svc.Cfg.Features.VRChat
@@ -281,7 +360,7 @@ func (u *UI) vrcEmotesState() vrcEmotesSt {
 		PreviewLabel: i18n.T("vrchat.emotes.preview"),
 	}
 	if st.HasSource {
-		st.Player = u.mpHTML("flipbook")
+		st.Player = u.fbPlayerHTML(u.mpSnap("flipbook"))
 		st.KeptLine = u.fbKeptLine(fb)
 		st.Frame = u.fbFrameState(fb)
 		if fb.prevURL != "" {
@@ -504,6 +583,11 @@ func (u *UI) fbFrame(t float64) {
 		}
 		if done {
 			u.fbPatchFrame()
+			// the frame is now the video poster: re-render #mp-flipbook-vid unless the element is
+			// actively playing (a mid-play swap would restart it; muted/paused/idle is safe).
+			if vs := u.mpSnap("flipbook").vid; vs.err == "" && (!vs.started || vs.paused) {
+				u.mpPatchVideo(u.mpSnap("flipbook"))
+			}
 			u.fbKickPreview() // preview follows the new frame (phase 3)
 		}
 	})
