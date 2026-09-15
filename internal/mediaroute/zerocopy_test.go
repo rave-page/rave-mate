@@ -80,7 +80,9 @@ func TestReadbackRouteAttachesOnFirstNext(t *testing.T) {
 		t.Fatalf("attach was eager: opens=%d", *opens)
 	}
 	recv.ch <- pool.frame(64, 64)
-	f, err := src.Next(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second) // a lost attach frame fails here, not at the 10m budget
+	defer cancel()
+	f, err := src.Next(ctx)
 	if err != nil {
 		t.Fatalf("Next: %v", err)
 	}

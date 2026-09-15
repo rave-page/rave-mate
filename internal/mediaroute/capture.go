@@ -113,7 +113,8 @@ type captureSub struct {
 func (h *captureHub) attach(name string, maxFPS float64) (*captureSub, error) {
 	h.mu.Lock()
 	c := h.caps[name]
-	if c == nil {
+	fresh := c == nil
+	if fresh {
 		recv, err := h.open(name, maxFPS)
 		if err != nil {
 			h.mu.Unlock()
@@ -121,7 +122,6 @@ func (h *captureHub) attach(name string, maxFPS float64) (*captureSub, error) {
 		}
 		c = &capture{hub: h, name: name, recv: recv, subs: map[*captureSub]struct{}{}}
 		h.caps[name] = c
-		debuglog.Go(h.log, source, func() { c.fanout() })
 	}
 	h.mu.Unlock()
 
@@ -130,6 +130,12 @@ func (h *captureHub) attach(name string, maxFPS float64) (*captureSub, error) {
 	c.subs[s] = struct{}{}
 	n := len(c.subs)
 	c.mu.Unlock()
+	if fresh {
+		// Pump only once the first subscriber is registered: a frame already queued in the receiver
+		// would otherwise fan out to an empty set (one frame lost at attach; on a loaded CI runner
+		// that hung the one-frame readback test to the 10m budget).
+		debuglog.Go(h.log, source, func() { c.fanout() })
+	}
 	c.rerate()
 	// ALWAYS logged, not only for n>1: the capture runs at the FASTEST subscriber's rate and every
 	// slower route then discards the surplus itself (spoutSource.minGap → PipelineStats.RateCapped).

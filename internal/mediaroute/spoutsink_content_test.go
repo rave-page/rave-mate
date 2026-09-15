@@ -1,6 +1,7 @@
 package mediaroute
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -27,9 +28,10 @@ func TestSpoutSinkReportsFrozenPictureWhilePublishedClimbs(t *testing.T) {
 	framedebug.SetDir(t.TempDir())
 	const w, h = 32, 18
 	// Unique sender name: recorders are process-global, so a shared name would inherit another
-	// test's stall clock and make this pass (or fail) for the wrong reason.
+	// test's (or, under -count>1, the previous iteration's) stall clock and change count, and make
+	// this pass or fail for the wrong reason.
 	snd := &countingSender{}
-	s := &spoutSink{log: logbus.New(16), fs: snd, name: "frozen-gate-" + t.Name(), w: w, h: h}
+	s := &spoutSink{log: logbus.New(16), fs: snd, name: uniqueStage(t, "frozen-gate-"), w: w, h: h}
 
 	frozen := rawFrame(w, h, 7)
 	for range 30 {
@@ -77,7 +79,7 @@ func TestInnerContentLiftsTheStallAndReportsUnknownAsNegative(t *testing.T) {
 	framedebug.SetDir(t.TempDir())
 	const w, h = 16, 16
 	s := &spoutSink{log: logbus.New(16), fs: &countingSender{},
-		name: "lift-gate-" + t.Name(), w: w, h: h}
+		name: uniqueStage(t, "lift-gate-"), w: w, h: h}
 	for range 5 {
 		_ = s.Write(rawFrame(w, h, 3))
 	}
@@ -92,4 +94,11 @@ func TestInnerContentLiftsTheStallAndReportsUnknownAsNegative(t *testing.T) {
 	if got, _, _, _ := medialink.InnerContent(struct{}{}); got != -1 {
 		t.Fatalf("InnerContent(non-reporter) = %d, want -1", got)
 	}
+}
+
+// uniqueStage names a recorder for THIS run of the test, not just this test: recorders are
+// process-global (framedebug.For), so a t.Name()-keyed stage under -count>1 starts with the previous
+// iteration's Changes count and last hash - the "PubChanges=2 on identical frames" false failure.
+func uniqueStage(t *testing.T, prefix string) string {
+	return prefix + t.Name() + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 }
