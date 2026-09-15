@@ -4122,18 +4122,21 @@
     },
     "emotes": {
       "crop": "Crop",
+      "empty": "Pick a clip to start - then trim, crop and preview it here before you generate.",
       "field": {
         "fps": "FPS",
         "frames": "Frames",
         "name": "Name",
         "outputDir": "Output dir",
-        "source": "Source (video/GIF)",
+        "source": "Source clip",
         "trimEnd": "Trim end (s)",
         "trimStart": "Trim start (s)"
       },
       "generate": "Generate sprite sheet",
-      "hint": "Generate an animated-emoji sprite sheet (named <name>_<N>frames_<fps>fps.png). More frames = lower per-frame resolution - 16 is a good default. Browse for a source clip; custom emoji need VRC+.",
+      "hint": "Trim, crop and preview a clip, then generate a VRChat animated emoji (named <name>_<N>frames_<fps>fps.png). More frames = lower per-frame resolution - 16 is a good default. Custom emoji need VRC+.",
+      "keptLine": "{frames} frames · {grid} · {res}px · {fps} fps · {loop}s loop",
       "pingpong": "Bake ping-pong (forward then reversed)",
+      "preview": "Preview",
       "result": {
         "copyPath": "Copy path",
         "failed": "Generation failed",
@@ -4330,6 +4333,7 @@
       "pickSource": "Pick a source video/GIF first",
       "refreshingEvents": "Refreshing events…",
       "sentToVrchat": "Sent to VRChat (needs OSC enabled).",
+      "sourceMissing": "Source clip not found.",
       "spriteGenerated": "Sprite sheet generated"
     },
     "tools": {

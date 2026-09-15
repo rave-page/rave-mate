@@ -1059,6 +1059,10 @@ export fn rz_ui_render_vrchat_photos_v2(state: ?[*]const u8, len: usize, out_len
     return renderWire(vrchat.Photos, wire_gen.decodeVrcPhotos, vrchat.renderPhotos, wire_gen.msg_vrc_photos, state, len, out_len);
 }
 
+export fn rz_ui_render_vrchat_emotes_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(vrchat.Emotes, wire_gen.decodeVrcEmotes, vrchat.renderEmotes, wire_gen.msg_vrc_emotes, state, len, out_len);
+}
+
 export fn rz_ui_render_vrcgroups_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
     return renderWire(vrcgroups.State, wire_gen.decodeVrcg, vrcgroups.render, wire_gen.msg_vrcg, state, len, out_len);
 }

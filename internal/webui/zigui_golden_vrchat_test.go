@@ -92,7 +92,9 @@ func vrcFixtures() map[string]vrcTabSt {
 	escaping.Editor.StatusPreset = vrcPresetSelSt{Act: "vrc-status-preset", Placeholder: `ph&"'<>`, Names: []string{`n&"1'<>`, "n2"}}
 	escaping.Editor.BioPreset = vrcPresetSelSt{Act: "vrc-bio-preset", Placeholder: `ph2&"'<>`, Names: []string{`m&"1'<>`}}
 	escaping.Emotes.OutDir = `C:\out&"dir'<>`
-	escaping.Emotes.UploadURL = `https://vrchat.com/home/emoji?a=1&b=2`
+	escaping.Emotes.Source = `C:\clips\a&"b'<>.mp4`
+	escaping.Emotes.Name = `w&"a<v>e'`
+	escaping.Emotes.Player = `<video data-x="a&b"><source src="x?a=1&b=2"></video>` // RAW: verbatim both sides
 	escaping.CamPaths = vrcCampathsSt{State: "detail",
 		Items: []vrcPathItemSt{{Idx: 0, Label: `p&"ath'<>`, Active: true}},
 		SVG:   `<svg><text>&amp;</text></svg>`, PlayBtn: `<span id="cpv-vrc-play"></span>`,
@@ -188,20 +190,58 @@ func vrcEditorFixture() vrcEditorSt {
 
 func vrcEmotesFixture() vrcEmotesSt {
 	return vrcEmotesSt{
-		Hint:        "Generates a flipbook sheet VRChat accepts as an animated emoji.",
-		SourceLabel: "Source clip", NameLabel: "Emoji name", FramesLabel: "Frames", FPSLabel: "FPS",
-		TrimStart: "Trim start", TrimEnd: "Trim end", OutDirLabel: "Output folder",
-		Browse: "Browse",
+		Hint:        "Trim, crop and preview a clip, then generate a VRChat animated emoji.",
+		HasSource:   true,
+		SourceLabel: "Source clip",
+		Source:      `C:\clips\my clip.mp4`,
+		Browse:      "Browse",
+		EmptyHint:   "Pick a clip to start.",
+		Player:      `<div id="mp-flipbook-root"><video id="mp-vid-flipbook"></video></div>`,
+		NameLabel:   "Name", Name: "wave",
+		FramesLabel: "Frames",
 		FrameOpts: []vrcFrameOptSt{
 			{Frames: 4, Grid: 2, Res: 512},
 			{Frames: 16, Grid: 4, Res: 256, Sel: true},
 			{Frames: 64, Grid: 8, Res: 128},
 		},
-		OutDir:   `C:\Users\dj\Pictures\VRChat\Flipbooks`,
-		PingPong: "Ping-pong", Crop: "Crop", Generate: "Generate",
-		OpenFolder: "Open output folder", OpenUpload: "Open emoji upload page",
-		UploadURL: "https://vrchat.com/home/emoji",
+		FPSLabel: "FPS", FPS: "20",
+		PingPong: "Ping-pong", PingPongOn: true,
+		Crop: "Crop", CropOn: false,
+		Generate:     "Generate sprite sheet",
+		OutDir:       `C:\Users\dj\Pictures\VRChat\Flipbooks`,
+		OpenFolder:   "Open output folder",
+		KeptLine:     "16 frames · 4×4 · 256px · 20 fps · 0.8s loop",
+		PreviewLabel: "Preview",
 	}
+}
+
+// vrcEmotesFixtures exercises the standalone #vrc-emotes creator render (wire path): empty state,
+// with source, crop-on, the 64-frame tier, and an escaping edge (RAW player passes through verbatim).
+func vrcEmotesFixtures() map[string]vrcEmotesSt {
+	full := vrcEmotesFixture()
+
+	nosrc := full
+	nosrc.HasSource, nosrc.Source, nosrc.Player, nosrc.KeptLine = false, "", "", ""
+
+	cropOn := full
+	cropOn.CropOn = true
+
+	tier64 := full
+	tier64.FrameOpts = []vrcFrameOptSt{
+		{Frames: 4, Grid: 2, Res: 512},
+		{Frames: 16, Grid: 4, Res: 256},
+		{Frames: 64, Grid: 8, Res: 128, Sel: true},
+	}
+	tier64.KeptLine = "64 frames · 8×8 · 128px · 20 fps · 3.2s loop"
+
+	esc := full
+	esc.Source = `C:\clips\a&"b'<>.mp4`
+	esc.Name = `w&"a<v>e'`
+	esc.OutDir = `C:\out&"dir'<>`
+	esc.KeptLine = `16 frames · 4×4 · 256px · 20 fps · 0.8s <loop>`
+	esc.Player = `<video data-x="a&b"><source src="x?a=1&b=2"></video>` // RAW: verbatim both sides
+
+	return map[string]vrcEmotesSt{"nosrc": nosrc, "full": full, "cropOn": cropOn, "tier64": tier64, "escaping": esc}
 }
 
 // ── Groups sub-view fixtures ──
@@ -459,6 +499,27 @@ func TestZigVRCGroupsGolden(t *testing.T) {
 	for name, st := range vrcgFixtures() {
 		t.Run(name, func(t *testing.T) {
 			assertZigEqual(t, "body", vrcgBodyHTML(st), stateJSON(st), zigui.RenderVRCGroups)
+		})
+	}
+}
+
+// TestZigVRChatEmotesWire: the standalone #vrc-emotes creator fragment (wire path) is byte-identical
+// to its Go renderer across empty/with-source/crop-on/64-tier/escaping states.
+func TestZigVRChatEmotesWire(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	for name, st := range vrcEmotesFixtures() {
+		t.Run(name, func(t *testing.T) {
+			doc := wireVrcEmotes(st)
+			if doc == nil {
+				t.Fatal("wire marshal failed")
+			}
+			zig, ok := zigui.RenderVRChatEmotesV2(doc)
+			if !ok {
+				t.Fatal("emotes render failed")
+			}
+			assertBytesEqual(t, "emotes", vrcEmotesRenderHTML(st), zig)
 		})
 	}
 }

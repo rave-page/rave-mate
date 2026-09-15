@@ -10,12 +10,27 @@
   border:1px solid rgba(255,255,255,.08); white-space:pre-wrap; word-break:break-word; color:var(--rp-fg,#fafafa); font-size:13px; min-height:1.2em; }
 .vrc-note { font-size:12px; color:var(--rp-muted,#9aa); margin-top:6px; }
 
-/* flipbook generator - path row (input + Browse) + crop fields gated by the Crop toggle */
-.vrc-pathrow { display:flex; gap:8px; align-items:center; }
-.vrc-pathrow .field-input { flex:1 1 auto; min-width:0; }
-.vrc-pathrow .rp-btn { flex:0 0 auto; }
-.vrc-crop-in { width:70px; }
-.vrc-crop:not(:has(input[name=crop]:checked)) .vrc-crop-fields { display:none; }
+/* flipbook creator - source row, player | preview stage, compact controls */
+.fb-card { gap:10px; }
+.fb-srcrow { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.fb-srcpath { flex:1 1 auto; min-width:0; font-family:"JetBrains Mono",monospace; font-size:11px;
+  color:var(--rp-muted,#9aa); word-break:break-all; }
+.fb-srcrow .rp-btn { flex:0 0 auto; margin-left:auto; }
+.fb-stage { display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap; }
+.fb-player { flex:1 1 320px; min-width:0; }
+.fb-side { flex:0 0 auto; display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
+.fb-eyebrow { font-family:Orbitron,sans-serif; font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--rp-muted,#9aa); }
+.fb-keptline { font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--rp-muted,#9aa);
+  font-variant-numeric:tabular-nums; }
+.fb-body { display:flex; flex-direction:column; gap:8px; }
+.fb-controls { display:flex; flex-direction:column; gap:8px; }
+.fb-tiers { display:flex; gap:6px; }
+.fb-tier { min-width:44px; text-align:center; font-variant-numeric:tabular-nums; }
+.fb-foot { display:flex; gap:8px; align-items:center; }
+.fb-outdir { flex:1 1 auto; min-width:0; font-family:"JetBrains Mono",monospace; font-size:11px;
+  color:var(--rp-muted,#9aa); word-break:break-all; }
+.fb-foot .rp-btn { flex:0 0 auto; }
 
 /* flipbook result (runtime-patched into #vrc-emote-result) */
 .vrc-note.over { color:var(--rp-hot,#FF3E8A); }

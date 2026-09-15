@@ -74,25 +74,30 @@ pub const FrameOpt = struct {
     sel: bool = false,
 };
 
-/// Emotes: animated-emoji flipbook generator card.
+/// Emotes: animated-emoji flipbook creator card (#vrc-emotes). RAW player markup rides in .player.
 pub const Emotes = struct {
     hint: []const u8 = "",
+    hasSource: bool = false,
     sourceLabel: []const u8 = "",
-    nameLabel: []const u8 = "",
-    framesLabel: []const u8 = "",
-    fpsLabel: []const u8 = "",
-    trimStart: []const u8 = "",
-    trimEnd: []const u8 = "",
-    outDirLabel: []const u8 = "",
+    source: []const u8 = "",
     browse: []const u8 = "",
+    emptyHint: []const u8 = "",
+    player: []const u8 = "", // RAW mp("flipbook") markup
+    nameLabel: []const u8 = "",
+    name: []const u8 = "",
+    framesLabel: []const u8 = "",
     frameOpts: []const FrameOpt = &.{},
-    outDir: []const u8 = "",
+    fpsLabel: []const u8 = "",
+    fps: []const u8 = "",
     pingpong: []const u8 = "",
+    pingpongOn: bool = false,
     crop: []const u8 = "",
+    cropOn: bool = false,
     generate: []const u8 = "",
+    outDir: []const u8 = "",
     openFolder: []const u8 = "",
-    openUpload: []const u8 = "",
-    uploadUrl: []const u8 = "",
+    keptLine: []const u8 = "",
+    previewLabel: []const u8 = "",
 };
 
 pub const PathItem = struct {
@@ -194,7 +199,9 @@ pub fn render(h: *Html, s: State) !void {
     try c.sectionClose(h);
 
     try c.sectionOpen(h, s.secEmotes);
+    try h.raw("<div id=vrc-emotes>");
     try renderEmotes(h, s.emotes);
+    try h.raw("</div>");
     try c.sectionClose(h);
 
     if (s.hasTools) {
@@ -330,68 +337,81 @@ fn pathBtn(h: *Html, label: []const u8, variant: []const u8, act: []const u8, pa
     try h.raw("</button>");
 }
 
-/// renderEmotes mirrors Go vrcEmotesRenderHTML.
+/// renderEmotes mirrors Go vrcEmotesRenderHTML (#vrc-emotes creator inner).
 pub fn renderEmotes(h: *Html, s: Emotes) !void {
-    try h.raw("<div class=\"rp-card vrc-card\">");
+    try h.raw("<div class=\"rp-card vrc-card fb-card\">");
     try c.hint(h, "info", s.hint);
-    try h.raw("<form data-act=vrc-emote-gen><label class=field><span class=field-label>");
+    try h.raw("<div class=fb-srcrow><span class=field-label>");
     try h.esc(s.sourceLabel);
-    try h.raw("</span><div class=vrc-pathrow><input id=vrc-emote-source class=field-input name=source placeholder=\"C:\\path\\clip.mp4\"><button class=\"rp-btn rp-btn--ghost\" type=button data-act=\"pick-file:vrc-emote-source\">");
+    try h.raw("</span>");
+    if (s.hasSource) {
+        try h.raw("<span class=fb-srcpath>");
+        try h.esc(s.source);
+        try h.raw("</span>");
+    }
+    try h.raw("<button class=\"rp-btn rp-btn--ghost\" type=button data-act=\"pick-file:vrc-emote-source\">");
     try h.esc(s.browse);
-    try h.raw("</button></div></label><label class=field><span class=field-label>");
-    try h.esc(s.nameLabel);
-    try h.raw("</span><input class=field-input name=name placeholder=\"emoji name\"></label>");
-    try c.fpairOpen(h);
+    try h.raw("</button></div>");
+    if (!s.hasSource) {
+        try c.emptyState(h, s.emptyHint);
+        return h.raw("</div>");
+    }
+    try h.raw("<div class=fb-stage><div id=fb-player-wrap class=fb-player>");
+    try h.raw(s.player);
+    try h.raw("</div><div class=fb-side><span class=fb-eyebrow>");
+    try h.esc(s.previewLabel);
+    try h.raw("</span><div id=fb-keptline class=fb-keptline>");
+    try h.esc(s.keptLine);
+    try h.raw("</div></div></div><div id=fb-body class=fb-body>");
+    try renderEmotesBody(h, s);
+    try h.raw("</div></div>");
+}
+
+/// renderEmotesBody mirrors Go fbBodyHTML (#fb-body inner).
+fn renderEmotesBody(h: *Html, s: Emotes) !void {
+    try h.raw("<div id=fb-controls class=fb-controls>");
+    try renderEmotesControls(h, s);
+    try h.raw("</div><button class=\"rp-btn rp-btn--go\" data-act=fb-generate>");
+    try h.esc(s.generate);
+    try h.raw("</button><div id=vrc-emote-result></div><div class=fb-foot><span class=fb-outdir>");
+    try h.esc(s.outDir);
+    try h.raw("</span>");
+    try c.btn(h, s.browse, "ghost", "pick-dir:vrc-emote-outdir", "");
+    try pathBtn(h, s.openFolder, "ghost", "open-url", s.outDir);
+    try h.raw("</div>");
+}
+
+/// renderEmotesControls mirrors Go fbControlsHTML (#fb-controls inner).
+fn renderEmotesControls(h: *Html, s: Emotes) !void {
     try h.raw("<label class=field><span class=field-label>");
+    try h.esc(s.nameLabel);
+    try h.raw("</span><input class=field-input id=fb-name data-act=fb-set:name value=\"");
+    try h.esc(s.name);
+    try h.raw("\" placeholder=\"emoji name\"></label><div class=field><span class=field-label>");
     try h.esc(s.framesLabel);
-    try h.raw("</span><select class=\"field-input select-input\" name=frames>");
+    try h.raw("</span><div class=fb-tiers>");
     for (s.frameOpts) |t| {
-        try h.raw("<option value=");
+        try h.raw("<button class=\"");
+        try h.raw(if (t.sel) "rp-chip rp-chip--active fb-tier" else "rp-chip fb-tier");
+        try h.raw("\" type=button data-act=fb-set:frames data-val=");
         try c.num(h, t.frames);
-        if (t.sel) try h.raw(" selected");
         try h.raw(">");
         try c.num(h, t.frames);
-        try h.raw(" frames (");
-        try c.num(h, t.grid);
-        try h.raw("×");
-        try c.num(h, t.grid);
-        try h.raw(", ");
-        try c.num(h, t.res);
-        try h.raw("px)</option>");
+        try h.raw("</button>");
     }
-    try h.raw("</select></label><label class=field><span class=field-label>");
+    try h.raw("</div></div><label class=field><span class=field-label>");
     try h.esc(s.fpsLabel);
-    try h.raw("</span><input class=field-input name=fps type=number value=20 min=1 max=120></label>");
-    try c.fpairClose(h);
-    try c.fpairOpen(h);
-    try h.raw("<label class=field><span class=field-label>");
-    try h.esc(s.trimStart);
-    try h.raw("</span><input class=field-input name=trimStart placeholder=\"optional\"></label>" ++
-        "<label class=field><span class=field-label>");
-    try h.esc(s.trimEnd);
-    try h.raw("</span><input class=field-input name=trimEnd placeholder=\"optional\"></label>");
-    try c.fpairClose(h);
-    try h.raw("<label class=field><span class=field-label>");
-    try h.esc(s.outDirLabel);
-    try h.raw("</span><div class=vrc-pathrow><input id=vrc-emote-outdir class=field-input name=outdir value=\"");
-    try h.esc(s.outDir);
-    try h.raw("\"><button class=\"rp-btn rp-btn--ghost\" type=button data-act=\"pick-dir:vrc-emote-outdir\">");
-    try h.esc(s.browse);
-    try h.raw("</button></div></label><label class=row><span class=row-label>");
+    try h.raw("</span><input class=field-input id=fb-fps data-act=fb-set:fps type=number value=\"");
+    try h.esc(s.fps);
+    try h.raw("\" min=1 max=120></label><label class=row><span class=row-label>");
     try h.esc(s.pingpong);
-    try h.raw("</span><span class=switch><input type=checkbox name=pingpong value=1><span class=switch-track></span></span></label>" ++
-        "<div class=vrc-crop><label class=row><span class=row-label>");
+    try h.raw("</span><span class=switch><input type=checkbox data-act=fb-set:pingpong value=1");
+    if (s.pingpongOn) try h.raw(" checked");
+    try h.raw("><span class=switch-track></span></span></label><label class=row><span class=row-label>");
     try h.esc(s.crop);
-    try h.raw("</span><span class=switch><input type=checkbox name=crop value=1><span class=switch-track></span></span></label>" ++
-        "<div class=\"btn-row vrc-crop-fields\"><input class=\"field-input vrc-crop-in\" name=cropx placeholder=\"x\">" ++
-        "<input class=\"field-input vrc-crop-in\" name=cropy placeholder=\"y\">" ++
-        "<input class=\"field-input vrc-crop-in\" name=cropw placeholder=\"w\">" ++
-        "<input class=\"field-input vrc-crop-in\" name=croph placeholder=\"h\"></div></div>" ++
-        "<button class=\"rp-btn rp-btn--go\" type=submit>");
-    try h.esc(s.generate);
-    try h.raw("</button></form><div id=vrc-emote-result></div><div class=btn-row>");
-    try pathBtn(h, s.openFolder, "ghost", "open-url", s.outDir);
-    try h.raw("</div></div>");
+    try h.raw("</span><span class=switch><input type=checkbox data-act=fb-set:crop value=1");
+    if (s.cropOn) try h.raw(" checked");
+    try h.raw("><span class=switch-track></span></span></label>");
 }
 
 /// renderCampaths mirrors Go vrcCampathsHTML (#vrc-campaths).

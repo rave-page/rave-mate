@@ -79,6 +79,9 @@ type UI struct {
 	ar        arSt         // automation run-now modal state (automations_runnow.go)
 	gfTrain   gfTrainState // model fine-tuning state (settings_gridfix_model.go)
 
+	fbMu sync.Mutex // guards fb (VRChat animated-emoji flipbook creator, vrchat_flipbook.go)
+	fb   fbSt
+
 	ceMu    sync.Mutex // guards ceState/ceStore/cePref lazy-init (library_cueedit.go)
 	ceState *ceSt
 	ceStore *cuepattern.Store

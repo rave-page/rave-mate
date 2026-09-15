@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash         uint32 = 0x9f26120f
+	wireSchemaHash         uint32 = 0x8ee72a48
 	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -118,6 +118,7 @@ const (
 	wireMsgEdvView         uint16 = 114 // Editor tab video mode (full view)
 	wireMsgEdvReframe      uint16 = 115 // Editor video reframe/area-select modal body
 	wireMsgEdvFrame        uint16 = 116 // reframe modal frame block (#edv-frame inner)
+	wireMsgVrcEmotes       uint16 = 117 // #vrc-emotes animated-emoji flipbook creator (visual: player+trim, crop, filmstrip, preview)
 )
 
 func (v agApp) encodeWire(w *zigui.WireWriter) {
@@ -2554,22 +2555,27 @@ func (v vrcFrameOptSt) encodeWire(w *zigui.WireWriter) {
 
 func (v vrcEmotesSt) encodeWire(w *zigui.WireWriter) {
 	w.Str(1, v.Hint)
-	w.Str(2, v.SourceLabel)
-	w.Str(3, v.NameLabel)
-	w.Str(4, v.FramesLabel)
-	w.Str(5, v.FPSLabel)
-	w.Str(6, v.TrimStart)
-	w.Str(7, v.TrimEnd)
-	w.Str(8, v.OutDirLabel)
-	w.List(9, len(v.FrameOpts), func(i int) { v.FrameOpts[i].encodeWire(w) })
-	w.Str(10, v.OutDir)
-	w.Str(11, v.PingPong)
-	w.Str(12, v.Crop)
-	w.Str(13, v.Generate)
-	w.Str(14, v.OpenFolder)
-	w.Str(15, v.OpenUpload)
-	w.Str(16, v.UploadURL)
-	w.Str(17, v.Browse)
+	w.Bool(2, v.HasSource)
+	w.Str(3, v.SourceLabel)
+	w.Str(4, v.Source)
+	w.Str(5, v.Browse)
+	w.Str(6, v.EmptyHint)
+	w.Str(7, v.Player)
+	w.Str(8, v.NameLabel)
+	w.Str(9, v.Name)
+	w.Str(10, v.FramesLabel)
+	w.List(11, len(v.FrameOpts), func(i int) { v.FrameOpts[i].encodeWire(w) })
+	w.Str(12, v.FPSLabel)
+	w.Str(13, v.FPS)
+	w.Str(14, v.PingPong)
+	w.Bool(15, v.PingPongOn)
+	w.Str(16, v.Crop)
+	w.Bool(17, v.CropOn)
+	w.Str(18, v.Generate)
+	w.Str(19, v.OutDir)
+	w.Str(20, v.OpenFolder)
+	w.Str(21, v.KeptLine)
+	w.Str(22, v.PreviewLabel)
 }
 
 func (v vrcPathItemSt) encodeWire(w *zigui.WireWriter) {
@@ -4711,6 +4717,13 @@ func wireEdvReframe(v edvReframeSt) []byte {
 // wireEdvFrame encodes edvFrameSt as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireEdvFrame(v edvFrameSt) []byte {
 	w := zigui.NewWireWriter(wireMsgEdvFrame, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireVrcEmotes encodes vrcEmotesSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireVrcEmotes(v vrcEmotesSt) []byte {
+	w := zigui.NewWireWriter(wireMsgVrcEmotes, wireSchemaHash)
 	v.encodeWire(w)
 	return w.Finish()
 }

@@ -250,6 +250,7 @@ func RenderVRChatStatusV2(state []byte) (string, bool)    { return "", false }
 func RenderVRChatEditorV2(state []byte) (string, bool)    { return "", false }
 func RenderVRChatCampathsV2(state []byte) (string, bool)  { return "", false }
 func RenderVRChatPhotosV2(state []byte) (string, bool)    { return "", false }
+func RenderVRChatEmotesV2(state []byte) (string, bool)    { return "", false }
 func RenderVRCGroupsV2(state []byte) (string, bool)       { return "", false }
 func RenderVgRoleBodyV2(state []byte) (string, bool)      { return "", false }
 func RenderVgInviteListV2(state []byte) (string, bool)    { return "", false }

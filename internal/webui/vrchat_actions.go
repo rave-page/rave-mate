@@ -10,9 +10,7 @@ import (
 	"time"
 
 	"rave.page/mate/internal/config"
-	"rave.page/mate/internal/flipbook"
 	"rave.page/mate/internal/i18n"
-	"rave.page/mate/internal/mediatools"
 	"rave.page/mate/internal/twitch"
 	"rave.page/mate/internal/vrccampaths"
 	"rave.page/mate/internal/vrchat"
@@ -23,7 +21,6 @@ import (
 // modals, emote generation, camera-path selection, and photo-thumbnail generation. Rendering lives
 // in render_vrchat.go. Reuses the already-wired vrc-status / vrc-bio form actions (ui.go).
 
-const vrcEmojiUploadURL = flipbook.EmojiUploadURL
 const vrcAllPhotos = "All Photos"
 
 // Package-scoped tab state (the single UI's struct fields live in ui.go, not owned here).
@@ -52,16 +49,8 @@ func init() {
 	onPrefix("vrc-bio-preset-del:", func(u *UI, m actMsg) { u.vrcDelBioPreset(m.arg("vrc-bio-preset-del:")) })
 	onExact("vrc-bio-vars-save", func(u *UI, m actMsg) { u.vrcSaveBioVars(m.Form) })
 	onExact("vrc-events-refresh", func(u *UI, _ actMsg) { u.vrcRefreshEvents() })
-	onExact("vrc-emote-gen", func(u *UI, m actMsg) { u.vrcEmoteGen(m.Form) })
-	// Browse targets: set only their own input via eval (see pickSelfPatch) - a full re-render
-	// would wipe the user's other typed fields (name/fps/trim/crop).
-	onExact("vrc-emote-source", func(u *UI, m actMsg) { u.setEmoteField("vrc-emote-source", m.Val) })
-	onExact("vrc-emote-outdir", func(u *UI, m actMsg) {
-		f := &u.svc.Cfg.Features.VRChat
-		f.FlipbookDir = m.Val
-		u.saveCfg()
-		u.setEmoteField("vrc-emote-outdir", m.Val)
-	})
+	// Flipbook creator actions (vrc-emote-source / vrc-emote-outdir / fb-set:* / fb-generate /
+	// fb-pan / fb-zoom) are registered in vrchat_flipbook.go.
 	onPrefix("vrc-campath:", func(u *UI, m actMsg) { u.vrcSelectCampath(m.arg("vrc-campath:")) })
 	onExact("vrc-campath-load", func(u *UI, _ actMsg) { u.vrcCampathLoad() })
 	onExact("vrc-campath-organize", func(u *UI, _ actMsg) { u.vrcCampathOrganize() })
@@ -368,80 +357,6 @@ func (u *UI) vrcBioVarsModal() string {
 	return modal(i18n.T("vrchat.label.bioVariables"), body.String(), "")
 }
 
-// ── emote generation ──
-
-func (u *UI) vrcEmoteGen(form string) {
-	f := &u.svc.Cfg.Features.VRChat
-	m := parseForm(form)
-	src := strings.TrimSpace(m["source"])
-	if src == "" {
-		u.toast(i18n.T("vrchat.toast.pickSource"))
-		return
-	}
-	frames, _ := strconv.Atoi(m["frames"])
-	if frames == 0 {
-		u.toast(i18n.T("vrchat.toast.pickFrameTier"))
-		return
-	}
-	fps, err := strconv.ParseFloat(strings.TrimSpace(m["fps"]), 64)
-	if err != nil || fps <= 0 {
-		u.toast(i18n.T("vrchat.toast.fpsPositive"))
-		return
-	}
-	outDir := strings.TrimSpace(m["outdir"])
-	if outDir == "" {
-		outDir = f.ResolvedFlipbookDir()
-	} else if outDir != f.ResolvedFlipbookDir() {
-		f.FlipbookDir = outDir
-		u.saveCfg()
-	}
-	o := flipbook.Options{
-		Input: src, OutName: strings.TrimSpace(m["name"]), Frames: frames, FPS: fps,
-		TrimStart: vrcParseSecs(m["trimStart"]), TrimEnd: vrcParseSecs(m["trimEnd"]),
-		PingPong: m["pingpong"] != "", OutDir: outDir,
-	}
-	if m["crop"] != "" {
-		o.Crop = &flipbook.Rect{X: vrcAtoi(m["cropx"]), Y: vrcAtoi(m["cropy"]), W: vrcAtoi(m["cropw"]), H: vrcAtoi(m["croph"])}
-	}
-	if err := o.Validate(); err != nil {
-		u.toast(err.Error())
-		return
-	}
-	ffmpeg, ok := mediatools.Resolve("ffmpeg")
-	if !ok {
-		u.toast(i18n.T("vrchat.toast.ffmpegNotFound"))
-		u.eval("window.__patch('vrc-emote-result'," + jsQuote(`<div class="vrc-note over">`+i18n.T("vrchat.emotes.result.ffmpegMissing")+`</div>`) + ")")
-		return
-	}
-	u.eval("window.__patch('vrc-emote-result'," + jsQuote(`<div class="vrc-note vrc-busy">`+i18n.T("vrchat.emotes.result.generating")+`</div>`) + ")")
-	u.bg(func() {
-		out, genErr := flipbook.Generate(ffmpeg, o)
-		if genErr != nil {
-			u.eval("window.__patch('vrc-emote-result'," + jsQuote(`<div class="vrc-note over">`+i18n.T("vrchat.emotes.result.failed")+`: `+htmlEscape(genErr.Error())+`</div>`) + ")")
-			return
-		}
-		res := `<div class=vrc-result>` +
-			`<img class=vrc-sheet loading=lazy src="` + u.imgURL(out, 512) + `" alt="">` +
-			`<div class=vrc-result-body>` +
-			`<div class=vrc-note><b>` + htmlEscape(i18n.T("vrchat.emotes.result.savedTitle")) + `</b></div>` +
-			`<div class=vrc-path>` + htmlEscape(out) + `</div>` +
-			`<div class=btn-row>` +
-			btn(i18n.T("vrchat.emotes.result.copyPath"), "ghost", "copy", out) +
-			btn(i18n.T("vrchat.emotes.result.openFolder"), "ghost", "open-url", filepath.Dir(out)) +
-			btn(i18n.T("vrchat.emotes.result.upload"), "ghost", "open-url", flipbook.EmojiUploadURL) +
-			`</div>` +
-			`<div class=vrc-note>` + htmlEscape(i18n.T("vrchat.emotes.result.savedHint")) + `</div>` +
-			`</div></div>`
-		u.eval("window.__patch('vrc-emote-result'," + jsQuote(res) + ")")
-		u.toast(i18n.T("vrchat.toast.spriteGenerated"))
-	})
-}
-
-// setEmoteField sets one flipbook input's value in place (Browse target) without a full re-render.
-func (u *UI) setEmoteField(id, val string) {
-	u.eval("var e=document.getElementById(" + jsQuote(id) + ");if(e)e.value=" + jsQuote(val) + ";")
-}
-
 // ── background scans (camera paths + photos) ──
 //
 // vrccampaths.Scan and vrcphotos.ScanAll are filepath.WalkDir sweeps of the VRChat dirs (hundreds–
@@ -702,17 +617,4 @@ func vrcTrunc(s string, n int) string {
 		return s
 	}
 	return s[:n-1] + "…"
-}
-
-func vrcParseSecs(s string) float64 {
-	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	if err != nil {
-		return 0
-	}
-	return v
-}
-
-func vrcAtoi(s string) int {
-	v, _ := strconv.Atoi(strings.TrimSpace(s))
-	return v
 }

@@ -1281,6 +1281,13 @@ func RenderVRChatPhotosV2(state []byte) (string, bool) {
 	})
 }
 
+// RenderVRChatEmotesV2 renders the #vrc-emotes flipbook creator fragment from an RZW1 document.
+func RenderVRChatEmotesV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrchat_emotes_v2(p, l, n)
+	})
+}
+
 // RenderVRCGroupsV2 renders the #vrcg-body Groups sub-tab from an RZW1 document.
 func RenderVRCGroupsV2(state []byte) (string, bool) {
 	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {

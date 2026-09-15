@@ -8,7 +8,6 @@ import (
 	"unicode/utf8"
 
 	"rave.page/mate/internal/config"
-	"rave.page/mate/internal/flipbook"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/vrccampaths"
 	"rave.page/mate/internal/vrchat"
@@ -89,25 +88,33 @@ type vrcFrameOptSt struct {
 	Sel    bool `json:"sel"`
 }
 
-// vrcEmotesSt is the animated-emoji flipbook generator card.
+// vrcEmotesSt is the animated-emoji flipbook creator card (#vrc-emotes). Once a source is
+// picked the card becomes a visual creator: the mp video player + draggable trim, a square
+// crop tool, a filmstrip of the tiled frames and a looping animated preview - all before
+// Generate. State-driven: controls post `fb-set:*` and the card re-renders from u.fb.
 type vrcEmotesSt struct {
-	Hint        string          `json:"hint"`
-	SourceLabel string          `json:"sourceLabel"`
-	NameLabel   string          `json:"nameLabel"`
-	FramesLabel string          `json:"framesLabel"`
-	FPSLabel    string          `json:"fpsLabel"`
-	TrimStart   string          `json:"trimStart"`
-	TrimEnd     string          `json:"trimEnd"`
-	OutDirLabel string          `json:"outDirLabel"`
-	Browse      string          `json:"browse"`
-	FrameOpts   []vrcFrameOptSt `json:"frameOpts,omitempty"`
-	OutDir      string          `json:"outDir"`
-	PingPong    string          `json:"pingpong"`
-	Crop        string          `json:"crop"`
-	Generate    string          `json:"generate"`
-	OpenFolder  string          `json:"openFolder"`
-	OpenUpload  string          `json:"openUpload"`
-	UploadURL   string          `json:"uploadUrl"`
+	Hint         string          `json:"hint"`
+	HasSource    bool            `json:"hasSource"`
+	SourceLabel  string          `json:"sourceLabel"`
+	Source       string          `json:"source"` // picked path ("" = empty state)
+	Browse       string          `json:"browse"`
+	EmptyHint    string          `json:"emptyHint"` // no-source hint (what's missing + next step)
+	Player       string          `json:"player"`    // RAW mp("flipbook") markup (video + trim lanes + readout)
+	NameLabel    string          `json:"nameLabel"`
+	Name         string          `json:"name"`
+	FramesLabel  string          `json:"framesLabel"`
+	FrameOpts    []vrcFrameOptSt `json:"frameOpts,omitempty"` // tier chips
+	FPSLabel     string          `json:"fpsLabel"`
+	FPS          string          `json:"fps"`
+	PingPong     string          `json:"pingpong"`
+	PingPongOn   bool            `json:"pingpongOn"`
+	Crop         string          `json:"crop"`
+	CropOn       bool            `json:"cropOn"`
+	Generate     string          `json:"generate"`
+	OutDir       string          `json:"outDir"`
+	OpenFolder   string          `json:"openFolder"`
+	KeptLine     string          `json:"keptLine"`     // "N frames · fps · loop s" (P8: text carries exact values)
+	PreviewLabel string          `json:"previewLabel"` // right-panel eyebrow
 }
 
 // vrcPathItemSt is one camera-path list row.
@@ -219,6 +226,20 @@ func (u *UI) vrcEditorHTML() string {
 		}
 	}
 	return vrcEditorRenderHTML(st)
+}
+
+// vrcEmotesFragHTML renders the #vrc-emotes creator fragment (Zig wire, else Go). The whole card
+// re-renders through this on a source change; sub-regions (#fb-body, #fb-fovl, #fb-strip, #fb-anim)
+// patch themselves on control changes/drags so the player <video> is never rebuilt.
+func (u *UI) vrcEmotesFragHTML() string {
+	st := u.vrcEmotesState()
+	if zigui.Available() {
+		if h, ok := zigWire("RenderVRChatEmotesV2", wireVrcEmotes(st), zigui.RenderVRChatEmotesV2,
+			wireNoV1, func() []byte { return stateJSON(st) }); ok {
+			return h
+		}
+	}
+	return vrcEmotesRenderHTML(st)
 }
 
 func (u *UI) vrcCampathsBody() string {
@@ -361,34 +382,6 @@ func (u *UI) vrcEditorState() vrcEditorSt {
 	}
 }
 
-// vrcEmotesState resolves the flipbook generator's labels + tiers + output dir.
-func (u *UI) vrcEmotesState() vrcEmotesSt {
-	f := &u.svc.Cfg.Features.VRChat
-	opts := make([]vrcFrameOptSt, 0, 4)
-	for i, t := range flipbook.Tiers() {
-		opts = append(opts, vrcFrameOptSt{Frames: t.Frames, Grid: t.Grid, Res: t.FrameRes, Sel: i == 1}) // 16-frame default
-	}
-	return vrcEmotesSt{
-		Hint:        i18n.T("vrchat.emotes.hint"),
-		SourceLabel: i18n.T("vrchat.emotes.field.source"),
-		NameLabel:   i18n.T("vrchat.emotes.field.name"),
-		FramesLabel: i18n.T("vrchat.emotes.field.frames"),
-		FPSLabel:    i18n.T("vrchat.emotes.field.fps"),
-		TrimStart:   i18n.T("vrchat.emotes.field.trimStart"),
-		TrimEnd:     i18n.T("vrchat.emotes.field.trimEnd"),
-		OutDirLabel: i18n.T("vrchat.emotes.field.outputDir"),
-		Browse:      i18n.T("common.browse"),
-		FrameOpts:   opts,
-		OutDir:      f.ResolvedFlipbookDir(),
-		PingPong:    i18n.T("vrchat.emotes.pingpong"),
-		Crop:        i18n.T("vrchat.emotes.crop"),
-		Generate:    i18n.T("vrchat.emotes.generate"),
-		OpenFolder:  i18n.T("vrchat.action.openOutputFolder"),
-		OpenUpload:  i18n.T("vrchat.action.openEmojiUploadPage"),
-		UploadURL:   vrcEmojiUploadURL,
-	}
-}
-
 // vrcCampathsState resolves the cached path scan + the selected path's viewer/info/actions.
 func (u *UI) vrcCampathsState() vrcCampathsSt {
 	if u.svc.VRCTools == nil {
@@ -509,7 +502,7 @@ func vrchatHTML(st vrcTabSt) string {
 		b.WriteString(section(st.SecStatusBio, hint("info", st.SignInHint)))
 	}
 
-	b.WriteString(section(st.SecEmotes, vrcEmotesRenderHTML(st.Emotes)))
+	b.WriteString(section(st.SecEmotes, `<div id=vrc-emotes>`+vrcEmotesRenderHTML(st.Emotes)+`</div>`))
 
 	if st.HasTools {
 		b.WriteString(section(st.SecCamPaths, `<div id=vrc-campaths>`+vrcCampathsHTML(st.CamPaths)+`</div>`))
@@ -608,44 +601,74 @@ func vrcPresetSelectHTML(s vrcPresetSelSt) string {
 	return o.String()
 }
 
+// vrcEmotesRenderHTML renders the #vrc-emotes creator inner (golden ref; byte-identical to
+// native/zigui/src/vrchat.zig renderEmotes). No source ⇒ an empty-state hint. With a source ⇒
+// the mp player + draggable trim (left) beside the animated preview (right), then the compact
+// controls (fb-body). The player rides through in st.Player as RAW mp markup.
 func vrcEmotesRenderHTML(st vrcEmotesSt) string {
 	var b strings.Builder
-	b.WriteString(`<div class="rp-card vrc-card">`)
+	b.WriteString(`<div class="rp-card vrc-card fb-card">`)
 	b.WriteString(hint("info", st.Hint))
-	b.WriteString(`<form data-act=vrc-emote-gen>`)
-	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(st.SourceLabel) + `</span><div class=vrc-pathrow><input id=vrc-emote-source class=field-input name=source placeholder="C:\path\clip.mp4"><button class="rp-btn rp-btn--ghost" type=button data-act="pick-file:vrc-emote-source">` + html.EscapeString(st.Browse) + `</button></div></label>`)
-	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(st.NameLabel) + `</span><input class=field-input name=name placeholder="emoji name"></label>`)
-	b.WriteString(fpair(`<label class=field><span class=field-label>`+html.EscapeString(st.FramesLabel)+`</span><select class="field-input select-input" name=frames>`+
-		vrcFrameOptionsHTML(st.FrameOpts)+`</select></label>`,
-		`<label class=field><span class=field-label>`+html.EscapeString(st.FPSLabel)+`</span><input class=field-input name=fps type=number value=20 min=1 max=120></label>`))
-	b.WriteString(fpair(`<label class=field><span class=field-label>`+html.EscapeString(st.TrimStart)+`</span><input class=field-input name=trimStart placeholder="optional"></label>`,
-		`<label class=field><span class=field-label>`+html.EscapeString(st.TrimEnd)+`</span><input class=field-input name=trimEnd placeholder="optional"></label>`))
-	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(st.OutDirLabel) + `</span><div class=vrc-pathrow><input id=vrc-emote-outdir class=field-input name=outdir value="` + html.EscapeString(st.OutDir) + `"><button class="rp-btn rp-btn--ghost" type=button data-act="pick-dir:vrc-emote-outdir">` + html.EscapeString(st.Browse) + `</button></div></label>`)
-	b.WriteString(`<label class=row><span class=row-label>` + html.EscapeString(st.PingPong) + `</span>` +
-		`<span class=switch><input type=checkbox name=pingpong value=1><span class=switch-track></span></span></label>`)
-	b.WriteString(`<div class=vrc-crop><label class=row><span class=row-label>` + html.EscapeString(st.Crop) + `</span><span class=switch><input type=checkbox name=crop value=1><span class=switch-track></span></span></label>` +
-		`<div class="btn-row vrc-crop-fields">` +
-		`<input class="field-input vrc-crop-in" name=cropx placeholder="x">` +
-		`<input class="field-input vrc-crop-in" name=cropy placeholder="y">` +
-		`<input class="field-input vrc-crop-in" name=cropw placeholder="w">` +
-		`<input class="field-input vrc-crop-in" name=croph placeholder="h"></div></div>`)
-	b.WriteString(`<button class="rp-btn rp-btn--go" type=submit>` + html.EscapeString(st.Generate) + `</button></form>`)
-	b.WriteString(`<div id=vrc-emote-result></div>`)
-	b.WriteString(`<div class=btn-row>` + vrcPathBtn(st.OpenFolder, "ghost", "open-url", st.OutDir) + `</div>`)
+	b.WriteString(`<div class=fb-srcrow><span class=field-label>` + html.EscapeString(st.SourceLabel) + `</span>`)
+	if st.HasSource {
+		b.WriteString(`<span class=fb-srcpath>` + html.EscapeString(st.Source) + `</span>`)
+	}
+	b.WriteString(`<button class="rp-btn rp-btn--ghost" type=button data-act="pick-file:vrc-emote-source">` + html.EscapeString(st.Browse) + `</button></div>`)
+	if !st.HasSource {
+		b.WriteString(emptyState(st.EmptyHint))
+		b.WriteString(`</div>`)
+		return b.String()
+	}
+	b.WriteString(`<div class=fb-stage><div id=fb-player-wrap class=fb-player>` + st.Player + `</div>`)
+	b.WriteString(`<div class=fb-side><span class=fb-eyebrow>` + html.EscapeString(st.PreviewLabel) + `</span>`)
+	b.WriteString(`<div id=fb-keptline class=fb-keptline>` + html.EscapeString(st.KeptLine) + `</div></div></div>`)
+	b.WriteString(`<div id=fb-body class=fb-body>` + fbBodyHTML(st) + `</div>`)
 	b.WriteString(`</div>`)
 	return b.String()
 }
 
-func vrcFrameOptionsHTML(opts []vrcFrameOptSt) string {
-	var o strings.Builder
-	for _, t := range opts {
-		sel := ""
+// fbBodyHTML renders the #fb-body inner (controls + primary + result + footer). Patched on its
+// own on any fb-set:* change so the player <video> in #fb-player-wrap is never rebuilt.
+func fbBodyHTML(st vrcEmotesSt) string {
+	var b strings.Builder
+	b.WriteString(`<div id=fb-controls class=fb-controls>` + fbControlsHTML(st) + `</div>`)
+	b.WriteString(`<button class="rp-btn rp-btn--go" data-act=fb-generate>` + html.EscapeString(st.Generate) + `</button>`)
+	b.WriteString(`<div id=vrc-emote-result></div>`)
+	b.WriteString(`<div class=fb-foot><span class=fb-outdir>` + html.EscapeString(st.OutDir) + `</span>` +
+		btn(st.Browse, "ghost", "pick-dir:vrc-emote-outdir", "") +
+		vrcPathBtn(st.OpenFolder, "ghost", "open-url", st.OutDir) + `</div>`)
+	return b.String()
+}
+
+// fbControlsHTML renders the compact control block (#fb-controls): name, frame-tier chips, fps,
+// ping-pong + crop switches. Each posts fb-set:* on change.
+func fbControlsHTML(st vrcEmotesSt) string {
+	var b strings.Builder
+	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(st.NameLabel) +
+		`</span><input class=field-input id=fb-name data-act=fb-set:name value="` + html.EscapeString(st.Name) + `" placeholder="emoji name"></label>`)
+	b.WriteString(`<div class=field><span class=field-label>` + html.EscapeString(st.FramesLabel) + `</span><div class=fb-tiers>`)
+	for _, t := range st.FrameOpts {
+		cls := "rp-chip fb-tier"
 		if t.Sel {
-			sel = " selected"
+			cls = "rp-chip rp-chip--active fb-tier"
 		}
-		fmt.Fprintf(&o, `<option value=%d%s>%d frames (%d×%d, %dpx)</option>`, t.Frames, sel, t.Frames, t.Grid, t.Grid, t.Res)
+		fmt.Fprintf(&b, `<button class="%s" type=button data-act=fb-set:frames data-val=%d>%d</button>`, cls, t.Frames, t.Frames)
 	}
-	return o.String()
+	b.WriteString(`</div></div>`)
+	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(st.FPSLabel) +
+		`</span><input class=field-input id=fb-fps data-act=fb-set:fps type=number value="` + html.EscapeString(st.FPS) + `" min=1 max=120></label>`)
+	b.WriteString(`<label class=row><span class=row-label>` + html.EscapeString(st.PingPong) +
+		`</span><span class=switch><input type=checkbox data-act=fb-set:pingpong value=1` + fbChecked(st.PingPongOn) + `><span class=switch-track></span></span></label>`)
+	b.WriteString(`<label class=row><span class=row-label>` + html.EscapeString(st.Crop) +
+		`</span><span class=switch><input type=checkbox data-act=fb-set:crop value=1` + fbChecked(st.CropOn) + `><span class=switch-track></span></span></label>`)
+	return b.String()
+}
+
+func fbChecked(on bool) string {
+	if on {
+		return " checked"
+	}
+	return ""
 }
 
 func vrcCampathsHTML(st vrcCampathsSt) string {

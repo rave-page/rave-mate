@@ -151,10 +151,11 @@ const runtimeJS = `(function(){
     if(!document.hasFocus()) return;
     var a=document.activeElement;
     if(a&&a.matches&&a.matches('input,textarea,select,button,a,[contenteditable]')) return;
-    var v=__vidOf('editor'); if(!v) return;       // only while the editor preview is mounted
+    var host=__vidOf('editor')?'editor':(__vidOf('flipbook')?'flipbook':null);
+    var v=host?__vidOf(host):null; if(!v) return;  // only while a mounted preview owns the video
     e.preventDefault(); if(e.repeat) return;
-    if(e.key==='Enter'){ __vpause('editor', false); return; }
-    if(v.paused) __vplay('editor'); else __vpause('editor', true);
+    if(e.key==='Enter'){ __vpause(host, false); return; }
+    if(v.paused) __vplay(host); else __vpause(host, true);
   }, true);
   document.addEventListener('change', function(e){
     var el = e.target;

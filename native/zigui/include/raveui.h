@@ -305,6 +305,7 @@ const uint8_t *rz_ui_render_vrchat_status_v2(const uint8_t *state, size_t len, s
 const uint8_t *rz_ui_render_vrchat_editor_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_vrchat_campaths_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_vrchat_photos_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vrchat_emotes_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_vrcgroups_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_vg_rolebody_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_vg_invitelist_v2(const uint8_t *state, size_t len, size_t *out_len);
