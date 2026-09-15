@@ -460,6 +460,21 @@ type MediaLinkFeature struct {
 	// working readback (one warn, a counted downgrade, "downgrades N" on the route panel), which is
 	// the honest trade; the warn names this key so an operator on a multi-GPU box can turn it on.
 	ZigAffinity *bool `json:"zigAffinity,omitempty"`
+	// VramGovernor enables the adaptive VRAM congestion governor: it gates GPU allocation under
+	// low primary-adapter headroom (never allocate/recycle when free < the rebuild cost - HOLD /
+	// freeze the immortal sender texture instead, so Resolume never re-registers interop on a full
+	// card), drives a degradation ladder (fps cap -> downscale -> freeze-last-good), and feeds the
+	// reduction back to the sender. Tri-state, DEFAULT ON (nil = on); explicit false = legacy
+	// behaviour (no VRAM-driven gating). Env RAVE_MATE_VRAM_GOVERNOR=1|0 overrides.
+	VramGovernor *bool `json:"vramGovernor,omitempty"`
+	// VramReserveMB is the primary-adapter free-VRAM floor the governor protects: below it, no new
+	// GPU allocation/recycle runs and the ladder steps down. 0 = auto (the gpumem watchdog
+	// threshold, max(1024, 8% budget)). A rebuild needing more than the current free is always held.
+	VramReserveMB int `json:"vramReserveMB,omitempty"`
+	// SenderMaxHeight pins the immortal Spout sender texture height so its shared handle never
+	// changes across a source-resolution change (decode scales into it). 0 = auto (first-observed
+	// source height, capped 2160); >0 = explicit cap.
+	SenderMaxHeight int `json:"senderMaxHeight,omitempty"`
 }
 
 // ZeroCopyCapture reports whether zero-copy Spout→encoder capture is enabled. Env
@@ -512,6 +527,43 @@ func (m MediaLinkFeature) ZeroCopyAffinity() bool {
 
 // SetZeroCopyAffinity sets the affinity opt-in EXPLICITLY (single write seam).
 func (m *MediaLinkFeature) SetZeroCopyAffinity(on bool) { v := on; m.ZigAffinity = &v }
+
+// VramGovernorEnabled reports whether the VRAM congestion governor is active. Env
+// RAVE_MATE_VRAM_GOVERNOR wins, then the config key, else ON. Only an explicit false opts out
+// (same tri-state migration argument as ZeroCopyDecode).
+func (m MediaLinkFeature) VramGovernorEnabled() bool {
+	switch os.Getenv("RAVE_MATE_VRAM_GOVERNOR") {
+	case "1", "true":
+		return true
+	case "0", "false":
+		return false
+	}
+	return m.VramGovernor == nil || *m.VramGovernor
+}
+
+// SetVramGovernor sets the governor opt-in EXPLICITLY (single write seam).
+func (m *MediaLinkFeature) SetVramGovernor(on bool) { v := on; m.VramGovernor = &v }
+
+// ResolvedVramReserveMB returns the free-VRAM floor the governor protects (0 = caller applies the
+// gpumem auto threshold; a negative config value normalises to 0).
+func (m MediaLinkFeature) ResolvedVramReserveMB() int {
+	if m.VramReserveMB < 0 {
+		return 0
+	}
+	return m.VramReserveMB
+}
+
+// ResolvedSenderMaxHeight returns the immortal-sender texture height cap (0 = auto: first-observed
+// source height, capped 2160; clamped to 4320).
+func (m MediaLinkFeature) ResolvedSenderMaxHeight() int {
+	if m.SenderMaxHeight <= 0 {
+		return 0
+	}
+	if m.SenderMaxHeight > 4320 {
+		return 4320
+	}
+	return m.SenderMaxHeight
+}
 
 // MediaSubprocess reports whether the media plane runs in the isolated child (#44). Default (key
 // absent) is TRUE; only an explicit false keeps the legacy in-proc plane. Note the old schema
