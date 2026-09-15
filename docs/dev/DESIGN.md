@@ -138,6 +138,15 @@ notes.
 
 Dated changes to the rules themselves. An entry here overrides older prose above.
 
+- **2026-09-16 — via-peer session federation UI.** When an external-platform feature (VRChat,
+  Twitch, World-Sync) is served by a paired instance because there is no local session, the
+  surface shows the borrowed identity as a state **badge** (`.rp-badge` / `statusRow`), a **hint**
+  line for WHERE the session lives ("via peer &lt;name&gt;"), and ALWAYS keeps the local sign-in
+  control (a local sign-in overrides federation and holds the session on this instance). Never a
+  control-styled pill for the via-peer fact, never hide the local sign-in. Established by the
+  VRChat via-peer trio; Twitch + World-Sync follow it. See `.devnotes/PEER_LINK_SUMMARY.md`
+  § Session federation.
+
 - **2026-09-15 — conventions ported.** rave.page Design & UX rules +
   `PRINCIPLES.md` (perception research) adapted to rave-mate — recipe-first for the
   Go-webview `.rp-*` kit; desktop control-surface domain. Same P1–P16 numbering as

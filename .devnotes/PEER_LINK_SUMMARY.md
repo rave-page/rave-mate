@@ -72,6 +72,39 @@ live wire state per connection and per plane.
   `peerlink` Managers pair over real websockets + persist mutual trust (<0.2s).
 - `go build ./... && go vet ./... && go test ./...` clean.
 
+## Session federation (via peer)
+
+External-platform sessions (VRChat, Twitch, GitHub/World-Sync) federate over the paired link: an
+instance with the feature ENABLED but no LOCAL session borrows a paired instance that HAS one, and
+every feature works as if signed in locally — the UI shows a "via peer &lt;name&gt;" hint and still
+offers a local sign-in (a local session always wins and disarms federation).
+
+- **Shared watcher** `internal/peerfed.Watcher[I]`: immediate first pass then 30 s; local session
+  wins (stay disarmed); arm the FIRST healthy peer, keep it while healthy, fail over / disarm on
+  peer loss or unlink. One loop reused by all three platforms (`app/vrcfederation.go`,
+  `twitchfederation.go`, `githubfederation.go`). A third hand-rolled copy is a defect.
+- **Tokens/cookies NEVER cross the link, in either direction.** The serving box executes each call
+  with ITS own credential and returns only results (remotectl `vrchat.proxy` / `twitch.*` /
+  `github.*` over the MAC'd pair). No handler returns, refreshes, or revokes a credential, and NO
+  auth verb is registered (StartDevice/PollDevice/Logout/token stay local-only) — a borrower can
+  never re-auth, refresh, or kill the serving session. The borrower keeps only in-memory
+  {nodeID, peerName, identity}; nothing about the peer's session is persisted. Serving handlers
+  gate on a live LOCAL session, so a box that is itself borrowing never serves a third peer.
+- **Per-platform coverage:**
+  - **VRChat** — full API tunnel (`vrchat.proxy`): a peer-tunneled `vrchat.Client` serves every
+    tab / worlds / status-edit read+write. Serving side refuses `/auth*` + `/logout` (except
+    `GET /auth/user`). Discovery: probe `vrchat.status` on each connected peer.
+  - **Twitch** — `twitch.*`: state (identity + live snapshot), searchCategories, setTitle,
+    applyTitlePreset, sendChat, moderate. Discovery: the existing `CapTwitch` eventbus advert +
+    `twitch.state` for the typed identity. Chat/alert/viewer events still ride the eventbus to the
+    borrower's feed (no new transport).
+  - **GitHub / World-Sync** — `github.*`: state (login only, never a token) + gist
+    create/update/get/delete. The borrower's `peerGistStore` (a `vrcperm.GistStore`) publishes
+    world feeds through the serving account; `github.Auth.Token()` errors while federated-only so
+    no local write can leak. Discovery: probe `github.state` on each connected peer.
+- **UI convention** (DESIGN.md decision log 2026-09-16): badge = state (signed in), hint = where
+  the session lives ("via peer &lt;name&gt;"), local sign-in always offered.
+
 ## Deferred to Phase 3+ (post-review)
 - Library metadata **sync + CRDT merge** (per-node play-count G-counters → summed total;
   LWW metadata; keep per-node granularity; rollback via `change_log`).
