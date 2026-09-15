@@ -64,6 +64,44 @@ func TestRememberedReceives(t *testing.T) {
 	}
 }
 
+func TestWebcamDeviceSettings(t *testing.T) {
+	var w WebcamFeature
+	if !w.RememberProp("Cam A", "zoom", 120, false) {
+		t.Fatal("first store must change")
+	}
+	if w.RememberProp("Cam A", "zoom", 120, false) {
+		t.Fatal("same value must be idempotent")
+	}
+	if !w.RememberProp("Cam A", "zoom", 130, false) {
+		t.Fatal("new value must change")
+	}
+	if !w.RememberProp("Cam A", "exposure", 0, true) {
+		t.Fatal("auto prop must store")
+	}
+	if w.RememberProp("", "zoom", 1, false) || w.RememberProp("Cam A", "", 1, false) {
+		t.Fatal("empty device/prop must be ignored")
+	}
+	got := w.DeviceProps("Cam A")
+	if got["zoom"].Value != 130 || got["zoom"].Auto {
+		t.Fatalf("zoom wrong: %+v", got["zoom"])
+	}
+	if !got["exposure"].Auto {
+		t.Fatalf("exposure must be auto: %+v", got["exposure"])
+	}
+	if w.DeviceProps("Cam B") != nil {
+		t.Fatal("unknown device must be nil")
+	}
+	// survives a JSON round-trip
+	b, _ := json.Marshal(w)
+	var back WebcamFeature
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(back.DeviceSettings, w.DeviceSettings) {
+		t.Fatalf("round trip: %+v != %+v", back.DeviceSettings, w.DeviceSettings)
+	}
+}
+
 func TestMediaLinkDevicePrefRoundTrip(t *testing.T) {
 	in := MediaLinkFeature{DevicePolicy: "pin", EncoderDevice: "0x00000000_0x0000c34f", Encoder: " h264_mf_native "}
 	if p, a := in.DevicePref(); p != "pin" || a != "0x00000000_0x0000c34f" {

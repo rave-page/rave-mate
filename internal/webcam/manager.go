@@ -213,8 +213,30 @@ func (m *Manager) StartCamera(device string, w, h, fps int) error {
 	m.log.Info(source, "camera started", map[string]any{
 		"device": device, "size": fmt.Sprintf("%dx%d", w, h), "fps": fps, "sender": SenderName(device)})
 	m.refreshProps(device)
+	m.restoreProps(device) // re-apply remembered UVC settings for this device
 	m.publishStatus()
 	return nil
+}
+
+// restoreProps re-applies the remembered per-device UVC settings (bonus: settings persist per
+// device). Best-effort: a device that lost a control just skips it; logged, never fatal.
+func (m *Manager) restoreProps(device string) {
+	saved := m.cfg().DeviceProps(device)
+	if len(saved) == 0 {
+		return
+	}
+	n := 0
+	for prop, s := range saved {
+		if err := m.setProp(device, prop, s.Value, s.Auto); err != nil {
+			m.log.Debug(source, "restore UVC prop failed", map[string]any{"device": device, "prop": prop, "err": err.Error()})
+			continue
+		}
+		n++
+	}
+	if n > 0 {
+		m.refreshProps(device)
+		m.log.Info(source, "restored remembered UVC settings", map[string]any{"device": device, "count": n})
+	}
 }
 
 // StopCamera stops the active capture (no-op when idle).

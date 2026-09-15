@@ -8,6 +8,7 @@ import (
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/mediaroute"
+	"rave.page/mate/internal/webcam"
 )
 
 // rememberingReceives wraps the video-receive control so the set of remote sources the user
@@ -118,6 +119,43 @@ func runReceiveResume(ctx context.Context, r *rememberingReceives) {
 			return
 		case <-t.C:
 			r.reconcile()
+		}
+	}
+}
+
+// runWebcamSettingsPersist snapshots the LOCAL camera's live UVC props on a ticker and persists any
+// change to config, so zoom/exposure/etc. are remembered PER DEVICE and re-applied on the next open
+// (webcam.Manager.restoreProps). Catches every set - local UI and remote peer commands alike - by
+// reading the published status rather than intercepting the command path. Auto props store value 0
+// (the device drives the value in auto), so a drifting auto value never churns the config. Runs in
+// the daemon, which owns cfg.Save().
+func runWebcamSettingsPersist(ctx context.Context, cam webcam.CamControl, cfg *config.Config, save func(), log *logbus.Bus) {
+	t := time.NewTicker(2 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		for _, inst := range cam.Instances() {
+			if !inst.Local || inst.Device == "" || len(inst.Props) == 0 {
+				continue
+			}
+			changed := false
+			for _, p := range inst.Props {
+				val := p.Value
+				if p.Auto {
+					val = 0
+				}
+				if cfg.Features.Webcam.RememberProp(inst.Device, p.ID, val, p.Auto) {
+					changed = true
+				}
+			}
+			if changed {
+				save()
+				log.Info("webcam", "remembered UVC settings for device", map[string]any{"device": inst.Device})
+			}
 		}
 	}
 }

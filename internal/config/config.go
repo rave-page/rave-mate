@@ -657,6 +657,42 @@ type WebcamFeature struct {
 	Height    int    `json:"height,omitempty"`    // capture size; 0 = device default
 	FPS       int    `json:"fps,omitempty"`       // capture rate; 0 = device default
 	AutoStart bool   `json:"autoStart,omitempty"` // start capture with the module (crash-recovery rigs)
+	// DeviceSettings remembers UVC controls PER DEVICE (dshow name -> prop id -> setting), so
+	// zoom/exposure/pan/tilt/focus/brightness are re-applied whenever that camera is opened again -
+	// on this PC or after a restart. Auto props store value 0 (the device drives the value in auto).
+	DeviceSettings map[string]map[string]PropSetting `json:"deviceSettings,omitempty"`
+}
+
+// PropSetting is one remembered UVC control value (WebcamFeature.DeviceSettings).
+type PropSetting struct {
+	Value int32 `json:"value"`
+	Auto  bool  `json:"auto,omitempty"`
+}
+
+// DeviceProps returns the remembered UVC settings for device (nil if none).
+func (w WebcamFeature) DeviceProps(device string) map[string]PropSetting {
+	return w.DeviceSettings[device]
+}
+
+// RememberProp stores one UVC setting for device (creating maps as needed). Returns true if the
+// stored value changed (caller persists). Auto props should pass value 0 to avoid churn from a
+// drifting auto value.
+func (w *WebcamFeature) RememberProp(device, prop string, value int32, auto bool) bool {
+	if device == "" || prop == "" {
+		return false
+	}
+	ns := PropSetting{Value: value, Auto: auto}
+	if cur, ok := w.DeviceSettings[device][prop]; ok && cur == ns {
+		return false
+	}
+	if w.DeviceSettings == nil {
+		w.DeviceSettings = map[string]map[string]PropSetting{}
+	}
+	if w.DeviceSettings[device] == nil {
+		w.DeviceSettings[device] = map[string]PropSetting{}
+	}
+	w.DeviceSettings[device][prop] = ns
+	return true
 }
 
 // DMXFeature configures the DMX plane: an Art-Net listener ingesting console DMX into the

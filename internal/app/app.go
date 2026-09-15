@@ -1033,6 +1033,10 @@ func run(parent context.Context, serviceMode bool) error {
 		mediaRoutesCtl = rr
 		debuglog.Go(log, "receive-resume", func() { runReceiveResume(ctx, rr) })
 	}
+	// Remember webcam UVC settings (zoom/exposure/…) per device; restored on the next device open.
+	if webcamCtl != nil {
+		debuglog.Go(log, "webcam-settings", func() { runWebcamSettingsPersist(ctx, webcamCtl, &cfg, func() { _ = cfg.Save() }, log) })
+	}
 
 	// VR perf/debug telemetry collector - receives vr.perf samples from any instance (incl. this one),
 	// for the UI monitor + `rave-mate ctl vrperf`. Always on (cheap; works even with no local VR), so a
