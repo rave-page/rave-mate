@@ -4,35 +4,42 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"rave.page/mate/internal/config"
-	"rave.page/mate/internal/debuglog"
 	"rave.page/mate/internal/eventbus"
 	"rave.page/mate/internal/logbus"
+	"rave.page/mate/internal/remotectl"
 	"rave.page/mate/internal/twitch"
 )
-
-// twitchPeerCmdTimeout bounds a forwarded peer send/moderate call into the child.
-const twitchPeerCmdTimeout = 15 * time.Second
 
 // TwitchProxy is the daemon-side stand-in for the subprocessed Twitch manager. It mirrors
 // sign-in/connection state, republishes child chat/alert/stats events onto the eventbus
 // (webui, VR overlays + peer mesh unchanged), advertises the twitch capability while the
-// child owns a session, forwards peer-directed send/moderate commands down, appends every
-// bus chat/alert (local AND peer-origin) to the persistent chat log, and proxies auth +
-// helix ops. Ops route to the owning peer when this instance isn't connected - parity with
-// the old in-proc Manager.
+// child owns a session, caches the last viewer snapshot, appends every bus chat/alert
+// (local AND peer-origin) to the persistent chat log, and proxies auth + helix ops.
+//
+// Twitch federation: with no LOCAL session, a paired instance that holds one serves every
+// op (chat/moderation/title reads+writes) as if signed in locally. The federated route is a
+// remotectl twitch.* call to the serving peer (request/response, so errors surface) - the
+// serving box executes with ITS token; the token never crosses the link. A local sign-in
+// always wins (fedClient returns nil while a local session is live); the watcher disarms
+// federation on local login or serving-peer loss (internal/app/twitchfederation.go).
 type TwitchProxy struct {
 	host    *Host
 	log     *logbus.Bus
 	bus     *eventbus.Bus
 	chatlog *twitch.ChatLog
 
-	mu      sync.Mutex
-	st      twitchState
-	onEvent func(twitch.Event) // optional direct hook (Fyne no-bus fallback)
+	mu          sync.Mutex
+	st          twitchState
+	lastViewers twitch.ViewerInfo  // last stats snapshot (served over twitch.state)
+	fedCli      *remotectl.Client  // armed serving peer (nil = no federation)
+	fedName     string             // serving peer's display name ("via <name>")
+	fedSelf     twitch.User        // serving peer's Twitch identity
+	onEvent     func(twitch.Event) // optional direct hook (Fyne no-bus fallback)
 }
 
 // NewTwitchProxy builds the proxy + its host. clientID is re-read per (re)spawn so a
@@ -45,13 +52,14 @@ func NewTwitchProxy(log *logbus.Bus, bus *eventbus.Bus, chatlog *twitch.ChatLog,
 		Init: func() any { return twitchInit{ClientID: clientID()} },
 		OnEvent: map[string]func(json.RawMessage){
 			"ev":       p.onEv,
-			"viewers":  func(data json.RawMessage) { p.publish(twitch.TopicViewers, data) },
+			"viewers":  p.onViewers,
 			"chatters": func(data json.RawMessage) { p.publish(twitch.TopicChatters, data) },
 			"state":    p.onState,
 		},
 		OnDown: func() {
 			p.mu.Lock()
 			p.st = twitchState{}
+			p.lastViewers = twitch.ViewerInfo{}
 			p.mu.Unlock()
 			if p.bus != nil {
 				p.bus.RemoveCap(twitch.CapTwitch)
@@ -62,24 +70,18 @@ func NewTwitchProxy(log *logbus.Bus, bus *eventbus.Bus, chatlog *twitch.ChatLog,
 		return nil, err
 	}
 	p.host = h
-	if bus != nil {
-		// Peer-directed commands: serve them here (forwarded into the child) while we own
-		// the session. Off the bus goroutine - the Call blocks on the child.
-		bus.Subscribe(twitch.TopicSendChat, func(e eventbus.Event) { p.onPeerCmd("chat.send", e.Data) })
-		bus.Subscribe(twitch.TopicModerate, func(e eventbus.Event) { p.onPeerCmd("chat.moderate", e.Data) })
+	if bus != nil && chatlog != nil {
 		// Persist chat + alerts from the bus, not the child pipe: captures this instance's
 		// events AND a paired peer's (bus fanout includes local publishes). Low-throughput
 		// single-writer file append - fine on the subscriber goroutine.
-		if chatlog != nil {
-			logEv := func(e eventbus.Event) {
-				var ev twitch.Event
-				if json.Unmarshal(e.Data, &ev) == nil {
-					chatlog.Append(ev)
-				}
+		logEv := func(e eventbus.Event) {
+			var ev twitch.Event
+			if json.Unmarshal(e.Data, &ev) == nil {
+				chatlog.Append(ev)
 			}
-			bus.Subscribe(twitch.TopicChat, logEv)
-			bus.Subscribe(twitch.TopicEvent, logEv)
 		}
+		bus.Subscribe(twitch.TopicChat, logEv)
+		bus.Subscribe(twitch.TopicEvent, logEv)
 	}
 	return p, nil
 }
@@ -120,6 +122,18 @@ func (p *TwitchProxy) onEv(data json.RawMessage) {
 	}
 }
 
+// onViewers caches the latest stream stats (served over twitch.state to federation borrowers)
+// and republishes them onto the bus (the tab's viewer chip + VR overlay).
+func (p *TwitchProxy) onViewers(data json.RawMessage) {
+	var vi twitch.ViewerInfo
+	if json.Unmarshal(data, &vi) == nil {
+		p.mu.Lock()
+		p.lastViewers = vi
+		p.mu.Unlock()
+	}
+	p.publish(twitch.TopicViewers, data)
+}
+
 // onState updates the mirror + syncs the twitch capability advertisement.
 func (p *TwitchProxy) onState(data json.RawMessage) {
 	var st twitchState
@@ -138,21 +152,6 @@ func (p *TwitchProxy) onState(data json.RawMessage) {
 	}
 }
 
-// onPeerCmd forwards a peer's directed command into the child (only while we own a session).
-func (p *TwitchProxy) onPeerCmd(method string, data json.RawMessage) {
-	if !p.connected() {
-		return
-	}
-	raw := append(json.RawMessage(nil), data...)
-	debuglog.Go(p.log, "feature:twitch", func() {
-		ctx, cancel := context.WithTimeout(context.Background(), twitchPeerCmdTimeout)
-		defer cancel()
-		if _, err := p.host.call(ctx, method, raw); err != nil {
-			p.log.Warn("twitch", "peer "+method+" failed", map[string]any{"error": err.Error()})
-		}
-	})
-}
-
 // connected reports whether the child owns a live EventSub session.
 func (p *TwitchProxy) connected() bool {
 	p.mu.Lock()
@@ -160,18 +159,92 @@ func (p *TwitchProxy) connected() bool {
 	return p.st.Connected && p.st.Self.ID != ""
 }
 
-// SignedIn mirrors the child's sealed-token state (false while the child is down).
+// LocalConnected reports a live LOCAL session (EventSub up + identity known) - the state in
+// which this box serves federation borrowers (remotectl twitch.* handlers gate on it).
+func (p *TwitchProxy) LocalConnected() bool { return p.connected() }
+
+// SignedIn reports a usable Twitch session from ANY consumer's view: local sealed token OR an
+// armed federation (so the tab + Settings light up like a local sign-in).
 func (p *TwitchProxy) SignedIn() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.st.SignedIn || p.fedCli != nil
+}
+
+// LocalSignedIn mirrors ONLY the child's sealed-token state (auth flows + the federation
+// watcher; a local session always wins over federation).
+func (p *TwitchProxy) LocalSignedIn() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.st.SignedIn
 }
 
-// Self returns the signed-in user (zero until the child's EventSub connects).
+// Federated reports whether an armed federation is serving this box (no local session).
+func (p *TwitchProxy) Federated() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return !p.st.SignedIn && p.fedCli != nil
+}
+
+// Via names the serving peer while federated ("" = local session or none).
+func (p *TwitchProxy) Via() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.st.SignedIn && p.fedCli != nil {
+		return p.fedName
+	}
+	return ""
+}
+
+// Self returns the signed-in user. Without a local session an armed federation answers with
+// the serving peer's identity (so every consumer shows who is streaming).
 func (p *TwitchProxy) Self() twitch.User {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if !p.st.SignedIn && p.fedCli != nil {
+		return p.fedSelf
+	}
 	return p.st.Self
+}
+
+// LocalSelf returns ONLY the local child's signed-in user (served over twitch.state).
+func (p *TwitchProxy) LocalSelf() twitch.User {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.st.Self
+}
+
+// LiveInfo returns the last cached stream stats (served over twitch.state).
+func (p *TwitchProxy) LiveInfo() twitch.ViewerInfo {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastViewers
+}
+
+// SetFederated arms federation: cli tunnels ops to the serving peer, self is that peer's Twitch
+// identity, name is its "via" label. A local session always overrides (fedClient returns nil).
+func (p *TwitchProxy) SetFederated(cli *remotectl.Client, peerName string, self twitch.User) {
+	p.mu.Lock()
+	p.fedCli, p.fedName, p.fedSelf = cli, strings.TrimSpace(peerName), self
+	p.mu.Unlock()
+}
+
+// ClearFederated drops the federation (serving peer gone/unlinked, or local login won).
+func (p *TwitchProxy) ClearFederated() {
+	p.mu.Lock()
+	p.fedCli, p.fedName, p.fedSelf = nil, "", twitch.User{}
+	p.mu.Unlock()
+}
+
+// fedClient returns the armed serving-peer client, or nil when a local session is live (local
+// always wins) or no federation is armed.
+func (p *TwitchProxy) fedClient() *remotectl.Client {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.st.SignedIn {
+		return nil
+	}
+	return p.fedCli
 }
 
 // Kick wakes the child's supervise loop (call after config changes; sign-in kicks itself).
@@ -184,57 +257,66 @@ func (p *TwitchProxy) SetOnEvent(fn func(twitch.Event)) {
 	p.mu.Unlock()
 }
 
-// Auth exposes the device-flow surface (proxied into the child, which owns the token).
+// Auth exposes the device-flow surface (proxied into the child, which owns the token). Auth
+// flows are LOCAL-ONLY and NEVER federated - a borrower can never re-auth the serving session.
 func (p *TwitchProxy) Auth() *TwitchAuthProxy { return &TwitchAuthProxy{p: p} }
 
-// SendChat sends a chat message: through the child if it owns the session, else routed to
-// the Twitch-owning peer.
+// SendChat sends a chat message: through the child if it owns the session, else through the
+// armed federation peer (request/response - the error surfaces).
 func (p *TwitchProxy) SendChat(ctx context.Context, text, replyParentID string) error {
 	if p.connected() {
 		_, err := p.host.Call(ctx, "chat.send", twitchSendReq{Text: text, ReplyParentID: replyParentID})
 		return err
 	}
-	return p.routeCmd(twitch.TopicSendChat, twitch.SendCmd{Text: text, ReplyParentID: replyParentID})
+	if cli := p.fedClient(); cli != nil {
+		return cli.TwitchSendChat(ctx, text, replyParentID)
+	}
+	return fmt.Errorf("twitch: no local session and no serving peer")
 }
 
-// Moderate runs a moderation action: locally via the child, else routed to the owning peer.
+// Moderate runs a moderation action: locally via the child, else through the federation peer.
 func (p *TwitchProxy) Moderate(ctx context.Context, cmd twitch.ModerateCmd) error {
 	if p.connected() {
 		_, err := p.host.Call(ctx, "chat.moderate", cmd)
 		return err
 	}
-	return p.routeCmd(twitch.TopicModerate, cmd)
+	if cli := p.fedClient(); cli != nil {
+		return cli.TwitchModerate(ctx, cmd)
+	}
+	return fmt.Errorf("twitch: no local session and no serving peer")
 }
 
-// routeCmd sends a directed command to the peer(s) owning the twitch capability.
-func (p *TwitchProxy) routeCmd(topic string, payload any) error {
-	if p.bus == nil {
-		return fmt.Errorf("twitch: not connected and no peers")
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	if n := p.bus.SendToCapability(twitch.CapTwitch, topic, raw); n == 0 {
-		return fmt.Errorf("twitch: no connected instance owns a Twitch session")
-	}
-	return nil
-}
-
-// ApplyTitlePreset resolves a preset's {variables} → sets the stream title (+ category).
+// ApplyTitlePreset resolves a preset's {variables} → sets the stream title (+ category), locally
+// or through the federation peer (its now-playing feeds the variables).
 func (p *TwitchProxy) ApplyTitlePreset(ctx context.Context, preset config.TitlePreset) error {
+	if !p.connected() {
+		if cli := p.fedClient(); cli != nil {
+			return cli.TwitchApplyTitlePreset(ctx, preset)
+		}
+	}
 	_, err := p.host.Call(ctx, "title.apply", preset)
 	return err
 }
 
-// SetTitle sets the stream title/category directly (child must be connected).
+// SetTitle sets the stream title/category directly, locally or through the federation peer.
 func (p *TwitchProxy) SetTitle(ctx context.Context, title, gameID string) error {
+	if !p.connected() {
+		if cli := p.fedClient(); cli != nil {
+			return cli.TwitchSetTitle(ctx, title, gameID)
+		}
+	}
 	_, err := p.host.Call(ctx, "title.set", twitchTitleReq{Title: title, GameID: gameID})
 	return err
 }
 
-// SearchCategories proxies a category fuzzy-search (for the preset editor).
+// SearchCategories proxies a category fuzzy-search (for the preset editor), locally or through
+// the federation peer.
 func (p *TwitchProxy) SearchCategories(ctx context.Context, q string) ([]twitch.Game, error) {
+	if !p.connected() {
+		if cli := p.fedClient(); cli != nil {
+			return cli.TwitchSearchCategories(ctx, q)
+		}
+	}
 	raw, err := p.host.Call(ctx, "categories.search", twitchSearchReq{Query: q})
 	if err != nil {
 		return nil, err
@@ -247,7 +329,8 @@ func (p *TwitchProxy) SearchCategories(ctx context.Context, q string) ([]twitch.
 }
 
 // TwitchAuthProxy proxies the Device Code Flow into the child (same surface the in-proc
-// *twitch.Auth offered the UI).
+// *twitch.Auth offered the UI). LOCAL-ONLY: never federated - the serving side exposes no
+// auth verb, so a borrower cannot re-auth, refresh, or revoke the serving session.
 type TwitchAuthProxy struct{ p *TwitchProxy }
 
 // StartDevice requests a device code + user code from Twitch.

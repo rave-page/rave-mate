@@ -142,4 +142,30 @@ const (
 	// /auth* + /logout refused (except GET /auth/user, the pure session read) so
 	// a peer can never re-auth, verify 2FA, or kill the serving session.
 	MethodVrcProxy = "vrchat.proxy"
+
+	// twitch.* - Twitch-link federation: ONE paired instance holds the Twitch session; a
+	// peer with the Twitch feature enabled but no local session drives chat/title/moderation
+	// AND reads identity+stream state through it as if signed in locally. state answers on
+	// every peer (signedIn=false without a session) so a borrower can confirm the serving
+	// identity. The OAuth token NEVER crosses the link and NO auth verb is registered:
+	// StartDevice/PollDevice/Logout stay local-only, so a peer can never re-auth, refresh,
+	// or revoke the serving session. Writes execute on the serving box with ITS token.
+	MethodTwitchState       = "twitch.state"
+	MethodTwitchSearchCats  = "twitch.searchCategories"
+	MethodTwitchSetTitle    = "twitch.setTitle"
+	MethodTwitchApplyPreset = "twitch.applyTitlePreset"
+	MethodTwitchSendChat    = "twitch.sendChat"
+	MethodTwitchModerate    = "twitch.moderate"
+
+	// github.* - World-Sync (GitHub gist) federation: ONE paired instance holds the GitHub
+	// link; a peer with World Sync enabled but no local link publishes world feeds through
+	// it (gist create/update/get/delete run on the serving box with ITS token). state answers
+	// on every peer (signedIn=false without a link) and NEVER carries the token. NO auth verb
+	// is registered: linking/unlinking stays local-only, so a peer can never re-auth or read
+	// the token.
+	MethodGitHubState      = "github.state"
+	MethodGitHubGistCreate = "github.gist.create"
+	MethodGitHubGistUpdate = "github.gist.update"
+	MethodGitHubGistGet    = "github.gist.get"
+	MethodGitHubGistDelete = "github.gist.delete"
 )

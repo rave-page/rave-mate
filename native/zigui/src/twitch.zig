@@ -73,6 +73,13 @@ pub const State = struct {
     showSend: bool = false,
     sendPh: []const u8 = "",
     sendLbl: []const u8 = "",
+
+    // sign-in status region (local session or via-peer federation); absent when signed out.
+    hasStatus: bool = false,
+    statusVariant: []const u8 = "",
+    statusLabel: []const u8 = "",
+    statusDl: []const u8 = "",
+    statusLine: []const u8 = "",
 };
 
 /// render mirrors Go twitchHTML (full tab view).
@@ -81,6 +88,11 @@ pub fn render(h: *Html, s: State) !void {
     if (!s.available) {
         try c.emptyState(h, s.unavailable);
         return;
+    }
+    if (s.hasStatus) {
+        try h.raw("<div class=\"rp-card\">");
+        try c.statusRow(h, s.statusVariant, s.statusLabel, s.statusDl, s.statusLine);
+        try h.raw("</div>");
     }
     if (s.showObs) {
         try c.sectionOpen(h, s.obsTitle);

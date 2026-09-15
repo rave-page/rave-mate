@@ -131,6 +131,22 @@ func twFixtures() map[string]twState {
 		twAlert("sub", "хтось підписався 🎉"),
 	}
 
+	// federated: the sign-in status region is present with the via-peer variant.
+	viaPeer := populated
+	viaPeer.HasStatus = true
+	viaPeer.StatusVariant = "success"
+	viaPeer.StatusLabel = "Signed in as raver&dj"
+	viaPeer.StatusDL = "signed in as raver&dj"
+	viaPeer.StatusLine = `Session served by peer desk-pc"<>' - login stays there`
+
+	// local: status region present, "session held here" line, no via-peer.
+	localStatus := base()
+	localStatus.HasStatus = true
+	localStatus.StatusVariant = "success"
+	localStatus.StatusLabel = "Signed in as raverdj"
+	localStatus.StatusDL = "signed in as raverdj"
+	localStatus.StatusLine = "session held on this instance"
+
 	return map[string]twState{
 		"unavailable": unavailable,
 		"empty":       empty,
@@ -139,6 +155,8 @@ func twFixtures() map[string]twState {
 		"escaping":    escaping,
 		"long":        long,
 		"unicode":     unicode,
+		"viaPeer":     viaPeer,
+		"localStatus": localStatus,
 	}
 }
 

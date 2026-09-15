@@ -990,18 +990,31 @@ func (u *UI) twitchBlocks() []setBlock {
 	if u.svc.Twitch == nil {
 		return []setBlock{sbNote(i18n.T("settings.body.twitch.unavailable"))}
 	}
-	signed := u.svc.Twitch.SignedIn()
+	tw := u.svc.Twitch
+	presetsBtn := nbtn(i18n.T("settings.body.twitch.titlePresets", i18n.A{"count": fmt.Sprint(len(u.svc.Cfg.Features.Twitch.Presets))}), "outline", "settings-twpreset", "")
+	// federated: a paired instance serves the session. Show the via-peer hint AND keep the local
+	// sign-in (device code) - a LOCAL sign-in always overrides federation, holding the session here.
+	if tw.Federated() {
+		self := tw.Self()
+		name := self.DisplayName
+		if name == "" {
+			name = self.Login
+		}
+		return []setBlock{
+			sbNote(i18n.T("settings.body.twitch.linkedViaPeer", i18n.A{"name": name, "peer": tw.Via()})),
+			sbBtnRow(nbtn(i18n.T("settings.body.twitch.signIn"), "primary", "settings-twitch-signin", ""), presetsBtn)}
+	}
 	line := i18n.T("settings.body.twitch.signInLine")
 	row := []uiBtn{nbtn(i18n.T("settings.body.twitch.signIn"), "primary", "settings-twitch-signin", "")}
-	if signed {
-		if lg := u.svc.Twitch.Self().Login; lg != "" {
+	if tw.LocalSignedIn() {
+		if lg := tw.Self().Login; lg != "" {
 			line = i18n.T("settings.body.twitch.signedInAs", i18n.A{"name": lg})
 		} else {
 			line = i18n.T("settings.body.twitch.connecting")
 		}
 		row = []uiBtn{nbtn(i18n.T("common.signOut"), "destructive", "settings-twitch-signout", "")}
 	}
-	row = append(row, nbtn(i18n.T("settings.body.twitch.titlePresets", i18n.A{"count": fmt.Sprint(len(u.svc.Cfg.Features.Twitch.Presets))}), "outline", "settings-twpreset", ""))
+	row = append(row, presetsBtn)
 	return []setBlock{sbNote(line), sbBtnRow(row...)}
 }
 

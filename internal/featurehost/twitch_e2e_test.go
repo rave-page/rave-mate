@@ -47,9 +47,10 @@ func TestTwitchFeatureE2E(t *testing.T) {
 	if p.Self().ID != "" {
 		t.Errorf("Self = %+v, want zero", p.Self())
 	}
-	// Not connected + no bus → SendChat reports no route (parity with the old Manager).
-	if err := p.SendChat(ctx, "hi", ""); err == nil || !strings.Contains(err.Error(), "no peers") {
-		t.Errorf("SendChat err = %v, want no-peers routing error", err)
+	// Not connected + no federation armed → SendChat reports no route (no local session, no
+	// serving peer). Parity with the old Manager's no-peers error, now federation-shaped.
+	if err := p.SendChat(ctx, "hi", ""); err == nil || !strings.Contains(err.Error(), "no serving peer") {
+		t.Errorf("SendChat err = %v, want no-serving-peer routing error", err)
 	}
 	// Signed-out title op surfaces the child's not-connected error.
 	tctx, tcancel := context.WithTimeout(ctx, 10*time.Second)

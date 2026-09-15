@@ -106,6 +106,14 @@ type twState struct {
 	ShowSend bool   `json:"showSend"`
 	SendPH   string `json:"sendPh"`
 	SendLbl  string `json:"sendLbl"`
+
+	// Sign-in status region (badge + line): shown when signed in locally or served via a peer
+	// (federation), absent when signed out. HasStatus gates the whole strow.
+	HasStatus     bool   `json:"hasStatus"`
+	StatusVariant string `json:"statusVariant"`
+	StatusLabel   string `json:"statusLabel"`
+	StatusDL      string `json:"statusDl"`
+	StatusLine    string `json:"statusLine"`
 }
 
 // subscribeTwitch seeds the feed from the persistent chat log (history survives restarts -
@@ -183,6 +191,7 @@ func (u *UI) twitchState() twState {
 	if !st.Available {
 		return st
 	}
+	u.twStatus(&st)
 	if u.svc.OBSControl != nil {
 		st.ShowObs, st.ObsTitle, st.Obs = true, i18n.T("twitch.streamingCockpit"), u.twObsState()
 	}
@@ -195,6 +204,34 @@ func (u *UI) twitchState() twState {
 		st.SendPH, st.SendLbl = i18n.T("twitch.sendPlaceholder"), i18n.T("twitch.send")
 	}
 	return st
+}
+
+// twStatus fills the sign-in status region: a LOCAL session -> "Signed in as X" (session held
+// on this instance); an armed federation -> "Signed in as X" + "via peer <peer>" (login stays on
+// that instance). Absent (HasStatus=false) when signed out. Mirrors the VRChat status region.
+func (u *UI) twStatus(st *twState) {
+	if u.svc.Twitch == nil {
+		return
+	}
+	tw := u.svc.Twitch
+	self := tw.Self()
+	name := self.DisplayName
+	if name == "" {
+		name = self.Login
+	}
+	switch {
+	case tw.Via() != "":
+		st.HasStatus, st.StatusVariant = true, "success"
+		st.StatusLabel = i18n.T("twitch.status.signedInAs", i18n.A{"name": orDash(name)})
+		st.StatusLine = i18n.T("twitch.status.viaPeer", i18n.A{"peer": tw.Via()})
+	case tw.LocalSignedIn() && self.Login != "":
+		st.HasStatus, st.StatusVariant = true, "success"
+		st.StatusLabel = i18n.T("twitch.status.signedInAs", i18n.A{"name": orDash(name)})
+		st.StatusLine = i18n.T("twitch.status.local")
+	}
+	if st.HasStatus {
+		st.StatusDL = strings.ToLower(st.StatusLabel)
+	}
 }
 
 // twObsState resolves the viewer chip + the Live-tab cockpit markup.
@@ -378,6 +415,9 @@ func twitchHTML(st twState) string {
 	b.WriteString(panel(st.Title, st.Sub))
 	if !st.Available {
 		return b.String() + emptyState(st.Unavailable)
+	}
+	if st.HasStatus {
+		b.WriteString(`<div class="rp-card">` + statusRowDL(st.StatusVariant, st.StatusLabel, st.StatusDL, st.StatusLine) + `</div>`)
 	}
 	if st.ShowObs {
 		b.WriteString(section(st.ObsTitle, `<div id=twitch-obs>`+twObsHTML(st.Obs)+`</div>`))

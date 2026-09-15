@@ -1333,6 +1333,13 @@ func run(parent context.Context, serviceMode bool) error {
 	debuglog.Go(log, "vrchat-federation", func() {
 		runVrcFederationWatcher(ctx, log, vrcMgr, peerMgr, func() *remotectl.Endpoint { return remoteCtl })
 	})
+	// twitch federation: serve THIS instance's Twitch session to paired peers (the token never
+	// crosses the link - only ops do, and no auth verb is exposed), and ARM the consuming side:
+	// with no local session, a peer holding one serves chat/moderation/title as if signed in here.
+	remotectl.RegisterTwitch(remoteCtl, twitchW)
+	debuglog.Go(log, "twitch-federation", func() {
+		runTwitchFederationWatcher(ctx, log, twitchW, bus, peerMgr, func() *remotectl.Endpoint { return remoteCtl })
+	})
 	remotectl.RegisterLibrary(remoteCtl, lib)
 	// Remote cue/beatgrid/drop editing: a paired controller pulls a track's audio + edits
 	// locally, then writes back here. Writes publish library.trackchanged so every open UI

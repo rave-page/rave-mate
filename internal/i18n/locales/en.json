@@ -3071,6 +3071,7 @@
       },
       "twitch": {
         "connecting": "Signed in. Connecting…",
+        "linkedViaPeer": "Signed in as {name} via peer {peer}. Sign in below to hold the session on THIS instance instead.",
         "signIn": "Sign in to Twitch",
         "signInLine": "Sign in with the Rave-Mate Twitch app (Device Code - no password, no secret).",
         "signedInAs": "Signed in as ",
@@ -3178,6 +3179,7 @@
         "linkDeviceCode": "Link GitHub (device code)",
         "linkLine": "Link a GitHub account (gist scope only). Paste a classic PAT with 'gist' scope, or use device code.",
         "linkedAs": "Linked as ",
+        "linkedViaPeer": "Linked as {name} via peer {peer}. Link below to hold the session on THIS instance instead.",
         "pasteToken": "Paste token…",
         "unavailable": "GitHub link unavailable in this build.",
         "publishVia": "Publish via",
@@ -4064,6 +4066,11 @@
     "resubscribed": "💜 {name} resubscribed ({months}){tier}",
     "send": "Send",
     "sendPlaceholder": "Send a message to chat…",
+    "status": {
+      "signedInAs": "Signed in as {name}",
+      "viaPeer": "Session served by peer {peer} - all features work as if signed in here. Login stays on that instance.",
+      "local": "session held on this instance"
+    },
     "streamTitle": "Stream title",
     "streamingCockpit": "Streaming cockpit",
     "subscribed": "💜 {name} subscribed{tier}",

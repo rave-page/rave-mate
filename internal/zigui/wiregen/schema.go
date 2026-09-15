@@ -942,7 +942,7 @@ var schema = []msg{
 	{
 		name: "TwState", goT: "twState", zigT: "twitch.State", id: 50,
 		doc: "Twitch tab (full view)",
-		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), b(5, "ShowObs", "showObs"), s(6, "ObsTitle", "obsTitle"), st(7, "Obs", "obs", "TwObs"), b(8, "ShowPresets", "showPresets"), s(9, "PresetsTitle", "presetsTitle"), st(10, "Presets", "presets", "TwPresets"), st(11, "Feed", "feed", "TwFeed"), b(12, "ShowSend", "showSend"), s(13, "SendPH", "sendPh"), s(14, "SendLbl", "sendLbl")},
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), b(5, "ShowObs", "showObs"), s(6, "ObsTitle", "obsTitle"), st(7, "Obs", "obs", "TwObs"), b(8, "ShowPresets", "showPresets"), s(9, "PresetsTitle", "presetsTitle"), st(10, "Presets", "presets", "TwPresets"), st(11, "Feed", "feed", "TwFeed"), b(12, "ShowSend", "showSend"), s(13, "SendPH", "sendPh"), s(14, "SendLbl", "sendLbl"), b(15, "HasStatus", "hasStatus"), s(16, "StatusVariant", "statusVariant"), s(17, "StatusLabel", "statusLabel"), s(18, "StatusDL", "statusDl"), s(19, "StatusLine", "statusLine")},
 	},
 	// midi mixer (i3): full tab (root 57) + the three live patch targets - #midi-active (54,
 	// ~1 Hz), #midi-monitor rows (55, ~1 Hz), #midi-ctlstat-<i> (56, ~1 Hz) - plus the two pcv
