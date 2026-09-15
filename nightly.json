@@ -1,13 +1,13 @@
 {
-  "version": "nightly-82c04d3",
-  "build": 325,
-  "commit": "82c04d3",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-325-20260915-82c04d3.exe",
-  "sha256": "c3381b9cc2fcf332287eb27da72ce989f22e0ee8589eb52130568c9f11286d16",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-325-20260915-82c04d3.exe",
-  "installer_sha256": "a04d006a9ca39610415696f2f3fb2d5b666a449d4b26a5be4a84fcc86fa27d7f",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-325-20260915-82c04d3",
-  "linux_sha256": "ebd2427ae8850fed37390b4e10c401b4b4cef59cc673c9aea17e8c939bb66535",
+  "version": "nightly-05e5c70",
+  "build": 326,
+  "commit": "05e5c70",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-326-20260915-05e5c70.exe",
+  "sha256": "f5d868740f2b54ccddc322c4f1cef3061bd2acc1759d198d40a3d6551a3b0772",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-326-20260915-05e5c70.exe",
+  "installer_sha256": "7a901c6c9f0b2f8ffd9199f2eddd7b237ce63917ed58abb722ec847f104b7e73",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-326-20260915-05e5c70",
+  "linux_sha256": "69878f778f7ce48b03694b72c930bac787ac1c181f135cb1d855571dfb4806b8",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-09-15T13:29:53Z",
-  "notes": "rekordbox: test DB-poll/optionsDBPath/prodjlink + SQLCipher raw-key fallback"
+  "released": "2026-09-15T14:30:39Z",
+  "notes": "webui: paginate the Library collection list (\"load more\")"
 }
