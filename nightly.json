@@ -1,13 +1,13 @@
 {
-  "version": "nightly-02e9e23",
-  "build": 328,
-  "commit": "02e9e23",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-328-20260915-02e9e23.exe",
-  "sha256": "e404e0d4c1028776cc3b66d20e65e559da9bf6b8f7b5f0e31506089c73f62de4",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-328-20260915-02e9e23.exe",
-  "installer_sha256": "a411e295034af696b1d5d10a289507d609c9ef11885aa891cd35eed1f91ddc3c",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-328-20260915-02e9e23",
-  "linux_sha256": "7e6f1cc1f269ad4ced9e8a09412062548dbf077fbd883e3e59699e7ce6dcd42e",
+  "version": "nightly-0463541",
+  "build": 330,
+  "commit": "0463541",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-330-20260915-0463541.exe",
+  "sha256": "54d6bbfc3134183e700895d0915bbdae198ccaeaf03b3d7974ce8c6f0927d533",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-330-20260915-0463541.exe",
+  "installer_sha256": "00234c63aef853874a7bc284da72ff943c7cdf76217b5cae526e274c222af4cc",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-330-20260915-0463541",
+  "linux_sha256": "a3e2772178864eb9d5f6fa2ec1fd5e2fc09b8cf12fffde3a00c5a8417409818b",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-09-15T17:54:44Z",
-  "notes": "webui(vrchat): production rework of the animated-emoji flipbook card"
+  "released": "2026-09-15T22:13:01Z",
+  "notes": "docs(CLAUDE): push development after each verified-green unit"
 }
