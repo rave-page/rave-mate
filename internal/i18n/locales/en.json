@@ -1961,6 +1961,12 @@
       "title": "Decks (merged)",
       "via": "via {sources}"
     },
+    "group": {
+      "decks": "Decks",
+      "signals": "Signals",
+      "stream": "Stream & picture",
+      "system": "System"
+    },
     "signals": {
       "channel": "Ch {n}",
       "driverBound": "driver holds the hardware (reading its rave-mate port)",

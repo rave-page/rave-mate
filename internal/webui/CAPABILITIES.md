@@ -18,6 +18,7 @@ the Go helper that emits it. Tokens live in `assets/ds/colors_and_type.css`.
 |---|---|---|---|
 | Button | `.rp-btn` (+ `--primary`/`--go`/`--outline`/`--ghost`/`--warn`/`--destructive`, `--sm`/`--lg`/`--icon`) | `uiBtn{}.html()`, `btnRow(...)` | ONE filled primary per surface (P16); rest outline/ghost; destructive never beside primary |
 | Card | `.rp-card` (+ `__head`/`__title`/`__sub`/`__foot`, `--glow`) | inline in `render_*.go` over the recipe | identity + state + action on one card (P8); `__foot` pinned bottom |
+| Disclosure (collapsible group) | `.rp-disclosure` (+ `__sum`) | inline `<details class=rp-disclosure><summary class="rp-disclosure__sum sec-title">` over the recipe | keeps a low-priority chunk out of the first glance (P1/P2); semantic `<details>`, keyboard- + `ctl`-reachable (Live SYSTEM chunk) |
 | Select (non-native) | select recipe | `resolveSelectBox`/`selHTML` (`smartselect.go`), `resolveSelectBoxTip` (`components.go`, w/ `?` tip) | replaces `<select>`; never a native dropdown |
 | Action menu | `.amenu` | `resolveActionMenu` (`actionmenu.go`) | > 4 actions collapse here (P16) |
 | Chip (control) | `.rp-chip` (+ `--active`) | inline over the recipe | filters/toggles/tiers/sub-nav ONLY — a control, never a label |

@@ -190,6 +190,12 @@ type liveState struct {
 	PerfTipS     *tipSt          `json:"perfTipSt,omitempty"` // structured tooltip - wins over PerfTip
 	Perf         livePerfSt      `json:"perf"`
 	Strip        liveStripSt     `json:"strip"`
+	// P1 chunk titles: the Live surface groups into four named chunks (+ the ambient strip). Resolved
+	// here so both renderers get the localized name; empty in a fixture just yields an empty header.
+	GroupStream  string `json:"groupStream"`
+	GroupDecks   string `json:"groupDecks"`
+	GroupSignals string `json:"groupSignals"`
+	GroupSystem  string `json:"groupSystem"`
 }
 
 // liveState resolves every fragment of the cockpit into render state.
@@ -199,10 +205,14 @@ func (u *UI) liveState() liveState {
 		Transport: u.liveTransportState(), NP: u.liveNPState(),
 		StatusTitle: i18n.T("live.status.title"), Status: u.liveStatusState(),
 		DecksTitle: i18n.T("live.decks.title"), Decks: u.liveDecksState(),
-		Signals: liveSignalsSt{Rows: []liveKV{}},
-		Cockpit: liveCockpitSt{Rows: []liveCockpitRow{}},
-		Link:    liveLinkSt{Sources: []liveSRow{}},
-		Strip:   u.liveStripState(),
+		Signals:      liveSignalsSt{Rows: []liveKV{}},
+		Cockpit:      liveCockpitSt{Rows: []liveCockpitRow{}},
+		Link:         liveLinkSt{Sources: []liveSRow{}},
+		Strip:        u.liveStripState(),
+		GroupStream:  i18n.T("live.group.stream"),
+		GroupDecks:   i18n.T("live.group.decks"),
+		GroupSignals: i18n.T("live.group.signals"),
+		GroupSystem:  i18n.T("live.group.system"),
 	}
 	if u.svc.Session != nil {
 		st.HasSignals, st.SignalsTitle, st.SignalsTipS = true, i18n.T("live.signals.title"), tipTopicSt("signal-sources")
@@ -243,32 +253,67 @@ func (u *UI) renderLive() string {
 	return liveHTML(st)
 }
 
-// liveHTML is the pure Go renderer (golden reference; byte-identical to Zig).
+// liveHTML is the pure Go renderer (golden reference; byte-identical to Zig). The surface groups
+// into four named chunks + the ambient strip (P1): STREAM & PICTURE (the auto-live landmark + OBS
+// cockpit), DECKS (the grid is the single now-playing truth - the LCD is retired, P8), SIGNALS
+// (signal sources + the Link phrase row beside them), and SYSTEM (connection status + the
+// monitoring graphs, behind one disclosure). Fragment ids are unchanged so every tick still lands.
 func liveHTML(st liveState) string {
 	var b strings.Builder
 	b.WriteString(panel(st.Title, st.Sub))
+
+	// ── CHUNK 1 — Stream & picture ──
+	b.WriteString(`<section class=sec><h2 class=sec-title>` + html.EscapeString(st.GroupStream) + `</h2>`)
 	b.WriteString(`<div id=live-transport>` + liveTransHTML(st.Transport) + `</div>`)
-	b.WriteString(`<div id=live-np>` + liveNPHTML(st.NP) + `</div>`)
-	b.WriteString(section(st.StatusTitle, `<div id=live-status>`+liveStatusFragHTML(st.Status)+`</div>`))
-	b.WriteString(section(st.DecksTitle, `<div id=live-decks>`+liveDecksFragHTML(st.Decks)+`</div>`))
-	if st.HasSignals {
-		b.WriteString(sectionTip(st.SignalsTitle, tipOr(st.SignalsTipS, st.SignalsTip), `<div id=live-signals>`+liveSignalsFragHTML(st.Signals)+`</div>`))
-	}
 	if st.HasCockpit {
-		b.WriteString(section(st.CockpitTitle, `<div id=live-cockpit>`+liveCockpitFragHTML(st.Cockpit)+`</div>`))
+		b.WriteString(liveSubLabel(st.CockpitTitle, ""))
+		b.WriteString(`<div id=live-cockpit>` + liveCockpitFragHTML(st.Cockpit) + `</div>`)
 	}
-	if st.HasLink {
-		b.WriteString(section(st.LinkTitle, `<div id=live-ablelink>`+liveLinkFragHTML(st.Link)+`</div>`))
+	b.WriteString(`</section>`)
+
+	// ── CHUNK 2 — Decks ──
+	b.WriteString(`<section class=sec><h2 class=sec-title>` + html.EscapeString(st.GroupDecks) + `</h2>`)
+	b.WriteString(`<div id=live-decks>` + liveDecksFragHTML(st.Decks) + `</div>`)
+	b.WriteString(`</section>`)
+
+	// ── CHUNK 3 — Signals (+ Link folded beside) ──
+	if st.HasSignals || st.HasLink {
+		b.WriteString(`<section class=sec><h2 class=sec-title>` + html.EscapeString(st.GroupSignals) + `</h2>`)
+		if st.HasSignals {
+			b.WriteString(liveSubLabel(st.SignalsTitle, tipOr(st.SignalsTipS, st.SignalsTip)))
+			b.WriteString(`<div id=live-signals>` + liveSignalsFragHTML(st.Signals) + `</div>`)
+		}
+		if st.HasLink {
+			b.WriteString(liveSubLabel(st.LinkTitle, ""))
+			b.WriteString(`<div id=live-ablelink>` + liveLinkFragHTML(st.Link) + `</div>`)
+		}
+		b.WriteString(`</section>`)
 	}
+
+	// ── CHUNK 4 — System (one disclosure; collapsed by default - least glance-critical, P1/P2) ──
+	b.WriteString(`<details class=rp-disclosure><summary class="rp-disclosure__sum sec-title">` + html.EscapeString(st.GroupSystem) + `</summary>`)
+	b.WriteString(liveSubLabel(st.StatusTitle, ""))
+	b.WriteString(`<div id=live-status>` + liveStatusFragHTML(st.Status) + `</div>`)
 	if st.HasNet {
-		b.WriteString(sectionTip(st.NetTitle, tipOr(st.NetTipS, st.NetTip), `<div id=live-net>`+liveGraphFragHTML(st.Net)+`</div>`))
-		b.WriteString(sectionTip(st.TimTitle, tipOr(st.TimTipS, st.TimTip), `<div id=live-tim>`+liveGraphFragHTML(st.Tim)+`</div>`))
+		b.WriteString(liveSubLabel(st.NetTitle, tipOr(st.NetTipS, st.NetTip)))
+		b.WriteString(`<div id=live-net>` + liveGraphFragHTML(st.Net) + `</div>`)
+		b.WriteString(liveSubLabel(st.TimTitle, tipOr(st.TimTipS, st.TimTip)))
+		b.WriteString(`<div id=live-tim>` + liveGraphFragHTML(st.Tim) + `</div>`)
 	}
 	if st.HasPerf {
-		b.WriteString(sectionTip(st.PerfTitle, tipOr(st.PerfTipS, st.PerfTip), `<div id=live-perf2>`+livePerfFragHTML(st.Perf)+`</div>`))
+		b.WriteString(liveSubLabel(st.PerfTitle, tipOr(st.PerfTipS, st.PerfTip)))
+		b.WriteString(`<div id=live-perf2>` + livePerfFragHTML(st.Perf) + `</div>`)
 	}
+	b.WriteString(`</details>`)
+
 	b.WriteString(`<div id=live-strip class=livestrip>` + liveStripFragHTML(st.Strip) + `</div>`)
 	return b.String()
+}
+
+// liveSubLabel is a chunk's inner sub-heading: an escaped title + optional pre-rendered tooltip
+// markup (same title+tip convention as sectionTip). "" tip = a plain sub-label.
+func liveSubLabel(title, tipHTML string) string {
+	return `<div class=sec-sub>` + html.EscapeString(title) + tipHTML + `</div>`
 }
 
 // liveFrag renders one tick-patched fragment through Zig when available: RZW1 binary state
@@ -359,7 +404,10 @@ func liveTransHTML(st liveTransportSt) string {
 	if st.HasRec {
 		b.WriteString(`<span class=tsep></span><span class=tlabel title=` + attrQ(st.RecHint) + `>` +
 			html.EscapeString(st.RecLabel) + `</span>`)
-		b.WriteString(`<button class="rp-btn rp-btn--outline" data-act=arec-toggle title=` + attrQ(st.RecHint) + `>` +
+		// The one filled primary on the Live tab (P16): capturing the set is the highest-stakes,
+		// one-way action here - streaming is auto (OBS-driven) and timecode is secondary, so both
+		// are outline. See DESIGN.md Decision log 2026-09-16.
+		b.WriteString(`<button class="rp-btn rp-btn--primary" data-act=arec-toggle title=` + attrQ(st.RecHint) + `>` +
 			html.EscapeString(st.RecBtn) + `</button>`)
 		b.WriteString(`<span class=np-artist id=live-rec-state title=` + attrQ(st.RecHint) + `>` +
 			html.EscapeString(st.RecState) + `</span>`)
@@ -367,7 +415,7 @@ func liveTransHTML(st liveTransportSt) string {
 	if st.HasTC {
 		b.WriteString(`<span class=tsep></span><span class=tlabel>` + html.EscapeString(st.TCLabel) + `</span>`)
 		b.WriteString(`<span class=tmono id=live-tc>` + html.EscapeString(st.TC) + `</span>`)
-		b.WriteString(`<button class="rp-btn rp-btn--go" data-act=tc-start>` + html.EscapeString(st.StartLbl) + `</button>`)
+		b.WriteString(`<button class="rp-btn rp-btn--outline" data-act=tc-start>` + html.EscapeString(st.StartLbl) + `</button>`)
 		b.WriteString(`<button class="rp-btn rp-btn--outline" data-act=tc-stop>` + html.EscapeString(st.StopLbl) + `</button>`)
 	}
 	b.WriteString(`</div>`)
@@ -494,7 +542,13 @@ func linkPhraseBarStr(fill, cap string) string {
 // advances smoothly at display refresh between the ~1 Hz ticks: phase (beats) + tempo drive a
 // local phase = (phase + tempo/60·dt) mod quantum → fill width + beat number. rate 0
 // (disabled/unavailable) = static snap + loop stop. Called each tick after the panel patch.
-func (u *UI) pushAbleLink() {
+func (u *UI) pushAbleLink() { u.pushAbleLinkR(false) }
+
+// pushAbleLinkR is pushAbleLink with an explicit freeze: forceStatic pins rate 0 regardless of the
+// live tempo (the P5 streaming freeze - the general tick's push is gated shut while a stream runs,
+// so the client loop would otherwise interpolate the whole set on its last-known rate). It records
+// whether the client loop is now animating (liveLinkAnim) so liveCriticalTick knows a freeze is owed.
+func (u *UI) pushAbleLinkR(forceStatic bool) {
 	if u.shell == nil || u.svc.AbleLink == nil {
 		return
 	}
@@ -508,9 +562,10 @@ func (u *UI) pushAbleLink() {
 	tmpl := i18n.T("live.ablelink.phraseBeat", i18n.A{"beat": "\x00", "quantum": fmt.Sprint(int(q))})
 	pre, post, _ := strings.Cut(tmpl, "\x00")
 	rate := 0.0
-	if st.Available && st.Enabled && st.Tempo > 0 {
+	if !forceStatic && st.Available && st.Enabled && st.Tempo > 0 {
 		rate = 1.0
 	}
+	u.setLinkAnim(rate > 0)
 	u.enqueueEval("rtlink", fmt.Sprintf(
 		"window.__rt&&window.__rt('link','live-link',{fill:'live-link-fill',cap:'live-link-cap',phase:%.4f,tempo:%.4f,q:%.2f,rate:%.1f,pre:%s,post:%s})",
 		st.Phase, st.Tempo, q, rate, jsQuote(pre), jsQuote(post)))
@@ -917,7 +972,7 @@ func liveCockpitFragHTML(st liveCockpitSt) string {
 	for _, r := range st.Rows {
 		b.WriteString(`<div class=row><span class=row-label>` + dot(r.Variant) + ` ` + html.EscapeString(r.Name) +
 			` <span class=np-artist>` + html.EscapeString(r.State) + `</span></span>` +
-			btnRow(btn(r.StreamLbl, "primary", r.StreamAct, ""), btn(r.RecLbl, "outline", r.RecAct, "")) + `</div>`)
+			btnRow(btn(r.StreamLbl, "outline", r.StreamAct, ""), btn(r.RecLbl, "outline", r.RecAct, "")) + `</div>`)
 	}
 	b.WriteString(`</div>`)
 	return b.String()
@@ -1075,9 +1130,8 @@ func (u *UI) stripLeft() string {
 			p = append(p, i18n.T("live.strip.capListening"))
 		}
 	}
-	if u.svc.AudioRec != nil && u.svc.AudioRec.Status().Recording {
-		p = append(p, i18n.T("live.strip.recOn"))
-	}
+	// P8: the audio recorder is stated authoritatively in the transport (#live-rec-state); the
+	// strip is ambient overflow only, so it no longer repeats "rec on" here.
 	return strings.Join(p, " · ")
 }
 
@@ -1118,17 +1172,8 @@ func (u *UI) stripRight() string {
 			p = append(p, i18n.T("live.strip.twitchConnecting"))
 		}
 	}
-	if u.svc.Perf != nil {
-		if ss := u.svc.Perf.Snapshot(); len(ss) > 0 {
-			last := ss[len(ss)-1]
-			if last.SysOK {
-				p = append(p, i18n.T("live.strip.freeResources", i18n.A{
-					"cpu": fmt.Sprintf("%.0f", math.Max(0, 100-last.SysCPUPct)),
-					"gb":  fmt.Sprintf("%.1f", (last.SysMemTotalMB-last.SysMemUsedMB)/1024),
-				}))
-			}
-		}
-	}
+	// P8: system headroom is a shape in the SYSTEM well (#live-perf2 "HEADROOM" line); the strip no
+	// longer repeats the free-CPU/RAM figure. Kept ambient: Twitch login only.
 	return strings.Join(p, " · ")
 }
 

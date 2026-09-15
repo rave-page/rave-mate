@@ -160,74 +160,99 @@ pub const State = struct {
     perfTipSt: ?c.Tip = null, // structured tooltip — wins over perfTip
     perf: Perf = .{},
     strip: Strip = .{},
+    // P1 chunk titles (four named groups + the ambient strip).
+    groupStream: []const u8 = "",
+    groupDecks: []const u8 = "",
+    groupSignals: []const u8 = "",
+    groupSystem: []const u8 = "",
 };
 
-/// render mirrors Go liveHTML (full cockpit; every fragment wrapped in its patch id).
+/// subLabel is a chunk's inner sub-heading (Go liveSubLabel): escaped title + optional raw tip.
+fn subLabel(h: *Html, title: []const u8, tip_html: []const u8) !void {
+    try h.raw("<div class=sec-sub>");
+    try h.esc(title);
+    try h.raw(tip_html);
+    try h.raw("</div>");
+}
+
+/// subLabelTip resolves the structured/raw tooltip (Go tipOr) then emits the sub-label.
+fn subLabelTip(h: *Html, title: []const u8, tip_st: ?c.Tip, tip_raw: []const u8) !void {
+    var tb = try c.tipBuf(h, tip_st, tip_raw);
+    defer tb.deinit();
+    try subLabel(h, title, tb.b.items);
+}
+
+/// render mirrors Go liveHTML: four named chunks (+ the ambient strip). Fragment ids unchanged.
 pub fn render(h: *Html, s: State) !void {
     try c.panel(h, s.title, s.sub);
-    try h.raw("<div id=live-transport>");
+
+    // ── CHUNK 1 — Stream & picture ──
+    try h.raw("<section class=sec><h2 class=sec-title>");
+    try h.esc(s.groupStream);
+    try h.raw("</h2><div id=live-transport>");
     try renderTransport(h, s.transport);
-    try h.raw("</div><div id=live-np>");
-    try renderNP(h, s.np);
     try h.raw("</div>");
-    try c.sectionOpen(h, s.statusTitle);
-    try h.raw("<div id=live-status>");
-    try renderStatus(h, s.status);
-    try h.raw("</div>");
-    try c.sectionClose(h);
-    try c.sectionOpen(h, s.decksTitle);
-    try h.raw("<div id=live-decks>");
-    try renderDecks(h, s.decks);
-    try h.raw("</div>");
-    try c.sectionClose(h);
-    if (s.hasSignals) {
-        var signalstb = try c.tipBuf(h, s.signalsTipSt, s.signalsTip);
-        defer signalstb.deinit();
-        try c.sectionOpenTip(h, s.signalsTitle, signalstb.b.items);
-        try h.raw("<div id=live-signals>");
-        try renderSignals(h, s.signals);
-        try h.raw("</div>");
-        try c.sectionClose(h);
-    }
     if (s.hasCockpit) {
-        try c.sectionOpen(h, s.cockpitTitle);
+        try subLabel(h, s.cockpitTitle, "");
         try h.raw("<div id=live-cockpit>");
         try renderCockpit(h, s.cockpit);
         try h.raw("</div>");
-        try c.sectionClose(h);
     }
-    if (s.hasLink) {
-        try c.sectionOpen(h, s.linkTitle);
-        try h.raw("<div id=live-ablelink>");
-        try renderLink(h, s.link);
-        try h.raw("</div>");
-        try c.sectionClose(h);
+    try h.raw("</section>");
+
+    // ── CHUNK 2 — Decks ──
+    try h.raw("<section class=sec><h2 class=sec-title>");
+    try h.esc(s.groupDecks);
+    try h.raw("</h2><div id=live-decks>");
+    try renderDecks(h, s.decks);
+    try h.raw("</div></section>");
+
+    // ── CHUNK 3 — Signals (+ Link folded beside) ──
+    if (s.hasSignals or s.hasLink) {
+        try h.raw("<section class=sec><h2 class=sec-title>");
+        try h.esc(s.groupSignals);
+        try h.raw("</h2>");
+        if (s.hasSignals) {
+            try subLabelTip(h, s.signalsTitle, s.signalsTipSt, s.signalsTip);
+            try h.raw("<div id=live-signals>");
+            try renderSignals(h, s.signals);
+            try h.raw("</div>");
+        }
+        if (s.hasLink) {
+            try subLabel(h, s.linkTitle, "");
+            try h.raw("<div id=live-ablelink>");
+            try renderLink(h, s.link);
+            try h.raw("</div>");
+        }
+        try h.raw("</section>");
     }
+
+    // ── CHUNK 4 — System (one disclosure) ──
+    try h.raw("<details class=rp-disclosure><summary class=\"rp-disclosure__sum sec-title\">");
+    try h.esc(s.groupSystem);
+    try h.raw("</summary>");
+    try subLabel(h, s.statusTitle, "");
+    try h.raw("<div id=live-status>");
+    try renderStatus(h, s.status);
+    try h.raw("</div>");
     if (s.hasNet) {
-        var nettb = try c.tipBuf(h, s.netTipSt, s.netTip);
-        defer nettb.deinit();
-        try c.sectionOpenTip(h, s.netTitle, nettb.b.items);
+        try subLabelTip(h, s.netTitle, s.netTipSt, s.netTip);
         try h.raw("<div id=live-net>");
         try renderGraph(h, s.net);
         try h.raw("</div>");
-        try c.sectionClose(h);
-        var timtb = try c.tipBuf(h, s.timTipSt, s.timTip);
-        defer timtb.deinit();
-        try c.sectionOpenTip(h, s.timTitle, timtb.b.items);
+        try subLabelTip(h, s.timTitle, s.timTipSt, s.timTip);
         try h.raw("<div id=live-tim>");
         try renderGraph(h, s.tim);
         try h.raw("</div>");
-        try c.sectionClose(h);
     }
     if (s.hasPerf) {
-        var perftb = try c.tipBuf(h, s.perfTipSt, s.perfTip);
-        defer perftb.deinit();
-        try c.sectionOpenTip(h, s.perfTitle, perftb.b.items);
+        try subLabelTip(h, s.perfTitle, s.perfTipSt, s.perfTip);
         try h.raw("<div id=live-perf2>");
         try renderPerf(h, s.perf);
         try h.raw("</div>");
-        try c.sectionClose(h);
     }
+    try h.raw("</details>");
+
     try h.raw("<div id=live-strip class=livestrip>");
     try renderStrip(h, s.strip);
     try h.raw("</div>");
@@ -261,7 +286,7 @@ pub fn renderTransport(h: *Html, s: Transport) !void {
         try h.attrQ(s.recHint);
         try h.raw(">");
         try h.esc(s.recLabel);
-        try h.raw("</span><button class=\"rp-btn rp-btn--outline\" data-act=arec-toggle title=");
+        try h.raw("</span><button class=\"rp-btn rp-btn--primary\" data-act=arec-toggle title=");
         try h.attrQ(s.recHint);
         try h.raw(">");
         try h.esc(s.recBtn);
@@ -276,7 +301,7 @@ pub fn renderTransport(h: *Html, s: Transport) !void {
         try h.esc(s.tcLabel);
         try h.raw("</span><span class=tmono id=live-tc>");
         try h.esc(s.tc);
-        try h.raw("</span><button class=\"rp-btn rp-btn--go\" data-act=tc-start>");
+        try h.raw("</span><button class=\"rp-btn rp-btn--outline\" data-act=tc-start>");
         try h.esc(s.startLbl);
         try h.raw("</button><button class=\"rp-btn rp-btn--outline\" data-act=tc-stop>");
         try h.esc(s.stopLbl);
@@ -372,7 +397,7 @@ pub fn renderCockpit(h: *Html, s: Cockpit) !void {
         try h.esc(r.state);
         try h.raw("</span></span>");
         try c.btnRowOpen(h);
-        try c.btn(h, r.streamLbl, "primary", r.streamAct, "");
+        try c.btn(h, r.streamLbl, "outline", r.streamAct, "");
         try c.btn(h, r.recLbl, "outline", r.recAct, "");
         try c.btnRowClose(h);
         try h.raw("</div>");
@@ -519,10 +544,15 @@ test "graph + perf wells embed Go-built legends raw" {
         "</div></div>", h.b.items);
 }
 
-test "full view section frame" {
+test "full view: four chunks, status behind the system disclosure, strip last" {
     var h = Html.init(std.testing.allocator);
     defer h.deinit();
-    try render(&h, .{ .title = "Live", .sub = "S", .statusTitle = "Status", .decksTitle = "Decks" });
-    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "<section class=sec><h2 class=sec-title>Status</h2><div id=live-status>") != null);
+    try render(&h, .{ .title = "Live", .sub = "S", .groupStream = "Stream", .groupDecks = "Decks", .groupSystem = "System", .statusTitle = "Status", .decksTitle = "Decks" });
+    // the transport landmark opens the Stream & picture chunk
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "<section class=sec><h2 class=sec-title>Stream</h2><div id=live-transport>") != null);
+    // status is a sub-label inside the System disclosure, no longer its own top-level section
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "<details class=rp-disclosure><summary class=\"rp-disclosure__sum sec-title\">System</summary><div class=sec-sub>Status</div><div id=live-status>") != null);
+    // the now-playing LCD is retired
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "id=live-np") == null);
     try std.testing.expect(std.mem.endsWith(u8, h.b.items, "<div id=live-strip class=livestrip><span></span><span></span><span></span></div>"));
 }

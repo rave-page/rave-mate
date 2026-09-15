@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0x709a6388;
+pub const schema_hash: u32 = 0xe99d534a;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -448,6 +448,10 @@ pub fn decodeLiveState(r: *wire.Reader, out: *live.State) wire.Error!void {
         32 => out.netTipSt = try r.sub(c.Tip, decodeTip, t),
         33 => out.timTipSt = try r.sub(c.Tip, decodeTip, t),
         34 => out.perfTipSt = try r.sub(c.Tip, decodeTip, t),
+        35 => out.groupStream = try r.str(t),
+        36 => out.groupDecks = try r.str(t),
+        37 => out.groupSignals = try r.str(t),
+        38 => out.groupSystem = try r.str(t),
         else => try r.skip(t),
     };
 }
@@ -5587,6 +5591,10 @@ pub fn mergeLiveState(r: *wire.Reader, out: *live.State) wire.Error!void {
             32 => out.netTipSt = null,
             33 => out.timTipSt = null,
             34 => out.perfTipSt = null,
+            35 => out.groupStream = "",
+            36 => out.groupDecks = "",
+            37 => out.groupSignals = "",
+            38 => out.groupSystem = "",
             else => {},
         },
         1 => out.title = try wire.strDup(r, t),
@@ -5635,6 +5643,10 @@ pub fn mergeLiveState(r: *wire.Reader, out: *live.State) wire.Error!void {
             if (out.perfTipSt == null) out.perfTipSt = .{};
             try wire.mergeSub(r, c.Tip, mergeTip, t, &out.perfTipSt.?);
         },
+        35 => out.groupStream = try wire.strDup(r, t),
+        36 => out.groupDecks = try wire.strDup(r, t),
+        37 => out.groupSignals = try wire.strDup(r, t),
+        38 => out.groupSystem = try wire.strDup(r, t),
         else => try r.skip(t),
     };
 }
@@ -5670,6 +5682,10 @@ pub fn cloneLiveState(a: std.mem.Allocator, v: live.State) wire.Error!live.State
     if (v.netTipSt) |x| { out.netTipSt = try cloneTip(a, x); }
     if (v.timTipSt) |x| { out.timTipSt = try cloneTip(a, x); }
     if (v.perfTipSt) |x| { out.perfTipSt = try cloneTip(a, x); }
+    out.groupStream = try a.dupe(u8, v.groupStream);
+    out.groupDecks = try a.dupe(u8, v.groupDecks);
+    out.groupSignals = try a.dupe(u8, v.groupSignals);
+    out.groupSystem = try a.dupe(u8, v.groupSystem);
     return out;
 }
 
@@ -5723,6 +5739,10 @@ pub fn hashLiveState(h: *wire.Hasher, v: live.State) void {
     if (v.timTipSt) |x| hashTip(h, x);
     h.opt(34, v.perfTipSt != null);
     if (v.perfTipSt) |x| hashTip(h, x);
+    h.str(35, v.groupStream);
+    h.str(36, v.groupDecks);
+    h.str(37, v.groupSignals);
+    h.str(38, v.groupSystem);
 }
 
 pub fn mergeUiBtn(r: *wire.Reader, out: *c.Btn) wire.Error!void {

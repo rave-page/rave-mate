@@ -153,7 +153,7 @@ pub fn runLive(a: std.mem.Allocator, s: LiveBatch) ![]u8 {
     const p = s.prev;
     try b.text("live-tc", p, s.tc);
     if (s.live.transport.hasRec) try b.text("live-rec-state", p, s.live.transport.recState);
-    try b.frag("live-np", p, live.NP, live.renderNP, s.live.np);
+    // #live-np (the LCD) is retired - the deck grid is the now-playing truth (P8).
     try b.frag("live-status", p, live.Status, live.renderStatus, s.live.status);
     try b.frag("live-decks", p, live.Decks, live.renderDecks, s.live.decks);
     if (s.live.hasSignals) try b.frag("live-signals", p, live.Signals, live.renderSignals, s.live.signals);
@@ -221,7 +221,7 @@ test "live batch: fragment set + order, no prev hashes" {
     defer a.free(buf);
     const es = try parseBatch(a, buf);
     defer a.free(es);
-    const want = [_][]const u8{ "live-tc", "live-rec-state", "live-np", "live-status", "live-decks", "live-strip" };
+    const want = [_][]const u8{ "live-tc", "live-rec-state", "live-status", "live-decks", "live-strip" };
     try std.testing.expectEqual(want.len, es.len);
     for (want, es) |w, e| try std.testing.expectEqualStrings(w, e.id);
     try std.testing.expectEqualStrings("01:02:03:04", es[0].html);
@@ -241,8 +241,9 @@ test "live batch: every optional section adds its fragment, in tick order" {
     const es = try parseBatch(a, buf);
     defer a.free(es);
     const want = [_][]const u8{
-        "live-tc",      "live-rec-state", "live-np",  "live-status", "live-decks", "live-signals",
-        "live-cockpit", "live-ablelink",  "live-net", "live-tim",    "live-perf2", "live-strip",
+        "live-tc",       "live-rec-state", "live-status", "live-decks",
+        "live-signals",  "live-cockpit",   "live-ablelink", "live-net",
+        "live-tim",      "live-perf2",     "live-strip",
     };
     try std.testing.expectEqual(want.len, es.len);
     for (want, es) |w, e| try std.testing.expectEqualStrings(w, e.id);
@@ -277,14 +278,14 @@ test "dedup: matching prev hash suppresses, changed bytes come back" {
     try std.testing.expectEqualStrings("00:00:00:01", es3[0].html);
 }
 
-test "dedup: an unknown id is always emitted (Go dropped its cache)" {
+test "dedup: a stale/unknown prev hash still emits everything (Go dropped its cache)" {
     const a = std.testing.allocator;
-    const prev = [_]Prev{.{ .id = "live-np", .hash = 0xDEAD }};
+    const prev = [_]Prev{.{ .id = "live-status", .hash = 0xDEAD }};
     const buf = try runLive(a, .{ .live = liveTestState(), .prev = &prev });
     defer a.free(buf);
     const es = try parseBatch(a, buf);
     defer a.free(es);
-    try std.testing.expectEqual(@as(usize, 6), es.len); // np's stale hash != its render → all 6
+    try std.testing.expectEqual(@as(usize, 5), es.len); // status's stale hash != its render; the rest have no prev → all 5
 }
 
 test "text fragments are escaped like Go htmlEscape" {
