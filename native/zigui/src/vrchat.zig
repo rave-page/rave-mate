@@ -8,6 +8,7 @@ const std = @import("std");
 const Html = @import("html.zig").Html;
 const c = @import("components.zig");
 const vg = @import("vrcgroups.zig");
+const ev = @import("editor_video.zig"); // reuse Frame (square crop tool shares the editor's shape)
 
 fn eq(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
@@ -98,6 +99,7 @@ pub const Emotes = struct {
     openFolder: []const u8 = "",
     keptLine: []const u8 = "",
     previewLabel: []const u8 = "",
+    frame: ev.Frame = .{}, // square crop tool (#fb-frame), shown when cropOn
 };
 
 pub const PathItem = struct {
@@ -369,7 +371,9 @@ pub fn renderEmotes(h: *Html, s: Emotes) !void {
 
 /// renderEmotesBody mirrors Go fbBodyHTML (#fb-body inner).
 fn renderEmotesBody(h: *Html, s: Emotes) !void {
-    try h.raw("<div id=fb-controls class=fb-controls>");
+    try h.raw("<div id=fb-frame>");
+    try renderCropFrame(h, s.frame);
+    try h.raw("</div><div id=fb-controls class=fb-controls>");
     try renderEmotesControls(h, s);
     try h.raw("</div><button class=\"rp-btn rp-btn--go\" data-act=fb-generate>");
     try h.esc(s.generate);
@@ -412,6 +416,61 @@ fn renderEmotesControls(h: *Html, s: Emotes) !void {
     try h.raw("</span><span class=switch><input type=checkbox data-act=fb-set:crop value=1");
     if (s.cropOn) try h.raw(" checked");
     try h.raw("><span class=switch-track></span></span></label>");
+}
+
+/// renderCropFrame mirrors Go fbFrameHTML/fbFrameOvlHTML (the #fb-frame square crop tool). Same
+/// markup as the editor's renderFrame but with flipbook drag ids (fb-pan / fb-zoom / #fb-fovl).
+fn renderCropFrame(h: *Html, s: ev.Frame) !void {
+    if (!s.show) return;
+    try h.raw("<div class=edv-fbox data-actpos=fb-pan data-actwheel=fb-zoom style=\"aspect-ratio:");
+    try h.raw(s.aw);
+    try h.raw("/");
+    try h.raw(s.ah);
+    try h.raw("\">");
+    if (s.imgUrl.len != 0) {
+        try h.raw("<img class=edv-fimg src=");
+        try h.attrQ(s.imgUrl);
+        try h.raw(" alt=\"\">");
+    } else {
+        try h.raw("<span class=edv-fbusy>");
+        try h.esc(s.busy);
+        try h.raw("</span>");
+    }
+    try h.raw("<div id=fb-fovl>");
+    if (s.hasCrop) {
+        try h.raw("<div class=edv-shade style=\"left:0;right:0;top:0;height:");
+        try h.raw(s.cropT);
+        try h.raw("%\"></div><div class=edv-shade style=\"left:0;right:0;top:calc(");
+        try h.raw(s.cropT);
+        try h.raw("% + ");
+        try h.raw(s.cropH);
+        try h.raw("%);bottom:0\"></div>");
+        try h.raw("<div class=edv-shade style=\"left:0;width:");
+        try h.raw(s.cropL);
+        try h.raw("%;top:");
+        try h.raw(s.cropT);
+        try h.raw("%;height:");
+        try h.raw(s.cropH);
+        try h.raw("%\"></div><div class=edv-shade style=\"left:calc(");
+        try h.raw(s.cropL);
+        try h.raw("% + ");
+        try h.raw(s.cropW);
+        try h.raw("%);right:0;top:");
+        try h.raw(s.cropT);
+        try h.raw("%;height:");
+        try h.raw(s.cropH);
+        try h.raw("%\"></div>");
+        try h.raw("<div class=edv-crop style=\"left:");
+        try h.raw(s.cropL);
+        try h.raw("%;top:");
+        try h.raw(s.cropT);
+        try h.raw("%;width:");
+        try h.raw(s.cropW);
+        try h.raw("%;height:");
+        try h.raw(s.cropH);
+        try h.raw("%\"></div>");
+    }
+    try h.raw("</div></div>");
 }
 
 /// renderCampaths mirrors Go vrcCampathsHTML (#vrc-campaths).

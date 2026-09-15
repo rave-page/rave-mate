@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0x8ee72a48;
+pub const schema_hash: u32 = 0xe73d3690;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -3205,6 +3205,7 @@ pub fn decodeVrcEmotes(r: *wire.Reader, out: *vrchat.Emotes) wire.Error!void {
         20 => out.openFolder = try r.str(t),
         21 => out.keptLine = try r.str(t),
         22 => out.previewLabel = try r.str(t),
+        23 => out.frame = try r.sub(editor_video.Frame, decodeEdvFrame, t),
         else => try r.skip(t),
     };
 }

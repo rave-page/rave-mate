@@ -225,6 +225,9 @@ func vrcEmotesFixtures() map[string]vrcEmotesSt {
 
 	cropOn := full
 	cropOn.CropOn = true
+	cropOn.Frame = edvFrameSt{Show: true, AW: "1920", AH: "1080",
+		ImgURL: "http://127.0.0.1:47621/img/s1/tok", HasCrop: true,
+		CropL: "23.437", CropT: "0", CropW: "56.25", CropH: "100"}
 
 	tier64 := full
 	tier64.FrameOpts = []vrcFrameOptSt{

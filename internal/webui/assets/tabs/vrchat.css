@@ -31,6 +31,9 @@
 .fb-outdir { flex:1 1 auto; min-width:0; font-family:"JetBrains Mono",monospace; font-size:11px;
   color:var(--rp-muted,#9aa); word-break:break-all; }
 .fb-foot .rp-btn { flex:0 0 auto; }
+/* crop tool reuses the editor's .edv-fbox/.edv-fimg/.edv-shade/.edv-crop recipe (editor.css); only
+   the overlay container id differs (#fb-fovl vs the editor's #edv-fovl). */
+#fb-fovl { position:absolute; inset:0; pointer-events:none; }
 
 /* flipbook result (runtime-patched into #vrc-emote-result) */
 .vrc-note.over { color:var(--rp-hot,#FF3E8A); }

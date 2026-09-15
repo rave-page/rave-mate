@@ -2,17 +2,21 @@ package webui
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/flipbook"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/mediatools"
 	"rave.page/mate/internal/transcode"
+	"rave.page/mate/internal/videoedit"
 )
 
 // Animated-emoji flipbook creator (VRChat Profile tab, #vrc-emotes). Once a source clip is
@@ -33,6 +37,16 @@ type fbSt struct {
 	srcW, srcH int     // probed source pixels (0 until the probe lands)
 	dur        float64 // probed duration s
 	srcGen     int     // bumped per source load: drops a stale async probe result
+
+	// square crop (own videoedit.Project, Aspect locked 1x1 - NOT the editor's global proj)
+	proj      videoedit.Project
+	frameT    float64 // source seconds of the extracted crop frame
+	framePath string  // extracted frame PNG ("" = none yet)
+	frameBusy bool
+	frameGen  int     // drops a stale async frame extract
+	panDrag   bool    // crop pan drag in flight
+	panLive   float64 // live free-axis window position while dragging
+	panLive2  float64 // live cross-axis position (0..1; 0.5 = centered)
 }
 
 const (
@@ -103,9 +117,14 @@ func init() {
 		u.fbPatchKept()
 	})
 	onExact("fb-set:crop", func(u *UI, m actMsg) {
-		u.fbMut(func(v *fbSt) { v.cropOn = m.Val == "true" })
+		fb := u.fbMut(func(v *fbSt) { v.cropOn = m.Val == "true" })
 		u.fbPatchBody()
+		if fb.cropOn && fb.framePath == "" { // first crop-on: extract the frame to drag over
+			u.fbFrame(u.fbInPoint())
+		}
 	})
+	onExact("fb-pan", func(u *UI, m actMsg) { u.fbPan(m.Val) })
+	onExact("fb-zoom", func(u *UI, m actMsg) { u.fbZoom(m.Val) })
 	onExact("fb-generate", func(u *UI, _ actMsg) { u.vrcEmoteGen() })
 }
 
@@ -124,6 +143,9 @@ func (u *UI) fbSetSource(path string) {
 		v.source = path
 		v.srcW, v.srcH, v.dur = 0, 0, 0
 		v.srcGen++
+		v.frameT, v.framePath, v.frameGen = 0, "", v.frameGen+1
+		v.proj = videoedit.Project{Aspect: "1x1"} // crop locked to a square; own proj, NOT editor's
+		v.proj.Normalize()
 	})
 	if edvIsVideo(path) {
 		u.mpMut("flipbook", func(t *mpSt) {
@@ -168,9 +190,18 @@ func (u *UI) fbProbe(path string, gen int) {
 			changed = true
 		})
 		if changed {
+			u.fbFrame(u.fbInPoint()) // dims known: extract the crop frame at the in-point
 			u.fbPatchCard()
 		}
 	})
+}
+
+// fbInPoint returns the current trim in-point in source seconds (0 = clip start).
+func (u *UI) fbInPoint() float64 {
+	if s := u.mpSnap("flipbook").inSec; s > 0 {
+		return s
+	}
+	return 0
 }
 
 // fbKeptLine renders the exact spec of the sprite the current controls produce (P8: text carries
@@ -226,7 +257,43 @@ func (u *UI) vrcEmotesState() vrcEmotesSt {
 	if st.HasSource {
 		st.Player = u.mpHTML("flipbook")
 		st.KeptLine = u.fbKeptLine(fb)
+		st.Frame = u.fbFrameState(fb)
 	}
+	return st
+}
+
+// fbFrameState resolves the square crop tool (#fb-frame; also the drag fragment). Mirrors
+// edvFrameState but flipbook-scoped (own 1x1 proj, no keyframes).
+func (u *UI) fbFrameState(fb fbSt) edvFrameSt {
+	st := edvFrameSt{}
+	if !fb.cropOn || fb.source == "" || !edvIsVideo(fb.source) || fb.srcW <= 0 || fb.srcH <= 0 {
+		return st
+	}
+	st.Show = true
+	st.AW, st.AH = strconv.Itoa(fb.srcW), strconv.Itoa(fb.srcH)
+	if fb.framePath != "" {
+		st.ImgURL = u.imgURL(fb.framePath, 960)
+	} else if fb.frameBusy {
+		st.Busy = i18n.T("vrchat.emotes.extracting")
+	} else {
+		st.Busy = i18n.T("vrchat.emotes.noFrame")
+	}
+	cw, ch, axis := videoedit.CropSizeZoom(fb.srcW, fb.srcH, videoedit.AspectByKey("1x1"), fb.proj.Zoom)
+	if cw == 0 || (fb.srcW-cw < 2 && fb.srcH-ch < 2) {
+		return st // square source at zoom 1: whole frame IS the crop, no slack
+	}
+	pos, pos2 := clamp01(fb.proj.Pan), clamp01(0.5+fb.proj.Pan2)
+	if fb.panDrag {
+		pos, pos2 = fb.panLive, fb.panLive2
+	}
+	posX, posY := pos, pos2
+	if axis == "y" {
+		posX, posY = pos2, pos
+	}
+	st.HasCrop = true
+	st.CropW, st.CropH = trimPct(float64(cw)/float64(fb.srcW)*100), trimPct(float64(ch)/float64(fb.srcH)*100)
+	st.CropL = trimPct(float64(fb.srcW-cw) / float64(fb.srcW) * 100 * posX)
+	st.CropT = trimPct(float64(fb.srcH-ch) / float64(fb.srcH) * 100 * posY)
 	return st
 }
 
@@ -248,6 +315,190 @@ func (u *UI) fbPatchKept() {
 	u.eval("window.__patch('fb-keptline'," + jsQuote(htmlEscape(u.fbKeptLine(u.fbSnap()))) + ")")
 }
 
+// fbPatchFrame re-renders the whole crop tool (#fb-frame) - used on frame-image arrival / zoom.
+func (u *UI) fbPatchFrame() {
+	u.eval("window.__patch('fb-frame'," + jsQuote(fbFrameHTML(u.fbFrameState(u.fbSnap()))) + ")")
+}
+
+// fbPatchOvl re-renders only the crop overlay (#fb-fovl) - the 60 Hz pan-drag path. Patching
+// #fb-frame mid-drag would replace the actpos box and drop the pointer capture.
+func (u *UI) fbPatchOvl() {
+	u.eval("window.__patch('fb-fovl'," + jsQuote(fbFrameOvlHTML(u.fbFrameState(u.fbSnap()))) + ")")
+}
+
+// ── square crop (own 1x1 videoedit.Project; thin clone of the editor's pan/zoom, no keyframes) ──
+
+// fbPan interprets the crop box's actpos stream: dragging slides the 1x1 window over the frame;
+// release persists the static pan. Mirrors edvPan, flipbook-scoped.
+func (u *UI) fbPan(val string) {
+	phase, rest, ok := strings.Cut(val, ":")
+	if !ok {
+		return
+	}
+	parts := strings.Split(rest, ",")
+	if len(parts) < 2 {
+		return
+	}
+	fx, e1 := strconv.ParseFloat(parts[0], 64)
+	fy, e2 := strconv.ParseFloat(parts[1], 64)
+	if e1 != nil || e2 != nil {
+		return
+	}
+	fb := u.fbSnap()
+	cw, ch, axis := videoedit.CropSizeZoom(fb.srcW, fb.srcH, videoedit.AspectByKey("1x1"), fb.proj.Zoom)
+	if cw == 0 || (fb.srcW-cw < 2 && fb.srcH-ch < 2) {
+		return
+	}
+	// pointer position → window CENTER → normalized per-axis position (an axis without slack pins to center)
+	posOf := func(f float64, c, s int) float64 {
+		if s-c <= 0 {
+			return 0.5
+		}
+		half := float64(c) / float64(s) / 2
+		return clamp01((f - half) / (1 - 2*half))
+	}
+	posX, posY := posOf(fx, cw, fb.srcW), posOf(fy, ch, fb.srcH)
+	prim := axis
+	if prim == "" {
+		prim = "x"
+	}
+	pos, pos2 := posX, posY
+	if prim == "y" {
+		pos, pos2 = posY, posX
+	}
+	switch phase {
+	case "down", "move":
+		u.fbMut(func(v *fbSt) { v.panDrag, v.panLive, v.panLive2 = true, pos, pos2 })
+		u.fbPatchOvl()
+	case "up":
+		committed := false
+		u.fbMut(func(v *fbSt) {
+			if !v.panDrag {
+				return
+			}
+			v.panDrag = false
+			v.proj.Pan, v.proj.Pan2 = pos, pos2-0.5
+			committed = true
+		})
+		if committed {
+			u.fbPatchOvl()
+			u.fbKickPreview() // crop moved → refresh the animated preview (phase 3)
+		}
+	}
+}
+
+// fbZoom handles a wheel step over the crop box (punch-in ≥1).
+func (u *UI) fbZoom(val string) {
+	dir, _, ok := strings.Cut(val, ":")
+	if !ok {
+		return
+	}
+	z := u.fbSnap().proj.Zoom
+	if z <= 0 {
+		z = 1
+	}
+	if dir == "in" {
+		z *= 1.15
+	} else {
+		z /= 1.15
+	}
+	if z < videoedit.ZoomMin {
+		z = videoedit.ZoomMin
+	}
+	if z > videoedit.ZoomMax {
+		z = videoedit.ZoomMax
+	}
+	u.fbMut(func(v *fbSt) { v.proj.Zoom = z })
+	u.fbPatchOvl()
+	u.fbKickPreview()
+}
+
+// fbDataDir is the on-disk cache dir for extracted crop frames + preview sheets.
+func fbDataDir() string {
+	p, err := config.DataPath("flipbook")
+	if err != nil {
+		return ""
+	}
+	return p
+}
+
+// fbFrame extracts the source frame at t into the flipbook cache dir (deterministic name per
+// src|t so the /img/ cache serves repeats). Bounded: the /img/ token cache evicts (mediahttp.go);
+// the PNGs are content-stable per position and reused via os.Stat, not re-extracted. Mirrors edvFrame.
+func (u *UI) fbFrame(t float64) {
+	fb := u.fbSnap()
+	if fb.source == "" || !edvIsVideo(fb.source) || fb.frameBusy {
+		return
+	}
+	src := fb.source
+	var gen int
+	u.fbMut(func(v *fbSt) { v.frameBusy = true; v.frameGen++; gen = v.frameGen })
+	dir := fbDataDir()
+	if dir == "" {
+		u.fbMut(func(v *fbSt) { v.frameBusy = false })
+		return
+	}
+	key := crc32.ChecksumIEEE([]byte(fmt.Sprintf("%s|%.2f", src, t)))
+	out := filepath.Join(dir, fmt.Sprintf("frame-%08x.png", key))
+	u.bg(func() {
+		var err error
+		if _, statErr := os.Stat(out); statErr != nil { // cached extract wins
+			err = u.fbFrameWorker(src, t, out)
+		}
+		done := false
+		u.fbMut(func(v *fbSt) {
+			if v.frameGen != gen {
+				return // superseded by a newer extract/source
+			}
+			v.frameBusy = false
+			if err == nil {
+				v.frameT, v.framePath, done = t, out, true
+			}
+		})
+		if err != nil {
+			u.logErr("flipbook frame", err)
+			return
+		}
+		if done {
+			u.fbPatchFrame()
+			u.fbKickPreview() // preview follows the new frame (phase 3)
+		}
+	})
+}
+
+func (u *UI) fbFrameWorker(src string, t float64, out string) error {
+	if u.svc.Workers == nil {
+		return errors.New("worker pool unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	_, err := u.svc.Workers.RunStream(ctx, "transcode", "transcode.frame", map[string]any{
+		"input": src, "t": t, "output": out, "maxW": 960,
+	}, nil)
+	return err
+}
+
+// fbCropRect converts the 1x1 crop window + pan into a source-pixel flipbook.Rect (nil = no crop).
+func fbCropRect(fb fbSt) *flipbook.Rect {
+	cw, ch, axis := videoedit.CropSizeZoom(fb.srcW, fb.srcH, videoedit.AspectByKey("1x1"), fb.proj.Zoom)
+	if cw == 0 || (fb.srcW-cw < 2 && fb.srcH-ch < 2) {
+		return nil // square source at zoom 1: nothing to crop
+	}
+	pos, pos2 := clamp01(fb.proj.Pan), clamp01(0.5+fb.proj.Pan2)
+	posX, posY := pos, pos2
+	if axis == "y" {
+		posX, posY = pos2, pos
+	}
+	return &flipbook.Rect{
+		X: int(float64(fb.srcW-cw) * posX),
+		Y: int(float64(fb.srcH-ch) * posY),
+		W: cw, H: ch,
+	}
+}
+
+// fbKickPreview refreshes the animated preview sheet (debounced). Filled in phase 3; a no-op here.
+func (u *UI) fbKickPreview() {}
+
 // ── generation ──
 
 func (u *UI) vrcEmoteGen() {
@@ -266,6 +517,9 @@ func (u *UI) vrcEmoteGen() {
 		Input: fb.source, OutName: fb.name, Frames: fb.frames, FPS: fb.fps,
 		TrimStart: trimStart, TrimEnd: t.outSec, // outSec < 0 = to end (bounded by frame count)
 		PingPong: fb.pingpong, OutDir: f.ResolvedFlipbookDir(),
+	}
+	if fb.cropOn {
+		o.Crop = fbCropRect(fb)
 	}
 	if err := o.Validate(); err != nil {
 		u.toast(err.Error())

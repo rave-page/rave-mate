@@ -115,6 +115,7 @@ type vrcEmotesSt struct {
 	OpenFolder   string          `json:"openFolder"`
 	KeptLine     string          `json:"keptLine"`     // "N frames · fps · loop s" (P8: text carries exact values)
 	PreviewLabel string          `json:"previewLabel"` // right-panel eyebrow
+	Frame        edvFrameSt      `json:"frame"`        // square crop tool (#fb-frame), shown when CropOn
 }
 
 // vrcPathItemSt is one camera-path list row.
@@ -627,10 +628,11 @@ func vrcEmotesRenderHTML(st vrcEmotesSt) string {
 	return b.String()
 }
 
-// fbBodyHTML renders the #fb-body inner (controls + primary + result + footer). Patched on its
-// own on any fb-set:* change so the player <video> in #fb-player-wrap is never rebuilt.
+// fbBodyHTML renders the #fb-body inner (crop tool + controls + primary + result + footer). Patched
+// on its own on any fb-set:* change so the player <video> in #fb-player-wrap is never rebuilt.
 func fbBodyHTML(st vrcEmotesSt) string {
 	var b strings.Builder
+	b.WriteString(`<div id=fb-frame>` + fbFrameHTML(st.Frame) + `</div>`)
 	b.WriteString(`<div id=fb-controls class=fb-controls>` + fbControlsHTML(st) + `</div>`)
 	b.WriteString(`<button class="rp-btn rp-btn--go" data-act=fb-generate>` + html.EscapeString(st.Generate) + `</button>`)
 	b.WriteString(`<div id=vrc-emote-result></div>`)
@@ -669,6 +671,39 @@ func fbChecked(on bool) string {
 		return " checked"
 	}
 	return ""
+}
+
+// fbFrameHTML renders the crop tool (the #fb-frame fragment). The crop overlay nests in #fb-fovl so
+// pan drags patch ONLY the overlay - replacing the actpos box would drop the pointer capture. Reuses
+// edvFrameSt + the editor's .edv-* crop-box CSS recipe with flipbook-scoped drag ids (fb-pan/fb-zoom).
+func fbFrameHTML(st edvFrameSt) string {
+	if !st.Show {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class=edv-fbox data-actpos=fb-pan data-actwheel=fb-zoom style="aspect-ratio:` + st.AW + `/` + st.AH + `">`)
+	if st.ImgURL != "" {
+		b.WriteString(`<img class=edv-fimg src=` + attrQ(st.ImgURL) + ` alt="">`)
+	} else {
+		b.WriteString(`<span class=edv-fbusy>` + html.EscapeString(st.Busy) + `</span>`)
+	}
+	b.WriteString(`<div id=fb-fovl>` + fbFrameOvlHTML(st) + `</div>`)
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// fbFrameOvlHTML renders the shades + 1x1 crop window (the #fb-fovl fragment). Mirrors edvFrameOvlHTML.
+func fbFrameOvlHTML(st edvFrameSt) string {
+	if !st.HasCrop {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class=edv-shade style="left:0;right:0;top:0;height:` + st.CropT + `%"></div>`)
+	b.WriteString(`<div class=edv-shade style="left:0;right:0;top:calc(` + st.CropT + `% + ` + st.CropH + `%);bottom:0"></div>`)
+	b.WriteString(`<div class=edv-shade style="left:0;width:` + st.CropL + `%;top:` + st.CropT + `%;height:` + st.CropH + `%"></div>`)
+	b.WriteString(`<div class=edv-shade style="left:calc(` + st.CropL + `% + ` + st.CropW + `%);right:0;top:` + st.CropT + `%;height:` + st.CropH + `%"></div>`)
+	b.WriteString(`<div class=edv-crop style="left:` + st.CropL + `%;top:` + st.CropT + `%;width:` + st.CropW + `%;height:` + st.CropH + `%"></div>`)
+	return b.String()
 }
 
 func vrcCampathsHTML(st vrcCampathsSt) string {
