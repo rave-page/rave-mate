@@ -47,7 +47,19 @@ type fbSt struct {
 	panDrag   bool    // crop pan drag in flight
 	panLive   float64 // live free-axis window position while dragging
 	panLive2  float64 // live cross-axis position (0..1; 0.5 = centered)
+
+	// animated preview + filmstrip (both derive from ONE low-res preview sheet)
+	prevURL   string   // preview sheet URL (mpMediaURL - PNG, alpha preserved) ("" = none yet)
+	prevGrid  int      // the preview sheet's grid (2|4|8)
+	prevN     int      // frames baked into the preview sheet (4|16|64)
+	prevFPS   float64  // fps the preview sheet was built at
+	prevBusy  bool     // a preview build is in flight (debounced)
+	prevGen   int      // debounce/stale generation
+	prevCache []fbPrev // ≤ fbPreviewCacheCap sheets, oldest first (evict + delete dir)
 }
+
+// fbPrev is one cached preview sheet: crc32-of-options key → sheet path (its dir is deleted on evict).
+type fbPrev struct{ key, path string }
 
 const (
 	fbDefaultFrames = 16
@@ -82,6 +94,12 @@ func (u *UI) fbMut(fn func(*fbSt)) fbSt {
 }
 
 func init() {
+	// A committed trim edit on the "flipbook" mp host refreshes the animated preview.
+	mpTrimDone = func(u *UI, host string) {
+		if host == "flipbook" {
+			u.fbKickPreview()
+		}
+	}
 	// Source Browse target (pickSelfPatch: no patchMain - we self-patch #vrc-emotes).
 	onExact("vrc-emote-source", func(u *UI, m actMsg) { u.fbSetSource(m.Val) })
 	// Output-folder Browse target: persist FlipbookDir, then re-render the card footer.
@@ -103,6 +121,7 @@ func init() {
 		u.fbMut(func(v *fbSt) { v.frames = n })
 		u.fbPatchBody()
 		u.fbPatchKept()
+		u.fbKickPreview()
 	})
 	onExact("fb-set:fps", func(u *UI, m actMsg) {
 		f, err := strconv.ParseFloat(strings.TrimSpace(m.Val), 64)
@@ -111,10 +130,12 @@ func init() {
 		}
 		u.fbMut(func(v *fbSt) { v.fps = f })
 		u.fbPatchKept()
+		u.fbKickPreview()
 	})
 	onExact("fb-set:pingpong", func(u *UI, m actMsg) {
 		u.fbMut(func(v *fbSt) { v.pingpong = m.Val == "true" })
 		u.fbPatchKept()
+		u.fbKickPreview()
 	})
 	onExact("fb-set:crop", func(u *UI, m actMsg) {
 		fb := u.fbMut(func(v *fbSt) { v.cropOn = m.Val == "true" })
@@ -122,6 +143,7 @@ func init() {
 		if fb.cropOn && fb.framePath == "" { // first crop-on: extract the frame to drag over
 			u.fbFrame(u.fbInPoint())
 		}
+		u.fbKickPreview() // crop on/off changes the tiled frames
 	})
 	onExact("fb-pan", func(u *UI, m actMsg) { u.fbPan(m.Val) })
 	onExact("fb-zoom", func(u *UI, m actMsg) { u.fbZoom(m.Val) })
@@ -146,6 +168,7 @@ func (u *UI) fbSetSource(path string) {
 		v.frameT, v.framePath, v.frameGen = 0, "", v.frameGen+1
 		v.proj = videoedit.Project{Aspect: "1x1"} // crop locked to a square; own proj, NOT editor's
 		v.proj.Normalize()
+		v.prevURL, v.prevGrid, v.prevN, v.prevBusy, v.prevGen = "", 0, 0, false, v.prevGen+1
 	})
 	if edvIsVideo(path) {
 		u.mpMut("flipbook", func(t *mpSt) {
@@ -158,6 +181,7 @@ func (u *UI) fbSetSource(path string) {
 		u.mpKickAnalyses("flipbook")
 	}
 	u.fbProbe(path, fb.srcGen)
+	u.fbKickPreview()
 	u.fbPatchCard()
 }
 
@@ -190,7 +214,9 @@ func (u *UI) fbProbe(path string, gen int) {
 			changed = true
 		})
 		if changed {
-			u.fbFrame(u.fbInPoint()) // dims known: extract the crop frame at the in-point
+			if u.fbSnap().cropOn { // dims known: extract the crop frame (only if the tool is showing)
+				u.fbFrame(u.fbInPoint())
+			}
 			u.fbPatchCard()
 		}
 	})
@@ -258,6 +284,23 @@ func (u *UI) vrcEmotesState() vrcEmotesSt {
 		st.Player = u.mpHTML("flipbook")
 		st.KeptLine = u.fbKeptLine(fb)
 		st.Frame = u.fbFrameState(fb)
+		if fb.prevURL != "" {
+			st.AnimURL, st.AnimGrid, st.AnimN = fb.prevURL, fb.prevGrid, fb.prevN
+			if fb.prevFPS > 0 {
+				st.AnimDur = trimNum(float64(fb.prevN)/fb.prevFPS) + "s"
+			}
+			cells, more := fbStripCells(fb.prevN)
+			g := fb.prevGrid
+			for _, cell := range cells {
+				px, py := "0", "0"
+				if g > 1 {
+					px = trimPct(float64(cell%g) / float64(g-1) * 100)
+					py = trimPct(float64(cell/g) / float64(g-1) * 100)
+				}
+				st.StripCells = append(st.StripCells, vrcStripCellSt{PosX: px, PosY: py})
+			}
+			st.StripMore = more
+		}
 	}
 	return st
 }
@@ -496,8 +539,175 @@ func fbCropRect(fb fbSt) *flipbook.Rect {
 	}
 }
 
-// fbKickPreview refreshes the animated preview sheet (debounced). Filled in phase 3; a no-op here.
-func (u *UI) fbKickPreview() {}
+// ── animated preview + filmstrip (one low-res sheet drives both) ──
+
+const (
+	fbPreviewSheet    = 512 // preview sheet edge px (fast to build; alpha kept)
+	fbPreviewCacheCap = 8   // ≤ 8 cached preview sheets (option tuple), evict oldest
+	fbStripMax        = 16  // filmstrip thumbnails cap; more ⇒ "+N"
+)
+
+// fbKickPreview rebuilds the animated preview sheet after a ~400 ms debounce (source / in-out /
+// crop / tier / fps / ping-pong all funnel here). A generation counter drops superseded builds.
+func (u *UI) fbKickPreview() {
+	if u.fbSnap().source == "" {
+		return
+	}
+	var gen int
+	u.fbMut(func(v *fbSt) { v.prevGen++; gen = v.prevGen })
+	u.bg(func() {
+		time.Sleep(400 * time.Millisecond)
+		if u.fbSnap().prevGen != gen {
+			return // a newer change superseded this one
+		}
+		u.fbBuildPreview(gen)
+	})
+}
+
+// fbBuildPreview generates (or serves from cache) the 512² preview sheet for the current options
+// and applies it to #fb-anim + #fb-strip. Runs on a bg goroutine (post-debounce).
+func (u *UI) fbBuildPreview(gen int) {
+	fb := u.fbSnap()
+	if fb.source == "" || !edvIsVideo(fb.source) {
+		return
+	}
+	ffmpeg, ok := mediatools.Resolve("ffmpeg")
+	if !ok {
+		return // no ffmpeg ⇒ no preview; the static text spec (kept line) stands
+	}
+	t := u.mpSnap("flipbook")
+	trimStart := t.inSec
+	if trimStart < 0 {
+		trimStart = 0
+	}
+	o := flipbook.Options{
+		Input: fb.source, OutName: "preview", Frames: fb.frames, FPS: fb.fps,
+		TrimStart: trimStart, TrimEnd: t.outSec, PingPong: fb.pingpong,
+		SheetSize: fbPreviewSheet,
+	}
+	if fb.cropOn {
+		o.Crop = fbCropRect(fb)
+	}
+	key := fbOptKey(o)
+	if path, ok := u.fbPrevLookup(key); ok {
+		u.fbApplyPreview(gen, key, path, o)
+		return
+	}
+	dir := fbDataDir()
+	if dir == "" {
+		return
+	}
+	o.OutDir = filepath.Join(dir, "preview", key) // keyed subdir so distinct tuples never collide
+	u.fbMut(func(v *fbSt) {
+		if v.prevGen == gen {
+			v.prevBusy = true
+		}
+	})
+	u.fbPatchAnim()
+	out, err := flipbook.Generate(ffmpeg, o)
+	if err != nil {
+		u.logErr("flipbook preview", err)
+		u.fbMut(func(v *fbSt) {
+			if v.prevGen == gen {
+				v.prevBusy = false
+			}
+		})
+		return
+	}
+	if u.fbSnap().prevGen != gen {
+		_ = os.RemoveAll(o.OutDir) // superseded during ffmpeg: drop the orphan
+		return
+	}
+	u.fbApplyPreview(gen, key, out, o)
+}
+
+// fbApplyPreview stores the sheet, bounds the cache, and patches #fb-anim + #fb-strip.
+func (u *UI) fbApplyPreview(gen int, key, path string, o flipbook.Options) {
+	grid := 2
+	if tr, err := flipbook.TierFor(o.Frames); err == nil {
+		grid = tr.Grid
+	}
+	url := u.mpMediaURL(path) // PNG served raw → alpha preserved (imgURL flattens to JPEG)
+	var evictDir string
+	u.fbMut(func(v *fbSt) {
+		if v.prevGen != gen {
+			return
+		}
+		v.prevBusy = false
+		v.prevURL, v.prevGrid, v.prevN, v.prevFPS = url, grid, o.Frames, o.FPS
+		hit := false
+		for i := range v.prevCache {
+			if v.prevCache[i].key == key {
+				v.prevCache[i].path, hit = path, true
+			}
+		}
+		if !hit {
+			v.prevCache = append(v.prevCache, fbPrev{key: key, path: path})
+		}
+		if len(v.prevCache) > fbPreviewCacheCap {
+			evictDir = filepath.Dir(v.prevCache[0].path)
+			v.prevCache = v.prevCache[1:]
+		}
+	})
+	if evictDir != "" {
+		_ = os.RemoveAll(evictDir)
+	}
+	if u.fbSnap().prevGen == gen {
+		u.fbPatchAnim()
+		u.fbPatchStrip()
+	}
+}
+
+// fbPrevLookup returns a cached sheet path whose file still exists.
+func (u *UI) fbPrevLookup(key string) (string, bool) {
+	for _, e := range u.fbSnap().prevCache {
+		if e.key == key {
+			if _, err := os.Stat(e.path); err == nil {
+				return e.path, true
+			}
+		}
+	}
+	return "", false
+}
+
+// fbOptKey is the deterministic cache key over every input that changes the sheet.
+func fbOptKey(o flipbook.Options) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s|%d|%g|%g|%g|%t|%d", o.Input, o.Frames, o.FPS, o.TrimStart, o.TrimEnd, o.PingPong, o.SheetSize)
+	if o.Crop != nil {
+		fmt.Fprintf(&b, "|%d,%d,%d,%d", o.Crop.X, o.Crop.Y, o.Crop.W, o.Crop.H)
+	}
+	return fmt.Sprintf("%08x", crc32.ChecksumIEEE([]byte(b.String())))
+}
+
+// fbStripCells picks ≤ fbStripMax evenly-spaced cell indices to show (+ overflow count).
+func fbStripCells(total int) (cells []int, more int) {
+	if total <= 0 {
+		return nil, 0
+	}
+	if total <= fbStripMax {
+		cells = make([]int, total)
+		for i := range cells {
+			cells[i] = i
+		}
+		return cells, 0
+	}
+	cells = make([]int, fbStripMax)
+	for i := 0; i < fbStripMax; i++ {
+		cells[i] = i * total / fbStripMax
+	}
+	return cells, total - fbStripMax
+}
+
+func (u *UI) fbPatchAnim() {
+	st := u.vrcEmotesState()
+	u.eval("window.__patch('fb-anim'," + jsQuote(fbAnimHTML(st)) + ")")
+}
+
+func (u *UI) fbPatchStrip() {
+	st := u.vrcEmotesState()
+	u.eval("window.__patch('fb-strip'," + jsQuote(fbStripHTML(st)) + ")")
+}
 
 // ── generation ──
 
@@ -538,15 +748,25 @@ func (u *UI) vrcEmoteGen() {
 			u.eval("window.__patch('vrc-emote-result'," + jsQuote(`<div class="vrc-note over">`+i18n.T("vrchat.emotes.result.failed")+`: `+htmlEscape(genErr.Error())+`</div>`) + ")")
 			return
 		}
-		u.eval("window.__patch('vrc-emote-result'," + jsQuote(u.fbResultHTML(out)) + ")")
+		u.eval("window.__patch('vrc-emote-result'," + jsQuote(u.fbResultHTML(out, o)) + ")")
 		u.toast(i18n.T("vrchat.toast.spriteGenerated"))
 	})
 }
 
-// fbResultHTML renders the post-Generate result block (patched into #vrc-emote-result).
-func (u *UI) fbResultHTML(out string) string {
-	return `<div class=vrc-result>` +
-		`<img class=vrc-sheet loading=lazy src="` + u.imgURL(out, 512) + `" alt="">` +
+// fbResultHTML renders the post-Generate result block (patched into #vrc-emote-result). The saved
+// sheet animates through the same .fb-anim recipe as the pre-Generate preview (real 1024² sheet).
+func (u *UI) fbResultHTML(out string, o flipbook.Options) string {
+	grid := 2
+	if tr, err := flipbook.TierFor(o.Frames); err == nil {
+		grid = tr.Grid
+	}
+	dur := "1s"
+	if o.FPS > 0 {
+		dur = trimNum(float64(o.Frames)/o.FPS) + "s"
+	}
+	anim := `<div class=fb-anim style="background-image:url(` + htmlEscape(u.mpMediaURL(out)) + `);--fb-g:` +
+		strconv.Itoa(grid) + `;--fb-kf:fb-play-` + strconv.Itoa(o.Frames) + `;--fb-d:` + dur + `"></div>`
+	return `<div class=vrc-result>` + anim +
 		`<div class=vrc-result-body>` +
 		`<div class=vrc-note><b>` + htmlEscape(i18n.T("vrchat.emotes.result.savedTitle")) + `</b></div>` +
 		`<div class=vrc-path>` + htmlEscape(out) + `</div>` +

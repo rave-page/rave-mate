@@ -83,6 +83,16 @@ type Options struct {
 	Crop      *Rect   // optional pre-scale crop
 	PingPong  bool    // append reversed frames so the loop plays forward then back
 	OutDir    string  // directory the sheet is written to
+	SheetSize int     // sheet edge px (0 = default SheetSize=1024); FrameRes = SheetSize/Grid. A
+	// smaller sheet (512) makes a fast preview; the filename tier/fps are unchanged.
+}
+
+// sheetEdge resolves the effective sheet edge (0 ⇒ default 1024).
+func (o Options) sheetEdge() int {
+	if o.SheetSize > 0 {
+		return o.SheetSize
+	}
+	return SheetSize
 }
 
 // Validate checks the options independently of ffmpeg (unit-tested).
@@ -108,6 +118,9 @@ func (o Options) Validate() error {
 	if strings.TrimSpace(o.OutDir) == "" {
 		return errors.New("flipbook: no output dir")
 	}
+	if o.SheetSize < 0 {
+		return errors.New("flipbook: negative sheet size")
+	}
 	return nil
 }
 
@@ -128,6 +141,8 @@ func Generate(ffmpegPath string, o Options) (string, error) {
 	}
 	tier, _ := TierFor(o.Frames)
 	extract := framesToExtract(o.Frames, o.PingPong)
+	sheetEdge := o.sheetEdge()
+	frameRes := sheetEdge / tier.Grid // even-square tier frame for THIS sheet size
 
 	if err := os.MkdirAll(o.OutDir, 0o755); err != nil {
 		return "", fmt.Errorf("flipbook: create out dir: %w", err)
@@ -141,7 +156,7 @@ func Generate(ffmpegPath string, o Options) (string, error) {
 	pattern := filepath.Join(tmp, "f_%05d.png")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, ffmpegPath, ffmpegArgs(o, tier.FrameRes, extract, pattern)...)
+	cmd := exec.CommandContext(ctx, ffmpegPath, ffmpegArgs(o, frameRes, extract, pattern)...)
 	sysexec.Hide(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
@@ -157,7 +172,7 @@ func Generate(ffmpegPath string, o Options) (string, error) {
 		return "", errors.New("flipbook: ffmpeg produced no frames (clip too short or trim out of range?)")
 	}
 
-	sheet := assemble(frames, tier, frameSequence(o.Frames, o.PingPong))
+	sheet := assemble(frames, tier, frameRes, sheetEdge, frameSequence(o.Frames, o.PingPong))
 	outPath := filepath.Join(o.OutDir, OutFileName(o.OutName, o.Frames, o.FPS))
 	if err := writePNG(outPath, sheet); err != nil {
 		return "", err
@@ -243,8 +258,8 @@ func readDuration(o Options, extract int) float64 {
 
 // assemble blits square source frames into the 1024² sheet per seq (L→R, T→B). A seq index past
 // the available frames reuses the last frame (short clip) so no cell is left blank.
-func assemble(frames []image.Image, t Tier, seq []int) *image.RGBA {
-	sheet := image.NewRGBA(image.Rect(0, 0, SheetSize, SheetSize))
+func assemble(frames []image.Image, t Tier, frameRes, sheetEdge int, seq []int) *image.RGBA {
+	sheet := image.NewRGBA(image.Rect(0, 0, sheetEdge, sheetEdge))
 	for cell, src := range seq {
 		if cell >= t.Frames {
 			break
@@ -254,7 +269,7 @@ func assemble(frames []image.Image, t Tier, seq []int) *image.RGBA {
 			idx = len(frames) - 1
 		}
 		col, row := cell%t.Grid, cell/t.Grid
-		dst := image.Rect(col*t.FrameRes, row*t.FrameRes, (col+1)*t.FrameRes, (row+1)*t.FrameRes)
+		dst := image.Rect(col*frameRes, row*frameRes, (col+1)*frameRes, (row+1)*frameRes)
 		draw.Draw(sheet, dst, frames[idx], frames[idx].Bounds().Min, draw.Src)
 	}
 	return sheet

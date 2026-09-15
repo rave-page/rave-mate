@@ -75,6 +75,12 @@ pub const FrameOpt = struct {
     sel: bool = false,
 };
 
+/// StripCell is one filmstrip thumbnail: a background-position (%) into the preview sheet.
+pub const StripCell = struct {
+    posX: []const u8 = "",
+    posY: []const u8 = "",
+};
+
 /// Emotes: animated-emoji flipbook creator card (#vrc-emotes). RAW player markup rides in .player.
 pub const Emotes = struct {
     hint: []const u8 = "",
@@ -100,6 +106,12 @@ pub const Emotes = struct {
     keptLine: []const u8 = "",
     previewLabel: []const u8 = "",
     frame: ev.Frame = .{}, // square crop tool (#fb-frame), shown when cropOn
+    animUrl: []const u8 = "", // preview sheet URL (drives #fb-anim + #fb-strip)
+    animGrid: i64 = 0,
+    animN: i64 = 0,
+    animDur: []const u8 = "",
+    stripCells: []const StripCell = &.{},
+    stripMore: i64 = 0,
 };
 
 pub const PathItem = struct {
@@ -362,7 +374,9 @@ pub fn renderEmotes(h: *Html, s: Emotes) !void {
     try h.raw(s.player);
     try h.raw("</div><div class=fb-side><span class=fb-eyebrow>");
     try h.esc(s.previewLabel);
-    try h.raw("</span><div id=fb-keptline class=fb-keptline>");
+    try h.raw("</span><div id=fb-anim class=fb-animwrap>");
+    try renderAnim(h, s);
+    try h.raw("</div><div id=fb-keptline class=fb-keptline>");
     try h.esc(s.keptLine);
     try h.raw("</div></div></div><div id=fb-body class=fb-body>");
     try renderEmotesBody(h, s);
@@ -373,6 +387,8 @@ pub fn renderEmotes(h: *Html, s: Emotes) !void {
 fn renderEmotesBody(h: *Html, s: Emotes) !void {
     try h.raw("<div id=fb-frame>");
     try renderCropFrame(h, s.frame);
+    try h.raw("</div><div id=fb-strip class=fb-strip>");
+    try renderStrip(h, s);
     try h.raw("</div><div id=fb-controls class=fb-controls>");
     try renderEmotesControls(h, s);
     try h.raw("</div><button class=\"rp-btn rp-btn--go\" data-act=fb-generate>");
@@ -471,6 +487,43 @@ fn renderCropFrame(h: *Html, s: ev.Frame) !void {
         try h.raw("%\"></div>");
     }
     try h.raw("</div></div>");
+}
+
+/// renderAnim mirrors Go fbAnimHTML (the #fb-anim looping preview). Empty ⇒ a static placeholder box.
+fn renderAnim(h: *Html, s: Emotes) !void {
+    if (s.animUrl.len == 0) {
+        return h.raw("<div class=\"fb-anim fb-anim--empty\"></div>");
+    }
+    try h.raw("<div class=fb-anim style=\"background-image:url(");
+    try h.esc(s.animUrl);
+    try h.raw(");--fb-g:");
+    try c.num(h, s.animGrid);
+    try h.raw(";--fb-kf:fb-play-");
+    try c.num(h, s.animN);
+    try h.raw(";--fb-d:");
+    try h.raw(s.animDur);
+    try h.raw("\"></div>");
+}
+
+/// renderStrip mirrors Go fbStripHTML (the #fb-strip filmstrip: sheet cells + a "+N" overflow chip).
+fn renderStrip(h: *Html, s: Emotes) !void {
+    if (s.animUrl.len == 0 or s.stripCells.len == 0) return;
+    for (s.stripCells) |cell| {
+        try h.raw("<div class=fb-cell style=\"background-image:url(");
+        try h.esc(s.animUrl);
+        try h.raw(");--fb-g:");
+        try c.num(h, s.animGrid);
+        try h.raw(";background-position:");
+        try h.raw(cell.posX);
+        try h.raw("% ");
+        try h.raw(cell.posY);
+        try h.raw("%\"></div>");
+    }
+    if (s.stripMore > 0) {
+        try h.raw("<div class=\"fb-cell fb-cell--more\">+");
+        try c.num(h, s.stripMore);
+        try h.raw("</div>");
+    }
 }
 
 /// renderCampaths mirrors Go vrcCampathsHTML (#vrc-campaths).

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"maps"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -116,6 +117,19 @@ type vrcEmotesSt struct {
 	KeptLine     string          `json:"keptLine"`     // "N frames · fps · loop s" (P8: text carries exact values)
 	PreviewLabel string          `json:"previewLabel"` // right-panel eyebrow
 	Frame        edvFrameSt      `json:"frame"`        // square crop tool (#fb-frame), shown when CropOn
+	// animated preview + filmstrip - both driven by ONE low-res preview sheet (AnimURL)
+	AnimURL    string           `json:"animUrl"`              // preview sheet URL ("" = not ready)
+	AnimGrid   int              `json:"animGrid"`             // sheet grid (2|4|8) → CSS --fb-g
+	AnimN      int              `json:"animN"`                // sheet frame count (4|16|64) → keyframe set
+	AnimDur    string           `json:"animDur"`              // CSS --fb-d value ("0.8s")
+	StripCells []vrcStripCellSt `json:"stripCells,omitempty"` // ≤16 thumbnails (sheet cells)
+	StripMore  int              `json:"stripMore"`            // overflow count ("+N")
+}
+
+// vrcStripCellSt is one filmstrip thumbnail: a CSS background-position (%) into the preview sheet.
+type vrcStripCellSt struct {
+	PosX string `json:"posX"`
+	PosY string `json:"posY"`
 }
 
 // vrcPathItemSt is one camera-path list row.
@@ -622,6 +636,7 @@ func vrcEmotesRenderHTML(st vrcEmotesSt) string {
 	}
 	b.WriteString(`<div class=fb-stage><div id=fb-player-wrap class=fb-player>` + st.Player + `</div>`)
 	b.WriteString(`<div class=fb-side><span class=fb-eyebrow>` + html.EscapeString(st.PreviewLabel) + `</span>`)
+	b.WriteString(`<div id=fb-anim class=fb-animwrap>` + fbAnimHTML(st) + `</div>`)
 	b.WriteString(`<div id=fb-keptline class=fb-keptline>` + html.EscapeString(st.KeptLine) + `</div></div></div>`)
 	b.WriteString(`<div id=fb-body class=fb-body>` + fbBodyHTML(st) + `</div>`)
 	b.WriteString(`</div>`)
@@ -633,6 +648,7 @@ func vrcEmotesRenderHTML(st vrcEmotesSt) string {
 func fbBodyHTML(st vrcEmotesSt) string {
 	var b strings.Builder
 	b.WriteString(`<div id=fb-frame>` + fbFrameHTML(st.Frame) + `</div>`)
+	b.WriteString(`<div id=fb-strip class=fb-strip>` + fbStripHTML(st) + `</div>`)
 	b.WriteString(`<div id=fb-controls class=fb-controls>` + fbControlsHTML(st) + `</div>`)
 	b.WriteString(`<button class="rp-btn rp-btn--go" data-act=fb-generate>` + html.EscapeString(st.Generate) + `</button>`)
 	b.WriteString(`<div id=vrc-emote-result></div>`)
@@ -703,6 +719,36 @@ func fbFrameOvlHTML(st edvFrameSt) string {
 	b.WriteString(`<div class=edv-shade style="left:0;width:` + st.CropL + `%;top:` + st.CropT + `%;height:` + st.CropH + `%"></div>`)
 	b.WriteString(`<div class=edv-shade style="left:calc(` + st.CropL + `% + ` + st.CropW + `%);right:0;top:` + st.CropT + `%;height:` + st.CropH + `%"></div>`)
 	b.WriteString(`<div class=edv-crop style="left:` + st.CropL + `%;top:` + st.CropT + `%;width:` + st.CropW + `%;height:` + st.CropH + `%"></div>`)
+	return b.String()
+}
+
+// fbAnimHTML renders the looping animated preview (the #fb-anim fragment). Pure-CSS sprite: one
+// static keyframe set per tier (fb-play-4/16/64) steps background-position through the sheet at fps.
+// Ping-pong is baked into the sheet's frames, so no CSS alternate. Reduced-motion pauses it (P5).
+func fbAnimHTML(st vrcEmotesSt) string {
+	if st.AnimURL == "" {
+		return `<div class="fb-anim fb-anim--empty"></div>`
+	}
+	return `<div class=fb-anim style="background-image:url(` + html.EscapeString(st.AnimURL) + `);--fb-g:` +
+		strconv.Itoa(st.AnimGrid) + `;--fb-kf:fb-play-` + strconv.Itoa(st.AnimN) + `;--fb-d:` + st.AnimDur + `"></div>`
+}
+
+// fbStripHTML renders the filmstrip of the exact tiled frames (#fb-strip): each cell is a static
+// crop of the same preview sheet via background-position (no extra ffmpeg). >16 ⇒ 16 + a "+N" chip.
+func fbStripHTML(st vrcEmotesSt) string {
+	if st.AnimURL == "" || len(st.StripCells) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	g := strconv.Itoa(st.AnimGrid)
+	bg := html.EscapeString(st.AnimURL)
+	for _, c := range st.StripCells {
+		b.WriteString(`<div class=fb-cell style="background-image:url(` + bg + `);--fb-g:` + g +
+			`;background-position:` + c.PosX + `% ` + c.PosY + `%"></div>`)
+	}
+	if st.StripMore > 0 {
+		b.WriteString(`<div class="fb-cell fb-cell--more">+` + strconv.Itoa(st.StripMore) + `</div>`)
+	}
 	return b.String()
 }
 

@@ -160,10 +160,8 @@ func TestAssemble(t *testing.T) {
 	for i, c := range cols {
 		frames[i] = solid(tier.FrameRes, c)
 	}
-	// Override SheetSize math: assemble uses package SheetSize; build a private sheet via the
-	// same layout by checking cell centers map to the right color (grid 2, res 8 → 16px sheet
-	// region used; rest transparent).
-	sheet := assemble(frames, tier, frameSequence(4, false))
+	// grid 2, res 8 → a 16px sheet; check cell centers map to the right color.
+	sheet := assemble(frames, tier, tier.FrameRes, tier.Grid*tier.FrameRes, frameSequence(4, false))
 	// Cell (col,row) center pixel == cols[row*grid+col].
 	at := func(col, row int) color.Color {
 		x := col*tier.FrameRes + tier.FrameRes/2
@@ -182,6 +180,31 @@ func TestAssemble(t *testing.T) {
 	check(1, 0, 1) // top-right
 	check(0, 1, 2) // bottom-left
 	check(1, 1, 3) // bottom-right
+}
+
+func TestSheetSize(t *testing.T) {
+	// sheetEdge() folds the default.
+	if got := (Options{}).sheetEdge(); got != SheetSize {
+		t.Errorf("default sheetEdge = %d; want %d", got, SheetSize)
+	}
+	if got := (Options{SheetSize: 512}).sheetEdge(); got != 512 {
+		t.Errorf("sheetEdge(512) = %d; want 512", got)
+	}
+	// A 512 sheet tiles a 4×4 tier into 128px cells at the requested edge.
+	tier := Tier{Frames: 16, Grid: 4, FrameRes: 256}
+	const edge, res = 512, 512 / 4
+	frames := make([]image.Image, 16)
+	for i := range frames {
+		frames[i] = solid(res, color.RGBA{R: 255, A: 255})
+	}
+	sheet := assemble(frames, tier, res, edge, frameSequence(16, false))
+	if b := sheet.Bounds(); b.Dx() != edge || b.Dy() != edge {
+		t.Fatalf("preview sheet = %dx%d; want %dx%d", b.Dx(), b.Dy(), edge, edge)
+	}
+	// bottom-right cell center is painted (frame 15 at col 3,row 3).
+	if _, _, _, a := sheet.At(3*res+res/2, 3*res+res/2).RGBA(); a == 0 {
+		t.Error("bottom-right preview cell is transparent; assemble did not use the requested edge")
+	}
 }
 
 func TestGenerateRequiresFFmpeg(t *testing.T) {

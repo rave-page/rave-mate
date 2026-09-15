@@ -211,6 +211,10 @@ var mpVidSurface func(u *UI, host string) (string, string)
 // its undo history (the trim lives in mpSt, outside the host's own state).
 var mpTrimSnap func(u *UI, host string)
 
+// mpTrimDone, when set, fires AFTER a committed trim edit so a host can react to the new
+// in/out (the flipbook creator refreshes its animated preview). Commit-only, not per drag frame.
+var mpTrimDone func(u *UI, host string)
+
 // mpVidGrip lets a host make its video box vertically resizable: returns the drag act
 // and the persisted height cap in px ("" = CSS default). Registered by the editor.
 var mpVidGrip func(u *UI, host string) (grip, maxH string)
@@ -1631,6 +1635,9 @@ func (u *UI) mpApplyTrim(host string, fn func(*mpSt)) {
 	u.mpKickMeasure(host)
 	u.mpSyncMonitor(host)
 	u.mpSyncVidTrim(t)
+	if mpTrimDone != nil {
+		mpTrimDone(u, host)
+	}
 }
 
 // mpSyncVidTrim mirrors the trim window onto the video element's data-in/data-out

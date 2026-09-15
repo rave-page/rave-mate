@@ -1119,9 +1119,13 @@ var schema = []msg{
 		fs: []field{u(1, "Frames", "frames"), u(2, "Grid", "grid"), u(3, "Res", "res"), b(4, "Sel", "sel")},
 	},
 	{
+		name: "VrcStripCell", goT: "vrcStripCellSt", zigT: "vrchat.StripCell",
+		fs: []field{s(1, "PosX", "posX"), s(2, "PosY", "posY")},
+	},
+	{
 		name: "VrcEmotes", goT: "vrcEmotesSt", zigT: "vrchat.Emotes", id: 117,
 		doc: "#vrc-emotes animated-emoji flipbook creator (visual: player+trim, crop, filmstrip, preview)",
-		fs:  []field{s(1, "Hint", "hint"), b(2, "HasSource", "hasSource"), s(3, "SourceLabel", "sourceLabel"), s(4, "Source", "source"), s(5, "Browse", "browse"), s(6, "EmptyHint", "emptyHint"), s(7, "Player", "player"), s(8, "NameLabel", "nameLabel"), s(9, "Name", "name"), s(10, "FramesLabel", "framesLabel"), li(11, "FrameOpts", "frameOpts", "VrcFrameOpt"), s(12, "FPSLabel", "fpsLabel"), s(13, "FPS", "fps"), s(14, "PingPong", "pingpong"), b(15, "PingPongOn", "pingpongOn"), s(16, "Crop", "crop"), b(17, "CropOn", "cropOn"), s(18, "Generate", "generate"), s(19, "OutDir", "outDir"), s(20, "OpenFolder", "openFolder"), s(21, "KeptLine", "keptLine"), s(22, "PreviewLabel", "previewLabel"), st(23, "Frame", "frame", "EdvFrame")},
+		fs:  []field{s(1, "Hint", "hint"), b(2, "HasSource", "hasSource"), s(3, "SourceLabel", "sourceLabel"), s(4, "Source", "source"), s(5, "Browse", "browse"), s(6, "EmptyHint", "emptyHint"), s(7, "Player", "player"), s(8, "NameLabel", "nameLabel"), s(9, "Name", "name"), s(10, "FramesLabel", "framesLabel"), li(11, "FrameOpts", "frameOpts", "VrcFrameOpt"), s(12, "FPSLabel", "fpsLabel"), s(13, "FPS", "fps"), s(14, "PingPong", "pingpong"), b(15, "PingPongOn", "pingpongOn"), s(16, "Crop", "crop"), b(17, "CropOn", "cropOn"), s(18, "Generate", "generate"), s(19, "OutDir", "outDir"), s(20, "OpenFolder", "openFolder"), s(21, "KeptLine", "keptLine"), s(22, "PreviewLabel", "previewLabel"), st(23, "Frame", "frame", "EdvFrame"), s(24, "AnimURL", "animUrl"), u(25, "AnimGrid", "animGrid"), u(26, "AnimN", "animN"), s(27, "AnimDur", "animDur"), li(28, "StripCells", "stripCells", "VrcStripCell"), u(29, "StripMore", "stripMore")},
 	},
 	{
 		name: "VrcPathItem", goT: "vrcPathItemSt", zigT: "vrchat.PathItem",

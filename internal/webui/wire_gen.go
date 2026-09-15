@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash         uint32 = 0xe73d3690
+	wireSchemaHash         uint32 = 0x99abcf5d
 	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -2553,6 +2553,11 @@ func (v vrcFrameOptSt) encodeWire(w *zigui.WireWriter) {
 	w.Bool(4, v.Sel)
 }
 
+func (v vrcStripCellSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.PosX)
+	w.Str(2, v.PosY)
+}
+
 func (v vrcEmotesSt) encodeWire(w *zigui.WireWriter) {
 	w.Str(1, v.Hint)
 	w.Bool(2, v.HasSource)
@@ -2577,6 +2582,12 @@ func (v vrcEmotesSt) encodeWire(w *zigui.WireWriter) {
 	w.Str(21, v.KeptLine)
 	w.Str(22, v.PreviewLabel)
 	w.Struct(23, func() { v.Frame.encodeWire(w) })
+	w.Str(24, v.AnimURL)
+	w.Uint(25, uint64(v.AnimGrid))
+	w.Uint(26, uint64(v.AnimN))
+	w.Str(27, v.AnimDur)
+	w.List(28, len(v.StripCells), func(i int) { v.StripCells[i].encodeWire(w) })
+	w.Uint(29, uint64(v.StripMore))
 }
 
 func (v vrcPathItemSt) encodeWire(w *zigui.WireWriter) {

@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0xe73d3690;
+pub const schema_hash: u32 = 0x99abcf5d;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -3181,6 +3181,14 @@ pub fn decodeVrcFrameOpt(r: *wire.Reader, out: *vrchat.FrameOpt) wire.Error!void
     };
 }
 
+pub fn decodeVrcStripCell(r: *wire.Reader, out: *vrchat.StripCell) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.posX = try r.str(t),
+        2 => out.posY = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
 pub fn decodeVrcEmotes(r: *wire.Reader, out: *vrchat.Emotes) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.hint = try r.str(t),
@@ -3206,6 +3214,12 @@ pub fn decodeVrcEmotes(r: *wire.Reader, out: *vrchat.Emotes) wire.Error!void {
         21 => out.keptLine = try r.str(t),
         22 => out.previewLabel = try r.str(t),
         23 => out.frame = try r.sub(editor_video.Frame, decodeEdvFrame, t),
+        24 => out.animUrl = try r.str(t),
+        25 => out.animGrid = @intCast(try r.uint(t)),
+        26 => out.animN = @intCast(try r.uint(t)),
+        27 => out.animDur = try r.str(t),
+        28 => out.stripCells = try r.list(vrchat.StripCell, decodeVrcStripCell, t),
+        29 => out.stripMore = @intCast(try r.uint(t)),
         else => try r.skip(t),
     };
 }

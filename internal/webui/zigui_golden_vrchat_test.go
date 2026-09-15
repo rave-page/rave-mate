@@ -212,6 +212,10 @@ func vrcEmotesFixture() vrcEmotesSt {
 		OpenFolder:   "Open output folder",
 		KeptLine:     "16 frames · 4×4 · 256px · 20 fps · 0.8s loop",
 		PreviewLabel: "Preview",
+		AnimURL:      "http://127.0.0.1:47621/m/s1/tok",
+		AnimGrid:     4, AnimN: 16, AnimDur: "0.8s",
+		StripCells: []vrcStripCellSt{{PosX: "0", PosY: "0"}, {PosX: "33.333", PosY: "0"}, {PosX: "100", PosY: "100"}},
+		StripMore:  0,
 	}
 }
 
@@ -222,6 +226,7 @@ func vrcEmotesFixtures() map[string]vrcEmotesSt {
 
 	nosrc := full
 	nosrc.HasSource, nosrc.Source, nosrc.Player, nosrc.KeptLine = false, "", "", ""
+	nosrc.AnimURL, nosrc.StripCells, nosrc.AnimN, nosrc.AnimGrid = "", nil, 0, 0
 
 	cropOn := full
 	cropOn.CropOn = true
@@ -236,6 +241,9 @@ func vrcEmotesFixtures() map[string]vrcEmotesSt {
 		{Frames: 64, Grid: 8, Res: 128, Sel: true},
 	}
 	tier64.KeptLine = "64 frames · 8×8 · 128px · 20 fps · 3.2s loop"
+	tier64.AnimGrid, tier64.AnimN, tier64.AnimDur = 8, 64, "3.2s"
+	tier64.StripCells = []vrcStripCellSt{{PosX: "0", PosY: "0"}, {PosX: "14.286", PosY: "0"}, {PosX: "100", PosY: "100"}}
+	tier64.StripMore = 48
 
 	esc := full
 	esc.Source = `C:\clips\a&"b'<>.mp4`
