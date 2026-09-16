@@ -135,6 +135,9 @@ func (u *UI) subscribeTwitch() {
 					rows = append(rows, twDayRow(d))
 				}
 				if e.Kind == twitch.KindChat {
+					if u.twSeen.Seen(e.MessageID) { // a dual-session double already persisted in the log
+						continue
+					}
 					rows = append(rows, twChatRow(e, canMod))
 				} else {
 					rows = append(rows, twAlertRow(e))
@@ -155,7 +158,7 @@ func (u *UI) subscribeTwitch() {
 	}
 	u.svc.EventBus.Subscribe(twitch.TopicChat, func(ev eventbus.Event) {
 		var e twitch.Event
-		if json.Unmarshal(ev.Data, &e) == nil {
+		if json.Unmarshal(ev.Data, &e) == nil && !u.twSeen.Seen(e.MessageID) { // drop a paired instance copy of the same line
 			push(twChatRow(e, canMod))
 		}
 	})
@@ -241,11 +244,12 @@ func (u *UI) twStatus(st *twState) {
 
 // twObsState resolves the viewer chip + the Live-tab cockpit markup.
 func (u *UI) twObsState() twObsState {
-	return twObsState{Viewers: twViewers(), Cockpit: u.cockpitHTML()}
+	return twObsState{Viewers: u.twViewers(), Cockpit: u.cockpitHTML()}
 }
 
-// twViewers resolves the viewer-count chip from the bus-published viewer info.
-func twViewers() twViewerState {
+// twViewers resolves the viewer-count chip from the bus-published viewer info; while live it also
+// carries the chat rate (msg/min over the last 60 s, local or federated session alike).
+func (u *UI) twViewers() twViewerState {
 	twViewMu.Lock()
 	vi, ok := twViewer, twViewOK
 	twViewMu.Unlock()
@@ -253,6 +257,9 @@ func twViewers() twViewerState {
 	case !ok:
 		return twViewerState{Cls: "tw-vc tw-vc--off", Text: i18n.T("twitch.viewersUnknown")}
 	case vi.Live:
+		if u.svc.Twitch != nil {
+			return twViewerState{Cls: "tw-vc tw-vc--live", Text: i18n.T("twitch.viewersLiveRate", i18n.A{"count": twComma(vi.ViewerCount), "rate": fmt.Sprint(u.svc.Twitch.ChatRate())})}
+		}
 		return twViewerState{Cls: "tw-vc tw-vc--live", Text: i18n.T("twitch.viewersLive", i18n.A{"count": twComma(vi.ViewerCount)})}
 	default:
 		return twViewerState{Cls: "tw-vc tw-vc--off", Text: i18n.T("twitch.offline")}

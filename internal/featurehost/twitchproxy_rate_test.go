@@ -27,3 +27,18 @@ func TestTwitchProxyChatRateCountsChatOnly(t *testing.T) {
 		t.Fatalf("ChatRate=%d, want 3 (alerts are not chat)", got)
 	}
 }
+
+// A message that arrives twice - this instance and a paired instance both signed in to the same
+// channel - is counted once (the feed and the chat log dedupe on the same id).
+func TestTwitchProxyChatRateDedupesByMessageID(t *testing.T) {
+	p, err := NewTwitchProxy(logbus.New(16), nil, nil, func() string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(twitch.Event{Kind: twitch.KindChat, MessageID: "msg-1", UserLogin: "x", Text: "hi"})
+	p.onEv(b)
+	p.onEv(b)
+	if got := p.ChatRate(); got != 1 {
+		t.Fatalf("ChatRate=%d, want 1 (same MessageID twice)", got)
+	}
+}

@@ -21,6 +21,7 @@ import (
 	"rave.page/mate/internal/perfmon"
 	"rave.page/mate/internal/sysnotify"
 	"rave.page/mate/internal/tray"
+	"rave.page/mate/internal/twitch"
 	"rave.page/mate/internal/ui"
 	"rave.page/mate/internal/updater"
 	"rave.page/mate/internal/version"
@@ -98,6 +99,7 @@ type UI struct {
 
 	twMu         sync.Mutex
 	twitchRows   []twRow              // rolling twitch chat/alert feed as resolved state (cap 250)
+	twSeen       twitch.IDWindow      // chat MessageIDs already in the feed (a paired instance copy of a line is dropped)
 	libSection   string               // Library active sub-section: "browse" | "collection"
 	libDir       string               // Library browse cwd
 	midiTrace    uint32               // ravemidi wire-trace viewer: port id (0 = closed)

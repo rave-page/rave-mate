@@ -4130,6 +4130,7 @@
     },
     "unavailable": "Twitch unavailable",
     "viewersLive": "{count} viewers · LIVE",
+    "viewersLiveRate": "{count} viewers · {rate} msg/min · LIVE",
     "viewersUnknown": "- viewers"
   },
   "vrchat": {

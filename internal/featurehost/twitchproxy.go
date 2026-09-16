@@ -33,6 +33,7 @@ type TwitchProxy struct {
 	bus     *eventbus.Bus
 	chatlog *twitch.ChatLog
 	rate    twitch.ChatRate // bounded 60 s chat-message window (Live strip "N msg/min"); zero value ready
+	seen    twitch.IDWindow // chat MessageIDs already handled: a paired instance copy of the same line is dropped
 
 	mu          sync.Mutex
 	st          twitchState
@@ -82,6 +83,9 @@ func NewTwitchProxy(log *logbus.Bus, bus *eventbus.Bus, chatlog *twitch.ChatLog,
 			if json.Unmarshal(e.Data, &ev) != nil {
 				return
 			}
+			if ev.Kind == twitch.KindChat && p.seen.Seen(ev.MessageID) {
+				return // the same message via a paired instance session - already counted + logged
+			}
 			if ev.Kind == twitch.KindChat {
 				p.rate.Add(time.Now())
 			}
@@ -119,6 +123,9 @@ func (p *TwitchProxy) onEv(data json.RawMessage) {
 	}
 	if p.bus == nil {
 		// No bus = no subscriber-side persistence; count + append directly so history still works.
+		if ev.Kind == twitch.KindChat && p.seen.Seen(ev.MessageID) {
+			return
+		}
 		if ev.Kind == twitch.KindChat {
 			p.rate.Add(time.Now())
 		}
