@@ -13,14 +13,12 @@ type sparkSeries struct {
 	fill  bool
 }
 
-// Brand trace colours (match the Fyne graphs).
+// Trace colours. ONE brand hue for every series (P4: hue = intent, never category); a series is
+// told apart by POSITION (its own small-multiple row) + label, and an in/out pair by a luminance
+// step (bright vs dim), never a second hue.
 const (
-	sparkMint   = "#08F79B"
-	sparkHot    = "#FF3E8A"
-	sparkViolet = "#7C3AED"
-	sparkAmber  = "#FFB547"
-	sparkInfo   = "#A78BFA"
-	sparkMuted  = "rgba(255,255,255,.35)"
+	sparkMint    = "#08F79B" // the brand data hue - primary series
+	sparkMintDim = "#0B8F62" // a luminance step of the same hue - the secondary of an in/out pair
 )
 
 // sparklineSVG renders multi-series traces as an inline SVG (autoscaled to the hottest sample; a

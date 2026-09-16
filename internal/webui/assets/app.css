@@ -175,8 +175,16 @@ body {
 .gwell { background: #050308; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 10px 12px; }
 .spark { width: 100%; height: 56px; display: block; margin: 6px 0; }
 .spark-grid { stroke: rgba(255,255,255,.07); stroke-width: 1; }
-.glegend { display: flex; flex-wrap: wrap; gap: 12px; font: 11px 'JetBrains Mono', ui-monospace, monospace; }
+.glegend { display: flex; flex-wrap: wrap; gap: 12px; font: 11px 'JetBrains Mono', ui-monospace, monospace; color: var(--rp-muted, #B98AA0); }
 .glegend span { white-space: nowrap; }
+/* small multiples: one labelled spark per series (P4 - identity by position, single brand hue) */
+.sparkmulti { display: flex; flex-direction: column; gap: 4px; }
+.spark-row { display: flex; align-items: center; gap: 12px; }
+.spark-lbl { flex: 0 0 150px; font: 11px 'JetBrains Mono', ui-monospace, monospace; color: var(--rp-muted, #B98AA0);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spark-row .spark { flex: 1; height: 26px; margin: 0; min-width: 0; }
+@media (max-width: 640px) { .spark-lbl { flex-basis: 110px; } }
+.spark-head { color: var(--rp-mint, #08F79B); }
 
 /* bottom status strip */
 .livestrip { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;

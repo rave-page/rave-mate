@@ -978,28 +978,49 @@ func liveCockpitFragHTML(st liveCockpitSt) string {
 	return b.String()
 }
 
-// ── graphs ──
+// ── graphs (small multiples: one labelled spark per series, single brand hue, P4/P7) ──
+
+// liveSpark is one small-multiple row: a labelled single-series sparkline. Dim = a luminance step of
+// the brand hue for the secondary of an in/out (or app/sys) pair; Fill draws the area under.
+type liveSpark struct {
+	Label string
+	Vals  []float64
+	Dim   bool
+	Fill  bool
+}
+
+// sparkMultiHTML renders stacked small multiples: one row per series, label at the LEFT (identity by
+// position, P4), the shape at the right in the single brand hue. Never an overlaid multi-hue chart -
+// a series is told apart by its own row + label, an in/out pair by a luminance step, no coloured legend.
+func sparkMultiHTML(rows []liveSpark) string {
+	var b strings.Builder
+	b.WriteString(`<div class=sparkmulti>`)
+	for _, r := range rows {
+		color := sparkMint
+		if r.Dim {
+			color = sparkMintDim
+		}
+		b.WriteString(`<div class=spark-row><span class=spark-lbl>` + html.EscapeString(r.Label) + `</span>` +
+			sparklineSVG([]sparkSeries{{r.Vals, color, r.Fill}}, 480, 26) + `</div>`)
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
 
 func (u *UI) liveNetState() liveGraphSt {
 	snap := u.svc.NetStats.Snapshot()
-	graph := sparklineSVG([]sparkSeries{
-		{snap.PeerIn, sparkMint, true},
-		{snap.PeerOut, sparkHot, true},
-		{snap.APIIn, sparkViolet, false},
-		{snap.APIOut, sparkAmber, false},
-	}, 600, 56)
-	legend := fmt.Sprintf(`<span style="color:%s">%s</span><span style="color:%s">%s</span>`+
-		`<span style="color:%s">%s</span><span style="color:%s">%s</span>`+
-		`<span style="color:%s">%s</span>`,
-		sparkMint, html.EscapeString(i18n.T("live.network.peerDown", i18n.A{"rate": rateStr(snap.PeerIn)})),
-		sparkHot, html.EscapeString(i18n.T("live.network.upRate", i18n.A{"rate": rateStr(snap.PeerOut)})),
-		sparkViolet, html.EscapeString(i18n.T("live.network.apiDown", i18n.A{"rate": rateStr(snap.APIIn)})),
-		sparkAmber, html.EscapeString(i18n.T("live.network.upRate", i18n.A{"rate": rateStr(snap.APIOut)})),
-		sparkMint, html.EscapeString(i18n.T("live.network.session", i18n.A{
-			"down": humanBytes(snap.SessPeerIn + snap.SessAPIIn),
-			"up":   humanBytes(snap.SessPeerOut + snap.SessAPIOut),
-		})))
-	return liveGraphSt{Tooltip: i18n.T("live.network.tooltip"), Legend: legend, Graph: graph}
+	graph := sparkMultiHTML([]liveSpark{
+		{Label: i18n.T("live.network.peerDown", i18n.A{"rate": rateStr(snap.PeerIn)}), Vals: snap.PeerIn, Fill: true},
+		{Label: i18n.T("live.network.rowPeerUp", i18n.A{"rate": rateStr(snap.PeerOut)}), Vals: snap.PeerOut, Dim: true},
+		{Label: i18n.T("live.network.apiDown", i18n.A{"rate": rateStr(snap.APIIn)}), Vals: snap.APIIn, Fill: true},
+		{Label: i18n.T("live.network.rowApiUp", i18n.A{"rate": rateStr(snap.APIOut)}), Vals: snap.APIOut, Dim: true},
+	})
+	// session totals are a summary caption, not a series - they ride in the (non-coloured) legend slot.
+	sess := `<span>` + html.EscapeString(i18n.T("live.network.session", i18n.A{
+		"down": humanBytes(snap.SessPeerIn + snap.SessAPIIn),
+		"up":   humanBytes(snap.SessPeerOut + snap.SessAPIOut),
+	})) + `</span>`
+	return liveGraphSt{Tooltip: i18n.T("live.network.tooltip"), Legend: sess, Graph: graph}
 }
 
 func (u *UI) networkHTML() string {
@@ -1008,23 +1029,19 @@ func (u *UI) networkHTML() string {
 
 func (u *UI) liveTimState() liveGraphSt {
 	snap := u.svc.NetStats.Snapshot()
-	pal := []string{sparkMint, sparkHot, sparkViolet, sparkAmber, sparkInfo}
-	var series []sparkSeries
-	var legend strings.Builder
-	for i, r := range snap.RTT {
-		c := pal[i%len(pal)]
-		series = append(series, sparkSeries{r.Ms, c, false})
+	rows := make([]liveSpark, 0, len(snap.RTT))
+	for _, r := range snap.RTT { // one row per peer (identity by position, P4)
 		ms := "-"
 		if r.Has {
 			ms = fmt.Sprintf("%.1fms", r.LatestMs)
 		}
-		fmt.Fprintf(&legend, `<span style="color:%s">%s %s</span>`, c, html.EscapeString(strings.ToUpper(r.Label)), ms)
+		rows = append(rows, liveSpark{Label: strings.ToUpper(r.Label) + " " + ms, Vals: r.Ms})
 	}
-	if len(series) == 0 {
-		series = []sparkSeries{{make([]float64, snap.Span), sparkMuted, false}}
-		legend.WriteString(`<span>` + html.EscapeString(i18n.T("live.timing.noPeers")) + `</span>`)
+	legend := ""
+	if len(rows) == 0 {
+		legend = `<span>` + html.EscapeString(i18n.T("live.timing.noPeers")) + `</span>`
 	}
-	return liveGraphSt{Tooltip: i18n.T("live.timing.tooltip"), Legend: legend.String(), Graph: sparklineSVG(series, 600, 56)}
+	return liveGraphSt{Tooltip: i18n.T("live.timing.tooltip"), Legend: legend, Graph: sparkMultiHTML(rows)}
 }
 
 func (u *UI) timingHTML() string {
@@ -1053,29 +1070,29 @@ func (u *UI) livePerfState() livePerfSt {
 			sysC[i], sysR[i] = math.NaN(), math.NaN()
 		}
 	}
-	appLbl, sysLbl := html.EscapeString(i18n.T("live.perf.app")), html.EscapeString(i18n.T("live.perf.sys"))
-	cpuLeg := `<span>` + appLbl + ` -</span><span>` + sysLbl + ` -</span>`
-	ramLeg := `<span>` + appLbl + ` -</span><span>` + sysLbl + ` -</span>`
+	appLbl, sysLbl := i18n.T("live.perf.app"), i18n.T("live.perf.sys")
+	cpuApp, cpuSys := appLbl+" -", sysLbl+" -"
+	ramApp, ramSys := appLbl+" -", sysLbl+" -"
 	head := i18n.T("live.perf.headroom") + " -"
 	if len(ss) > 0 {
 		l := ss[len(ss)-1]
-		sysCPU, sysRAM := "-", "-"
+		cpuApp = fmt.Sprintf("%s %.0f%%", appLbl, l.CPUPct)
+		ramApp = fmt.Sprintf("%s %.0f MB", appLbl, l.RSSMB)
 		if l.SysOK {
-			sysCPU = fmt.Sprintf("%.0f%%", l.SysCPUPct)
-			sysRAM = fmt.Sprintf("%.1f/%.1f GB", l.SysMemUsedMB/1024, l.SysMemTotalMB/1024)
+			cpuSys = fmt.Sprintf("%s %.0f%%", sysLbl, l.SysCPUPct)
+			ramSys = fmt.Sprintf("%s %.1f/%.1f GB", sysLbl, l.SysMemUsedMB/1024, l.SysMemTotalMB/1024)
 			head = i18n.T("live.perf.headroomLine", i18n.A{
 				"gb":  fmt.Sprintf("%.1f", (l.SysMemTotalMB-l.SysMemUsedMB)/1024),
 				"cpu": fmt.Sprintf("%.0f", math.Max(0, 100-l.SysCPUPct)),
 			})
 		}
-		cpuLeg = fmt.Sprintf(`<span style="color:%s">%s %.0f%%</span><span style="color:%s">%s %s</span>`, sparkMint, appLbl, l.CPUPct, sparkHot, sysLbl, sysCPU)
-		ramLeg = fmt.Sprintf(`<span style="color:%s">%s %.0f MB</span><span style="color:%s">%s %s</span>`, sparkViolet, appLbl, l.RSSMB, sparkAmber, sysLbl, sysRAM)
 	}
+	// two small-multiple wells (CPU, RAM); app = bright/filled, sys = a luminance step (P4).
 	return livePerfSt{
 		Tooltip: i18n.T("live.perf.tooltip"),
-		CPULeg:  cpuLeg, CPUGraph: sparklineSVG([]sparkSeries{{appC, sparkMint, true}, {sysC, sparkHot, false}}, 600, 56),
-		RAMLeg: ramLeg, RAMGraph: sparklineSVG([]sparkSeries{{sysR, sparkAmber, false}, {appR, sparkViolet, true}}, 600, 56),
-		Head: head, HeadColor: sparkMint,
+		CPULeg:  "", CPUGraph: sparkMultiHTML([]liveSpark{{Label: cpuApp, Vals: appC, Fill: true}, {Label: cpuSys, Vals: sysC, Dim: true}}),
+		RAMLeg: "", RAMGraph: sparkMultiHTML([]liveSpark{{Label: ramApp, Vals: appR, Fill: true}, {Label: ramSys, Vals: sysR, Dim: true}}),
+		Head: head, HeadColor: "",
 	}
 }
 
@@ -1083,11 +1100,12 @@ func (u *UI) sysperfHTML() string {
 	return liveFrag("perf", u.livePerfState(), wireLivePerf, livePerfFragHTML)
 }
 
-// livePerfFragHTML is the pure system-performance well renderer.
+// livePerfFragHTML is the pure system-performance well renderer. The headroom line is the single
+// brand hue via a class (.spark-head), never an inline colour.
 func livePerfFragHTML(st livePerfSt) string {
 	return `<div class=gwell title=` + attrQ(st.Tooltip) + `><div class=glegend>` + st.CPULeg + `</div>` + st.CPUGraph +
 		`<div class=glegend>` + st.RAMLeg + `</div>` + st.RAMGraph +
-		`<div class=glegend><span style="color:` + st.HeadColor + `">` + html.EscapeString(st.Head) + `</span></div></div>`
+		`<div class=glegend><span class=spark-head>` + html.EscapeString(st.Head) + `</span></div></div>`
 }
 
 // ── bottom signal strip (port of liveStatusLeft/Center/Right) ──

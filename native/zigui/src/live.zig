@@ -451,9 +451,7 @@ pub fn renderPerf(h: *Html, s: Perf) !void {
     try h.raw(s.ramLeg);
     try h.raw("</div>");
     try h.raw(s.ramGraph);
-    try h.raw("<div class=glegend><span style=\"color:");
-    try h.raw(s.headColor);
-    try h.raw("\">");
+    try h.raw("<div class=glegend><span class=spark-head>");
     try h.esc(s.head);
     try h.raw("</span></div></div>");
 }
@@ -538,9 +536,9 @@ test "graph + perf wells embed Go-built legends raw" {
     try std.testing.expectEqualStrings("<div class=gwell title=\"t&amp;t\"><div class=glegend>" ++
         "<span style=\"color:#08F79B\">x</span></div><svg/></div>", h.b.items);
     h.b.clearRetainingCapacity();
-    try renderPerf(&h, .{ .tooltip = "p", .cpuLeg = "<b>c</b>", .cpuGraph = "<svg id=c/>", .ramLeg = "<b>r</b>", .ramGraph = "<svg id=r/>", .head = "head &room", .headColor = "#08F79B" });
+    try renderPerf(&h, .{ .tooltip = "p", .cpuLeg = "<b>c</b>", .cpuGraph = "<svg id=c/>", .ramLeg = "<b>r</b>", .ramGraph = "<svg id=r/>", .head = "head &room" });
     try std.testing.expectEqualStrings("<div class=gwell title=\"p\"><div class=glegend><b>c</b></div><svg id=c/>" ++
-        "<div class=glegend><b>r</b></div><svg id=r/><div class=glegend><span style=\"color:#08F79B\">head &amp;room</span>" ++
+        "<div class=glegend><b>r</b></div><svg id=r/><div class=glegend><span class=spark-head>head &amp;room</span>" ++
         "</div></div>", h.b.items);
 }
 

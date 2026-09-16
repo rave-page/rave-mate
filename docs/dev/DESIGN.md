@@ -196,6 +196,17 @@ Dated changes to the rules themselves. An entry here overrides older prose above
   one: **arm/stop recording** (`arec-toggle` → `rp-btn--primary`) — capturing the set is
   the highest-stakes, one-way action here; streaming is auto (OBS-driven) and timecode is
   secondary, so both are `rp-btn--outline`. Mirrored in `live.zig`.
+- **2026-09-16 — sparklines: series-by-hue → small multiples (P4/P7).** The Live SYSTEM
+  graphs encoded series by HUE (net 4 hues, timing a 5-hue cycle, perf 4 hues) with inline
+  `style="color:#…"` legends — colour as category, the exact P4 violation. Replaced with
+  **small multiples**: one spark per series, stacked, single brand hue (`sparkMint`; an in/out
+  or app/sys pair uses one luminance step, `sparkMintDim`), the label at the LEFT of its own
+  row (identity by position), no coloured legend, no inline colour. Timing = one row per peer.
+  `graph.go` palette cut to the one hue + its dim step; `sparkMultiHTML` is the builder; net/tim
+  keep the `liveGraphSt` shape (rows in `Graph`, a plain summary caption in `Legend`), perf's
+  headroom line uses `.spark-head` (the hue via a class, not inline). New CSS `.sparkmulti`/
+  `.spark-row`/`.spark-lbl`. No golden-fixture churn (the graph fields are raw inputs both
+  renderers embed identically); the only Zig change is the perf head span.
 - **2026-09-16 — disclosure recipe added (`.rp-disclosure`).** New capability: a
   collapsible titled group, used for the Live SYSTEM chunk to keep the least-critical
   content out of the first glance (P1/P2). Recipe in `assets/ds/styles.css`
