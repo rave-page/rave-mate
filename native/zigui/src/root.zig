@@ -606,6 +606,7 @@ test "player module" {
 // six call sites. No dialog here has a live sub-patch, so there is no _frag export.
 
 const dialogs_a = @import("dialogs_a.zig");
+const pickbrowse = @import("pickbrowse.zig");
 const componentsA = @import("components.zig");
 
 export fn rz_ui_render_dlg_choice(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
@@ -622,6 +623,14 @@ export fn rz_ui_render_dlg_exportprev(state_json: ?[*]const u8, len: usize, out_
 
 export fn rz_ui_render_dlg_rename(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
     return renderJSON(dialogs_a.Rename, dialogs_a.renderRename, state_json, len, out_len);
+}
+
+export fn rz_ui_render_pkbrowse(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(pickbrowse.PkBrowse, pickbrowse.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_pkbrowse_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(pickbrowse.PkBrowse, wire_gen.decodePkBrowse, pickbrowse.render, wire_gen.msg_pk_browse, state, len, out_len);
 }
 
 export fn rz_ui_render_dlg_fix(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {

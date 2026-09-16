@@ -208,6 +208,7 @@ const uint8_t *rz_ui_render_dlg_choice(const uint8_t *state_json, size_t len, si
 const uint8_t *rz_ui_render_dlg_txtexport(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_dlg_exportprev(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_dlg_rename(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_pkbrowse(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_dlg_fix(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_dlg_preset(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_dlg_patmgr(const uint8_t *state_json, size_t len, size_t *out_len);
@@ -350,6 +351,7 @@ const uint8_t *rz_ui_render_dlg_choice_v2(const uint8_t *state, size_t len, size
 const uint8_t *rz_ui_render_dlg_txtexport_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_dlg_exportprev_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_dlg_rename_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_pkbrowse_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_dlg_fix_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_dlg_preset_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_dlg_patmgr_v2(const uint8_t *state, size_t len, size_t *out_len);

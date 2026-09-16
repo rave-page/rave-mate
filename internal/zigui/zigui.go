@@ -720,6 +720,13 @@ func RenderDlgRename(stateJSON []byte) (string, bool) {
 	})
 }
 
+// RenderPkBrowse renders the in-app file/dir/save picker modal.
+func RenderPkBrowse(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_pkbrowse(p, l, n)
+	})
+}
+
 // RenderDlgFix renders the capture-aligned "Fix start times" preview.
 func RenderDlgFix(stateJSON []byte) (string, bool) {
 	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
@@ -1599,6 +1606,13 @@ func RenderDlgExportPrevV2(state []byte) (string, bool) {
 func RenderDlgRenameV2(state []byte) (string, bool) {
 	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
 		return C.rz_ui_render_dlg_rename_v2(p, l, n)
+	})
+}
+
+// RenderPkBrowseV2 renders the in-app picker modal from an RZW1 document.
+func RenderPkBrowseV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_pkbrowse_v2(p, l, n)
 	})
 }
 

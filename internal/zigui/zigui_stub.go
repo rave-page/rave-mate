@@ -145,6 +145,7 @@ func RenderDlgChoice(stateJSON []byte) (string, bool)     { return "", false }
 func RenderDlgTxtExport(stateJSON []byte) (string, bool)  { return "", false }
 func RenderDlgExportPrev(stateJSON []byte) (string, bool) { return "", false }
 func RenderDlgRename(stateJSON []byte) (string, bool)     { return "", false }
+func RenderPkBrowse(stateJSON []byte) (string, bool)      { return "", false }
 func RenderDlgFix(stateJSON []byte) (string, bool)        { return "", false }
 func RenderDlgPreset(stateJSON []byte) (string, bool)     { return "", false }
 func RenderDlgPatMgr(stateJSON []byte) (string, bool)     { return "", false }
@@ -298,6 +299,7 @@ func RenderDlgChoiceV2(state []byte) (string, bool)       { return "", false }
 func RenderDlgTxtExportV2(state []byte) (string, bool)    { return "", false }
 func RenderDlgExportPrevV2(state []byte) (string, bool)   { return "", false }
 func RenderDlgRenameV2(state []byte) (string, bool)       { return "", false }
+func RenderPkBrowseV2(state []byte) (string, bool)        { return "", false }
 func RenderDlgFixV2(state []byte) (string, bool)          { return "", false }
 func RenderDlgPresetV2(state []byte) (string, bool)       { return "", false }
 func RenderDlgPatMgrV2(state []byte) (string, bool)       { return "", false }

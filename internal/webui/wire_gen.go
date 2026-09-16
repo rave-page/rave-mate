@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash         uint32 = 0x9a6827b7
+	wireSchemaHash         uint32 = 0x752e6543
 	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -122,6 +122,7 @@ const (
 	wireMsgLiveRoute       uint16 = 125 // #live-route fragment (route-health / frozen-picture landmark)
 	wireMsgLiveRecCard     uint16 = 127 // #live-rec-card fragment (armed tracklist recorder)
 	wireMsgLiveVram        uint16 = 128 // #live-vram fragment (GPU-memory meter + governor tier)
+	wireMsgPkBrowse        uint16 = 140 // in-app file/dir/save picker modal (pick_browser.go)
 )
 
 func (v agApp) encodeWire(w *zigui.WireWriter) {
@@ -4009,6 +4010,78 @@ func (v logsTickSt) encodeWire(w *zigui.WireWriter) {
 	w.List(2, len(v.Prev), func(i int) { v.Prev[i].encodeWire(w) })
 }
 
+func (v pkNavRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Act)
+	w.Str(2, v.Icon)
+	w.Str(3, v.Label)
+	w.Bool(4, v.On)
+	w.Str(5, v.Unpin)
+}
+
+func (v pkGroupSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Header)
+	w.List(2, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
+func (v pkCrumbSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Str(2, v.Act)
+}
+
+func (v pkChipSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Str(2, v.Act)
+	w.Bool(3, v.Active)
+}
+
+func (v pkEntrySt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Act)
+	w.Str(2, v.SelAct)
+	w.Str(3, v.Glyph)
+	w.Str(4, v.Img)
+	w.Str(5, v.Name)
+	w.Str(6, v.Modified)
+	w.Str(7, v.Size)
+	w.Str(8, v.Type)
+	w.Bool(9, v.Checked)
+	w.Bool(10, v.Sel)
+	w.Bool(11, v.HL)
+}
+
+func (v pkBrowseSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.List(2, len(v.Groups), func(i int) { v.Groups[i].encodeWire(w) })
+	w.List(3, len(v.Crumbs), func(i int) { v.Crumbs[i].encodeWire(w) })
+	w.Str(4, v.PathVal)
+	w.Str(5, v.PathPH)
+	w.Str(6, v.SearchVal)
+	w.Str(7, v.SearchPH)
+	w.List(8, len(v.Sorts), func(i int) { v.Sorts[i].encodeWire(w) })
+	w.Struct(9, func() { v.ViewList.encodeWire(w) })
+	w.Struct(10, func() { v.ViewGrid.encodeWire(w) })
+	w.Struct(11, func() { v.Hidden.encodeWire(w) })
+	w.Struct(12, func() { v.Pin.encodeWire(w) })
+	w.Bool(13, v.HasFilter)
+	w.Struct(14, func() { v.FilterOne.encodeWire(w) })
+	w.Struct(15, func() { v.FilterAll.encodeWire(w) })
+	w.Bool(16, v.Grid)
+	w.Str(17, v.ColName)
+	w.Str(18, v.ColMod)
+	w.Str(19, v.ColSize)
+	w.Str(20, v.ColType)
+	w.List(21, len(v.Entries), func(i int) { v.Entries[i].encodeWire(w) })
+	w.Str(22, v.Empty)
+	w.Str(23, v.More)
+	w.Str(24, v.Readout)
+	w.Bool(25, v.SaveMode)
+	w.Str(26, v.SaveVal)
+	w.Str(27, v.SavePH)
+	w.Str(28, v.Badge)
+	w.Str(29, v.SysDialog)
+	w.Str(30, v.Cancel)
+	w.Str(31, v.Primary)
+}
+
 // wireAgState encodes agState as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireAgState(v agState) []byte {
 	w := zigui.NewWireWriter(wireMsgAgState, wireSchemaHash)
@@ -4803,6 +4876,13 @@ func wireLiveRecCard(v liveRecCardSt) []byte {
 // wireLiveVram encodes liveVramSt as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireLiveVram(v liveVramSt) []byte {
 	w := zigui.NewWireWriter(wireMsgLiveVram, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wirePkBrowse encodes pkBrowseSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wirePkBrowse(v pkBrowseSt) []byte {
+	w := zigui.NewWireWriter(wireMsgPkBrowse, wireSchemaHash)
 	v.encodeWire(w)
 	return w.Finish()
 }
