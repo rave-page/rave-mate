@@ -8,14 +8,19 @@ package shellplaces
 // keep the FOLDERS (recent files are noise for a folder sidebar), and resolve each to a filesystem
 // path.
 //
-// Pinned flag: System.Home.IsPinned is NOT populated on the enumerated child items on Windows 11
-// (26xxx) - both IShellItem2::GetBool and IPropertyStore::GetValue return empty/NOT_FOUND (verified
-// by spike). So every entry is reported Pinned=false; the group is the Explorer Quick-Access folder
-// set (pinned + frequent), a faithful superset of the user's pins. See docs/dev/DESIGN.md decision
-// log. COM is reached through explicit vtable slots (matching internal/webui/pickers_windows.go).
+// Pinned flag: the shell does NOT surface it per item on Windows 11 (26xxx) - System.Home.IsPinned
+// is empty and System.IsPinnedToNameSpaceTree is true for EVERY Quick Access item (verified by
+// spike). The user's pins come instead from the Quick Access jump list (destlist.go): its DestList
+// stream carries a pin-status per target, and quickAccessPins() maps those onto the enumerated
+// folders (custom pins; the six default known-folders are stored as shell IDs, not paths, and stay
+// frequent here but still appear in PLACES). COM is reached through explicit vtable slots (matching
+// internal/webui/pickers_windows.go).
 
 import (
+	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -120,6 +125,7 @@ func systemPlaces() []Place {
 	}
 	defer en.call(slotRelease)
 
+	pins := quickAccessPins()
 	var out []Place
 	for i := 0; i < maxScan; i++ {
 		var child *comObj
@@ -128,11 +134,40 @@ func systemPlaces() []Place {
 			break
 		}
 		if p, ok := placeFromItem(child); ok {
+			p.Pinned = pins[strings.ToLower(filepath.Clean(p.Path))]
 			out = append(out, p)
 		}
 		child.call(slotRelease)
 	}
 	return out
+}
+
+// quickAccessPins reads the Quick Access pinned jump list and returns the set (lowercased, cleaned)
+// of user-pinned folders that still exist on disk. The existence check self-validates the parse, so
+// a wrong-version DestList or a corrupt file yields an empty set (fail-soft to the frequent superset)
+// rather than mislabelled pins. Default known-folder pins are stored as shell IDs, not paths, so
+// they are not surfaced here - they still appear in QUICK ACCESS (as frequent) and in PLACES.
+func quickAccessPins() map[string]bool {
+	appData := os.Getenv("APPDATA")
+	if appData == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(filepath.Join(appData,
+		"Microsoft", "Windows", "Recent", "AutomaticDestinations", "f01b4d95cf55d32a.automaticDestinations-ms"))
+	if err != nil {
+		return nil
+	}
+	stream, ok := readCFBStream(raw, "DestList")
+	if !ok {
+		return nil
+	}
+	set := map[string]bool{}
+	for _, p := range parseDestListPins(stream) {
+		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+			set[strings.ToLower(filepath.Clean(p))] = true
+		}
+	}
+	return set
 }
 
 // placeFromItem keeps folder items only and resolves the filesystem path + display name.
