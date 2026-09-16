@@ -1,13 +1,13 @@
 {
-  "version": "nightly-8d6b316",
-  "build": 342,
-  "commit": "8d6b316",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-342-20260916-8d6b316.exe",
-  "sha256": "677ddb2a4395618de672e190fd4230413cb39f1bcdd649aa67f4501b9e0d193a",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-342-20260916-8d6b316.exe",
-  "installer_sha256": "0a0d64ac035c4a03bc017bba30e5d433c5dfc7c7ae965a30be21cda7948f01bd",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-342-20260916-8d6b316",
-  "linux_sha256": "e29f69f22fc834fd1554b64184a55cfc692c76e514162efd57360d68828b6360",
+  "version": "nightly-f44df42",
+  "build": 343,
+  "commit": "f44df42",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-343-20260916-f44df42.exe",
+  "sha256": "1bf351d21262121305b2b7cd78431f4a8e66397631b93aa5d1ddc7229335d6f8",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-343-20260916-f44df42.exe",
+  "installer_sha256": "c320059b3087b56734c41334fc664ea9949bd594a559b6c920aab5aa57cd1e48",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-343-20260916-f44df42",
+  "linux_sha256": "e37a75df798a581ddbbdd9fef70186c408ed2c14343383efc87896513abec44a",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-09-16T10:39:38Z",
-  "notes": "Merge branch 'worktree-agent-a0c221d3279edd89b' into development"
+  "released": "2026-09-16T10:54:25Z",
+  "notes": "Merge branch 'worktree-agent-a800d9e92347a81f7' into development"
 }
