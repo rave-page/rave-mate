@@ -120,16 +120,56 @@ type StepResult struct {
 	Error      string     `json:"error,omitempty"`
 }
 
-// Run is one automation execution over one file (history, persisted).
+// Run is one automation execution over one file (history, persisted). Trigger names how the run
+// started: watch (a file arrived), schedule (a timer swept), manual (a Run-now sweep over the
+// match rules), manual-file (a Run-now over one hand-picked file, bypassing the match rules).
 type Run struct {
 	ID           string       `json:"id"`
 	AutomationID string       `json:"automationId"`
-	Trigger      string       `json:"trigger"` // watch|schedule|manual
+	Trigger      string       `json:"trigger"` // watch|schedule|manual|manual-file
 	FilePath     string       `json:"filePath"`
 	StartedAt    string       `json:"startedAt"`
 	FinishedAt   string       `json:"finishedAt,omitempty"`
 	Status       string       `json:"status"` // running|success|error|partial
 	Steps        []StepResult `json:"steps,omitempty"`
+}
+
+// SweepFile is one file a sweep matched: its path plus the size/mtime the eligibility stat already
+// read (no extra stat). The webui renders name/size/age from these; the engine runs the chain over
+// Path.
+type SweepFile struct {
+	Path    string    `json:"path"`
+	Name    string    `json:"name"`
+	Size    int64     `json:"size"`
+	ModTime time.Time `json:"modTime"`
+}
+
+// SweepPreview is what a sweep WOULD act on right now: the files under the watch dir that pass the
+// automation's Match, with per-file size/mtime, the total count + bytes, and the active Match (so
+// the UI can render the conditions as badges). Files is bounded (≤ previewFileCap); Total is the
+// full match count and may exceed len(Files).
+type SweepPreview struct {
+	AutomationID string      `json:"automationId"`
+	WatchDir     string      `json:"watchDir"`
+	Match        Match       `json:"match"`
+	Files        []SweepFile `json:"files"`
+	Total        int         `json:"total"`
+	TotalBytes   int64       `json:"totalBytes"`
+}
+
+// SweepResult records a whole sweep: one Run per matched file (as today) plus the trigger that
+// started it. Coalesced marks a manual/schedule sweep that was folded into an already-running or
+// already-pending sweep of the same automation (the coordinator never double-runs an automation);
+// its Runs are empty.
+type SweepResult struct {
+	AutomationID string `json:"automationId"`
+	Trigger      string `json:"trigger"`
+	Runs         []Run  `json:"runs"`
+	Coalesced    bool   `json:"coalesced,omitempty"`
+	// Queued marks a sweep the coordinator could not start now (a path/heavy/streaming conflict): it
+	// was enqueued and runs when the conflict clears; QueueReason says what it waits on. Runs is empty.
+	Queued      bool   `json:"queued,omitempty"`
+	QueueReason string `json:"queueReason,omitempty"`
 }
 
 // Worker runs media jobs on the worker subprocess pool (*worker.Supervisor satisfies it).
@@ -152,8 +192,19 @@ type Manager interface {
 	Get(id string) (Automation, bool)
 	Save(a Automation) (Automation, error) // empty ID → create (generates id+createdAt); else update
 	Delete(id string) error
+	// Preview lists the files a sweep would act on now (the match rules over the watch dir).
+	Preview(id string) (SweepPreview, error)
+	// RunSweep runs the automation over EVERY currently-matching file - the DEFAULT Run-now,
+	// identical to a schedule fire (trigger "manual"). Coordinated: self-coalesced + conflict-aware.
+	RunSweep(ctx context.Context, id string) (SweepResult, error)
+	// RunManual runs the chain over one hand-picked file, bypassing the match rules (trigger
+	// "manual-file") - the secondary Run-now path.
 	RunManual(ctx context.Context, id, filePath string) (Run, error)
 	Runs(limit int) []Run // recent runs across all automations, newest first
+	// CoordStatus snapshots what the run coordinator is running + has queued (UI status region).
+	CoordStatus() CoordStatus
+	// CoordConflict reports whether a rules sweep of id would wait now, and on what (Run-now line).
+	CoordConflict(id string) (SweepConflict, bool)
 	ListSchedules() []Schedule
 	SaveSchedule(s Schedule) (Schedule, error)
 	DeleteSchedule(id string) error

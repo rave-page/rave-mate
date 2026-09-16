@@ -33,3 +33,43 @@ ignored so automations still run on mac/linux).
 - Tests: cron parse/match (incl. dom-OR-dow, 0/7 Sunday), gate matrix, cron per-minute dedupe,
   idle once-per-period + re-arm, app-gated idle; Windows live idle+process snapshot.
 - `ctl`: schedule editor dialog renders, 0 overflow.
+
+## Run coordinator (2026-09-16)
+
+`internal/automation/coordinator.go` serializes + prioritizes every run so a schedule fire and a
+manual "Run now" behave identically and stay a good neighbour. All run paths funnel through it:
+schedule sweep (`onSchedule`), watch-file (`onWatchFile`), manual sweep (`RunSweep`), manual file
+(`RunManual`) and the attended interactive `StartRun`.
+
+Rules:
+- **No self-overlap.** A sweep of an automation already running (or already holding a pending
+  sweep) is COALESCED into ONE pending sweep, recorded "coalesced at HH:MM" on the card/schedule
+  row - never dropped, never multiplied. A single-file run (`manual-file`) serializes behind a
+  conflicting run but is never coalesced (a file the user hand-picked is not a duplicate of a sweep).
+- **Path serialization.** Two automations whose watch dir - or an output/move/copy target dir - are
+  equal or nested never run at once; the second waits (reason `path`, "waiting for <label>").
+- **Resource classes.** A chain with a heavy action (transcode/trim-silence -> spawns ffmpeg) takes
+  one of `MaxHeavyRuns` heavy slots (default 1) AND defers while the governor says background work
+  is off (a live stream) - reusing `governor.BackgroundAllowed`, never a second gate. Light chains
+  (move/copy/rename/delete) run alongside. `chainClass` derives the class from the action types.
+- **Bounded queue.** Pending runs are capped (`queueCap`, 64) and coalesced per automation, so the
+  queue can never grow with load; an over-cap submit folds. Queued runs are cancellable +
+  context-aware - a run whose context is cancelled (the window closed) is dropped from the queue.
+
+A tiny dispatcher goroutine owns the queue; jobs run on their own goroutines. `Status()` exposes
+running + queued (with reason codes the webui maps to i18n) for the UI status region; every state
+change bumps the Service version so the ~1 Hz Automations tick repaints the status region + card
+badges. `RunSweep` returns immediately with `Queued`/`Coalesced` when it cannot start now (the run
+happens async, surfaced by the tick) and blocks for the per-file `Runs` only when it started right
+away; `onSchedule`/`onWatchFile` submit fire-and-forget (the shared scheduler eval loop is never
+blocked on a run). `CoordConflict(id)` powers the Run-now modal's "Will wait -" line before you
+press Run. `SetMaxHeavyRuns(n)` is the knob (default 1).
+
+### Coordinator verification
+- Unit (`coordinator_test.go`, `-race`): self-coalesce (one pending, exactly two runs), path-overlap
+  serialization, heavy slot (two heavy -> one at a time; light alongside), governor deferral (real
+  `governor.SetStreaming`), queue cap, cancellation, interactive slot, `Status()`/version bump.
+- `RunSweep`/`Preview` equal what `onSchedule` sweeps (same fixtures); `RunManual` unchanged
+  (single file, no eligibility, trigger `manual-file`).
+- Render: run-now modal (rules / single-file / empty / conflict) + tab status region + card state
+  badge + schedule coalesced pinned Go == Zig (v1 JSON + v2 RZW1 goldens).

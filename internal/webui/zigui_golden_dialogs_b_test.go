@@ -3,8 +3,10 @@
 package webui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"rave.page/mate/internal/automation"
 	"rave.page/mate/internal/config"
@@ -389,26 +391,74 @@ func arModalFixtures() map[string]arModalSt {
 		defer s.mu.Unlock()
 		return arModalState(s)
 	}
+	// Fixed-in-the-past mtimes so fileAge resolves to a stable string (both renderers get the
+	// SAME resolved st, so the golden holds regardless - this just keeps the fixtures legible).
+	old := func(days int) time.Time { return time.Now().Add(-time.Duration(days)*24*time.Hour - time.Hour) }
+	sf := func(name string, size int64, days int) automation.SweepFile {
+		return automation.SweepFile{Name: name, Path: `D:\captures\` + name, Size: size, ModTime: old(days)}
+	}
+	match := automation.Match{Extensions: []string{".wav", ".flac"}, MinAgeDays: 30, FilenamePattern: "^set-", MinSizeBytes: 5 << 20}
+	deleteChain := []automation.Action{{Type: automation.ActionTranscode, PresetID: "mp3-320"}, {Type: automation.ActionDelete}}
 	return map[string]arModalSt{
-		"empty":     {},
-		"needFile":  mk(func(s *arSt) {}),
-		"ready":     mk(func(s *arSt) { s.file = `D:\captures\set.wav` }),
-		"busy":      mk(func(s *arSt) { s.file = `D:\captures\set.wav`; s.runningID = "a1" }),
-		"otherBusy": mk(func(s *arSt) { s.file = `D:\captures\set.wav`; s.runningID = "a2" }),
-		"needAck": mk(func(s *arSt) {
-			s.file = `D:\captures\set.wav`
-			s.acts = append(s.acts, automation.Action{Type: automation.ActionDelete})
+		"empty": {},
+		// rules-first default, nothing matches → empty state + why-hints (age/pattern/ext/size)
+		"rulesEmpty": mk(func(s *arSt) { s.preview = automation.SweepPreview{Match: match} }),
+		// rules-first, a few matches
+		"rulesFew": mk(func(s *arSt) {
+			s.preview = automation.SweepPreview{Match: match, Total: 3, TotalBytes: 42 << 20,
+				Files: []automation.SweepFile{sf("set-01.wav", 12<<20, 40), sf("set-02.wav", 18<<20, 33), sf("set-03.flac", 12<<20, 31)}}
 		}),
-		"acked": mk(func(s *arSt) {
-			s.file, s.ack = `D:\captures\set.wav`, true
-			s.acts = append(s.acts, automation.Action{Type: automation.ActionDelete})
+		// rules-first, more matches than shown → "and N more"
+		"rulesMany": mk(func(s *arSt) {
+			var files []automation.SweepFile
+			for i := 0; i < 8; i++ {
+				files = append(files, sf("set-0"+strconv.Itoa(i)+".wav", 10<<20, 40+i))
+			}
+			s.preview = automation.SweepPreview{Match: match, Total: 20, TotalBytes: 200 << 20, Files: files}
 		}),
-		"errBanner": mk(func(s *arSt) { s.file = `D:\x.wav`; s.errTx = `run failed: ffmpeg & "x" <y>'` }),
+		// rules-first + erasing chain: needs the ack
+		"rulesErase": mk(func(s *arSt) {
+			s.acts = deleteChain
+			s.preview = automation.SweepPreview{Match: match, Total: 2, TotalBytes: 30 << 20,
+				Files: []automation.SweepFile{sf("set-01.wav", 12<<20, 40), sf("set-02.wav", 18<<20, 33)}}
+		}),
+		"rulesEraseAck": mk(func(s *arSt) {
+			s.acts, s.ack = deleteChain, true
+			s.preview = automation.SweepPreview{Match: match, Total: 1, TotalBytes: 12 << 20,
+				Files: []automation.SweepFile{sf("set-01.wav", 12<<20, 40)}}
+		}),
+		// coordinator conflict: the primary becomes "Queue run", stated before you press it
+		"conflict": mk(func(s *arSt) {
+			s.conflict, s.conflictText = true, `Will wait — Archive is transcoding old-set.wav.`
+			s.preview = automation.SweepPreview{Match: match, Total: 2, TotalBytes: 30 << 20,
+				Files: []automation.SweepFile{sf("set-01.wav", 12<<20, 40)}}
+		}),
+		// secondary single-file mode (keeps the ignores-match copy)
+		"specificNeedFile": mk(func(s *arSt) { s.specificFile = true }),
+		"specificReady":    mk(func(s *arSt) { s.specificFile = true; s.file = `D:\captures\one.wav` }),
+		"specificEraseAck": mk(func(s *arSt) {
+			s.specificFile, s.file, s.ack, s.acts = true, `D:\captures\one.wav`, true, deleteChain
+		}),
+		"busy": mk(func(s *arSt) {
+			s.runningID = "a1"
+			s.preview = automation.SweepPreview{Match: match, Total: 1, Files: []automation.SweepFile{sf("set-01.wav", 12<<20, 40)}}
+		}),
+		"errBanner": mk(func(s *arSt) { s.errTx = `run failed: ffmpeg & "x" <y>'` }),
 		"escaping": mk(func(s *arSt) {
-			s.label, s.watch, s.file = `Set & "night" <x>'`, `D:\a&b\"c"`, `D:\p&q\"r".wav`
+			s.label, s.watch = `Set & "night" <x>'`, `D:\a&b\"c"`
+			s.preview = automation.SweepPreview{Match: automation.Match{Extensions: []string{`.w&v`}, FilenamePattern: `^s&t<">`}, Total: 1, TotalBytes: 1234,
+				Files: []automation.SweepFile{sf(`re&c "1"<>.wav`, 2048, 5)}}
 		}),
-		"long":    mk(func(s *arSt) { s.label = strings.Repeat("long label ", 60); s.file = strings.Repeat(`D:\deep\`, 40) }),
-		"unicode": mk(func(s *arSt) { s.label = "セット後 🎧"; s.watch = `D:\größer`; s.file = `D:\запись.wav` }),
+		"long": mk(func(s *arSt) {
+			s.label = strings.Repeat("long label ", 60)
+			s.preview = automation.SweepPreview{Match: match, Total: 999, TotalBytes: 1 << 40,
+				Files: []automation.SweepFile{sf(strings.Repeat("n", 200)+".wav", 5<<30, 400)}}
+		}),
+		"unicode": mk(func(s *arSt) {
+			s.label, s.watch = "セット後 🎧", `D:\größer`
+			s.preview = automation.SweepPreview{Match: automation.Match{Extensions: []string{".wav"}}, Total: 1, TotalBytes: 999,
+				Files: []automation.SweepFile{sf("запись.wav", 4096, 2)}}
+		}),
 	}
 }
 

@@ -457,6 +457,16 @@ func (f *fakeAuto) Save(a automation.Automation) (automation.Automation, error) 
 	return a, nil
 }
 func (f *fakeAuto) Delete(id string) error { delete(f.items, id); return nil }
+func (f *fakeAuto) Preview(string) (automation.SweepPreview, error) {
+	return automation.SweepPreview{}, nil
+}
+func (f *fakeAuto) RunSweep(context.Context, string) (automation.SweepResult, error) {
+	return automation.SweepResult{}, nil
+}
+func (f *fakeAuto) CoordStatus() automation.CoordStatus { return automation.CoordStatus{} }
+func (f *fakeAuto) CoordConflict(string) (automation.SweepConflict, bool) {
+	return automation.SweepConflict{}, false
+}
 func (f *fakeAuto) RunManual(_ context.Context, id, filePath string) (automation.Run, error) {
 	return automation.Run{ID: "r1", AutomationID: id, FilePath: filePath, Status: "success"}, nil
 }

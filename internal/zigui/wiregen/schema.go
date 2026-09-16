@@ -772,7 +772,7 @@ var schema = []msg{
 	},
 	{
 		name: "AutoCard", goT: "autoCard", zigT: "automations.Card",
-		fs: []field{s(1, "ID", "id"), s(2, "Label", "label"), s(3, "WatchDir", "watchDir"), s(4, "Status", "status"), s(5, "StatusVar", "statusVar"), s(6, "Chain", "chain"), b(7, "Enabled", "enabled")},
+		fs: []field{s(1, "ID", "id"), s(2, "Label", "label"), s(3, "WatchDir", "watchDir"), s(4, "Status", "status"), s(5, "StatusVar", "statusVar"), s(6, "Chain", "chain"), b(7, "Enabled", "enabled"), s(8, "State", "state"), s(9, "StateVar", "stateVar")},
 	},
 	{
 		name: "AutoListState", goT: "autoListState", zigT: "automations.ListState",
@@ -780,7 +780,7 @@ var schema = []msg{
 	},
 	{
 		name: "AutoSchedCard", goT: "autoSchedCard", zigT: "automations.SchedCard",
-		fs: []field{s(1, "ID", "id"), s(2, "Label", "label"), s(3, "Target", "target"), s(4, "StateText", "stateText"), s(5, "StateVar", "stateVar"), s(6, "Trigger", "trigger"), s(7, "Gates", "gates"), s(8, "LastFired", "lastFired"), s(9, "WarnTone", "warnTone"), s(10, "WarnText", "warnText"), b(11, "Enabled", "enabled")},
+		fs: []field{s(1, "ID", "id"), s(2, "Label", "label"), s(3, "Target", "target"), s(4, "StateText", "stateText"), s(5, "StateVar", "stateVar"), s(6, "Trigger", "trigger"), s(7, "Gates", "gates"), s(8, "LastFired", "lastFired"), s(9, "WarnTone", "warnTone"), s(10, "WarnText", "warnText"), b(11, "Enabled", "enabled"), s(12, "Coalesced", "coalesced")},
 	},
 	{
 		name: "AutoSchedsState", goT: "autoSchedsState", zigT: "automations.SchedsState",
@@ -795,9 +795,17 @@ var schema = []msg{
 		fs: []field{s(1, "Empty", "empty"), li(2, "Rows", "rows", "AutoRunRow")},
 	},
 	{
+		name: "AutoCoordRow", goT: "autoCoordRow", zigT: "automations.CoordRow",
+		fs: []field{s(1, "Dot", "dot"), s(2, "Label", "label"), s(3, "Line", "line"), s(4, "Badge", "badge"), s(5, "BadgeVar", "badgeVar")},
+	},
+	{
+		name: "AutoCoord", goT: "autoCoordState", zigT: "automations.Coord",
+		fs: []field{s(1, "Title", "title"), li(2, "Rows", "rows", "AutoCoordRow")},
+	},
+	{
 		name: "AutoBodyState", goT: "autoBodyState", zigT: "automations.Body", id: 42,
 		doc: "#auto-body (version-gated ~1 Hz tick)",
-		fs:  []field{s(1, "ListTitle", "listTitle"), s(2, "SchedTitle", "schedTitle"), s(3, "RunsTitle", "runsTitle"), st(4, "Labels", "labels", "AutoLabels"), st(5, "List", "list", "AutoListState"), st(6, "Scheds", "scheds", "AutoSchedsState"), st(7, "Runs", "runs", "AutoRunsState")},
+		fs:  []field{s(1, "ListTitle", "listTitle"), s(2, "SchedTitle", "schedTitle"), s(3, "RunsTitle", "runsTitle"), st(4, "Labels", "labels", "AutoLabels"), st(5, "List", "list", "AutoListState"), st(6, "Scheds", "scheds", "AutoSchedsState"), st(7, "Runs", "runs", "AutoRunsState"), st(8, "Coord", "coord", "AutoCoord")},
 	},
 	{
 		name: "AutoState", goT: "autoState", zigT: "automations.State", id: 41,
@@ -1666,9 +1674,21 @@ var schema = []msg{
 		fs: []field{b(1, "Gated", "gated"), s(2, "Label", "label"), s(3, "Why", "why"), s(4, "Variant", "variant"), s(5, "Cancel", "cancel")},
 	},
 	{
+		name: "ArBadge", goT: "arBadge", zigT: "dialogs_b.ArBadge",
+		fs: []field{s(1, "Label", "label"), s(2, "Variant", "variant")},
+	},
+	{
+		name: "ArPrevRow", goT: "arPrevRow", zigT: "dialogs_b.ArPrevRow",
+		fs: []field{s(1, "Name", "name"), s(2, "Size", "size"), s(3, "Meta", "meta")},
+	},
+	{
+		// Fields 1-16 are the original single-file dialog. 17+ are the rules-first default (B/run-now
+		// v2): the condition badges, the live match preview, the empty/why state, the mode switch and
+		// the conflict line. Append only.
 		name: "AutoRunNow", goT: "arModalSt", zigT: "dialogs_b.ArModal", id: 110,
 		doc: "automation run-now dialog",
-		fs:  []field{s(1, "Title", "title"), b(2, "HasErr", "hasErr"), s(3, "Err", "err"), st(4, "Auto", "auto", "UiKV"), st(5, "Watch", "watch", "UiKV"), st(6, "Chain", "chain", "UiKV"), s(7, "IgnoresMatch", "ignoresMatch"), st(8, "File", "file", "DlgField"), st(9, "Browse", "browse", "UiBtn"), b(10, "Erases", "erases"), s(11, "DeleteWarn", "deleteWarn"), s(12, "DeleteScope", "deleteScope"), s(13, "DeleteTip", "deleteTip"), op(14, "DeleteTipS", "deleteTipSt", "Tip"), st(15, "Ack", "ack", "UiToggle"), st(16, "Foot", "foot", "ArFoot")},
+		fs: []field{s(1, "Title", "title"), b(2, "HasErr", "hasErr"), s(3, "Err", "err"), st(4, "Auto", "auto", "UiKV"), st(5, "Watch", "watch", "UiKV"), st(6, "Chain", "chain", "UiKV"), s(7, "IgnoresMatch", "ignoresMatch"), st(8, "File", "file", "DlgField"), st(9, "Browse", "browse", "UiBtn"), b(10, "Erases", "erases"), s(11, "DeleteWarn", "deleteWarn"), s(12, "DeleteScope", "deleteScope"), s(13, "DeleteTip", "deleteTip"), op(14, "DeleteTipS", "deleteTipSt", "Tip"), st(15, "Ack", "ack", "UiToggle"), st(16, "Foot", "foot", "ArFoot"),
+			b(17, "SpecificFile", "specificFile"), st(18, "ModeToggle", "modeToggle", "UiToggle"), s(19, "CondsLabel", "condsLabel"), s(20, "CondsAny", "condsAny"), li(21, "Conds", "conds", "ArBadge"), li(22, "Files", "files", "ArPrevRow"), s(23, "More", "more"), s(24, "TotalLine", "totalLine"), b(25, "Empty", "empty"), s(26, "EmptyTitle", "emptyTitle"), sl(27, "EmptyHints", "emptyHints"), b(28, "Conflict", "conflict"), s(29, "ConflictText", "conflictText")},
 	},
 	{
 		name: "AutoSchedule", goT: "asModalSt", zigT: "dialogs_b.AsModal", id: 111,
