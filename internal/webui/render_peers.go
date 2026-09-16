@@ -153,6 +153,7 @@ type xferSetSt struct {
 	AutoLbl    string   `json:"autoLbl"`
 	Dir        uiField  `json:"dir"`
 	DefaultDir string   `json:"defaultDir"`
+	Browse     string   `json:"browse"` // resolved i18n label for the Browse… button
 }
 
 // xferPendSt is a pending incoming transfer awaiting an accept/decline decision.
@@ -750,6 +751,7 @@ func (u *UI) xferSetState() xferSetSt {
 		AutoLbl:    i18n.T("peers.autoMode"),
 		Dir:        newField(i18n.T("peers.saveTo"), "peers-xfer-dir", f.DownloadDir, "text"),
 		DefaultDir: i18n.T("peers.defaultDir", i18n.A{"dir": f.ResolvedDownloadDir()}),
+		Browse:     i18n.T("common.browse"),
 	}
 }
 
@@ -1039,6 +1041,7 @@ func xferSetHTML(st xferSetSt) string {
 	b.WriteString(`<div class=xfer-mode><span class=field-label>` + html.EscapeString(st.AcceptLbl) + `</span>` +
 		subTabs("peers-xfer-mode:", st.Mode, [2]string{"ask", st.AskLbl}, [2]string{"auto", st.AutoLbl}) + `</div>`)
 	b.WriteString(st.Dir.html())
+	b.WriteString(btn(st.Browse, "ghost", "pick-dir:peers-xfer-dir", ""))
 	b.WriteString(`<div class=np-artist>` + html.EscapeString(st.DefaultDir) + `</div>`)
 	b.WriteString(`</div>`)
 	return b.String()

@@ -237,6 +237,33 @@ const runtimeJS = `(function(){
     e.preventDefault();
     send({act:'key:'+scope, val:up});
   });
+  // in-app file browser keyboard nav: scoped by the picker modal's presence (.pk-wrap), so it
+  // arms/disarms with the picker and needs no body keyscope. Go owns the highlighted-row index -
+  // JS only forwards the key (pk-key = relative move / action, pk-jump = type-to-jump char).
+  document.addEventListener('keydown', function(e){
+    if(e.metaKey||e.altKey||e.ctrlKey) return;
+    if(!document.querySelector('.pk-wrap')) return; // picker not open
+    var k=e.key;
+    if(k==='Escape'){ e.preventDefault(); send({act:'modal-close'}); return; }
+    var a=document.activeElement;
+    var inField=a&&a.matches&&a.matches('input,textarea,select,[contenteditable]');
+    var nav={'ArrowDown':'down','ArrowUp':'up','Enter':'enter','Backspace':'updir','Home':'home','End':'end','PageDown':'pgdn','PageUp':'pgup'}[k];
+    if(inField){
+      // let the search/path/filename field keep its own typing; only ArrowDown/Up escape into the list
+      if(k!=='ArrowDown'&&k!=='ArrowUp') return;
+      a.blur();
+    }
+    if(nav){
+      if(e.repeat&&nav==='enter'){ e.preventDefault(); return; }
+      e.preventDefault();
+      send({act:'pk-key', val:(e.shiftKey?'s':'')+nav});
+      return;
+    }
+    if(!inField && k.length===1 && k>=' ' && !e.ctrlKey){ // type-to-jump
+      e.preventDefault();
+      send({act:'pk-jump', val:k});
+    }
+  });
   document.addEventListener('input', function(e){
     var el = e.target;
     if(!el || !el.getAttribute) return;

@@ -863,7 +863,7 @@ var schema = []msg{
 	},
 	{
 		name: "XferSet", goT: "xferSetSt", zigT: "peers.XferSet",
-		fs: []field{b(1, "Show", "show"), st(2, "Enabled", "enabled", "UiToggle"), s(3, "AcceptLbl", "acceptLbl"), s(4, "Mode", "mode"), s(5, "AskLbl", "askLbl"), s(6, "AutoLbl", "autoLbl"), st(7, "Dir", "dir", "UiField"), s(8, "DefaultDir", "defaultDir")},
+		fs: []field{b(1, "Show", "show"), st(2, "Enabled", "enabled", "UiToggle"), s(3, "AcceptLbl", "acceptLbl"), s(4, "Mode", "mode"), s(5, "AskLbl", "askLbl"), s(6, "AutoLbl", "autoLbl"), st(7, "Dir", "dir", "UiField"), s(8, "DefaultDir", "defaultDir"), s(9, "Browse", "browse")},
 	},
 	{
 		name: "XferPend", goT: "xferPendSt", zigT: "peers.XferPend",
@@ -1758,6 +1758,44 @@ var schema = []msg{
 		doc: "#log-view tick surface (one fragment, 400-line tail)",
 		fs:  []field{st(1, "Lines", "lines", "LogsLines"), li(2, "Prev", "prev", "TkPrev")},
 	},
+	// ── in-app file/dir/save picker modal (pick_browser.go); ids 140-159 reserved ──
+	{
+		name: "PkNavRow", goT: "pkNavRowSt", zigT: "pickbrowse.NavRow",
+		fs: []field{s(1, "Act", "act"), s(2, "Icon", "icon"), s(3, "Label", "label"), b(4, "On", "on"), s(5, "Unpin", "unpin")},
+	},
+	{
+		name: "PkGroup", goT: "pkGroupSt", zigT: "pickbrowse.Group",
+		fs: []field{s(1, "Header", "header"), li(2, "Rows", "rows", "PkNavRow")},
+	},
+	{
+		name: "PkCrumb", goT: "pkCrumbSt", zigT: "pickbrowse.Crumb",
+		fs: []field{s(1, "Label", "label"), s(2, "Act", "act")},
+	},
+	{
+		name: "PkChip", goT: "pkChipSt", zigT: "pickbrowse.Chip",
+		fs: []field{s(1, "Label", "label"), s(2, "Act", "act"), b(3, "Active", "active")},
+	},
+	{
+		name: "PkEntry", goT: "pkEntrySt", zigT: "pickbrowse.Entry",
+		fs: []field{s(1, "Act", "act"), s(2, "SelAct", "selAct"), s(3, "Glyph", "glyph"), s(4, "Img", "img"),
+			s(5, "Name", "name"), s(6, "Modified", "modified"), s(7, "Size", "size"), s(8, "Type", "typ"),
+			b(9, "Checked", "checked"), b(10, "Sel", "sel"), b(11, "HL", "hl")},
+	},
+	{
+		name: "PkBrowse", goT: "pkBrowseSt", zigT: "pickbrowse.PkBrowse", id: 140,
+		doc: "in-app file/dir/save picker modal (pick_browser.go)",
+		fs: []field{
+			s(1, "Title", "title"), li(2, "Groups", "groups", "PkGroup"), li(3, "Crumbs", "crumbs", "PkCrumb"),
+			s(4, "PathVal", "pathVal"), s(5, "PathPH", "pathPH"), s(6, "SearchVal", "searchVal"), s(7, "SearchPH", "searchPH"),
+			li(8, "Sorts", "sorts", "PkChip"), st(9, "ViewList", "viewList", "PkChip"), st(10, "ViewGrid", "viewGrid", "PkChip"),
+			st(11, "Hidden", "hidden", "PkChip"), st(12, "Pin", "pin", "PkChip"), b(13, "HasFilter", "hasFilter"),
+			st(14, "FilterOne", "filterOne", "PkChip"), st(15, "FilterAll", "filterAll", "PkChip"),
+			b(16, "Grid", "grid"), s(17, "ColName", "colName"), s(18, "ColMod", "colMod"), s(19, "ColSize", "colSize"), s(20, "ColType", "colType"),
+			li(21, "Entries", "entries", "PkEntry"), s(22, "Empty", "empty"), s(23, "More", "more"),
+			s(24, "Readout", "readout"), b(25, "SaveMode", "saveMode"), s(26, "SaveVal", "saveVal"), s(27, "SavePH", "savePH"),
+			s(28, "Badge", "badge"), s(29, "SysDialog", "sysDialog"), s(30, "Cancel", "cancel"), s(31, "Primary", "primary"),
+		},
+	},
 }
 
 // zigImports maps the import alias used in wire_gen.zig to its source file.
@@ -1798,6 +1836,7 @@ var zigImports = [][2]string{
 	{"cueedit", "cueedit.zig"},
 	{"libviews", "libviews.zig"},
 	{"libremote", "libremote.zig"},
+	{"pickbrowse", "pickbrowse.zig"},
 }
 
 // schemaHash is FNV-1a over the canonical schema text. Both sides embed it; a mismatch means

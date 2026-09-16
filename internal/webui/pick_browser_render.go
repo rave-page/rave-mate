@@ -1,8 +1,9 @@
 package webui
 
-// Rendering for the in-app picker modal (pick_browser.go). Pure Go, reuses the .rp-*/.libnav/
-// .field-input recipes; the entries list + footer are patched as fragments so search/sort/select
-// never steal focus from the search box.
+// Pure renderer for the in-app picker modal - the byte-exact GOLDEN REFERENCE the Zig twin
+// (native/zigui/src/pickbrowse.zig) mirrors. Renders from the resolved pkBrowseSt
+// (pick_browser_state.go); reuses the .rp-*/.libnav/.field-input recipes. The entries list + footer
+// are patched as fragments so search/sort/select never steal focus from the search box.
 
 import (
 	"fmt"
@@ -12,27 +13,38 @@ import (
 	"strings"
 
 	"rave.page/mate/internal/i18n"
-	"rave.page/mate/internal/library"
 	"rave.page/mate/internal/localmedia"
-	"rave.page/mate/internal/shellplaces"
+	"rave.page/mate/internal/zigui"
 )
 
-// pkModalHTML renders the whole picker modal (into __modal). Locks s.mu.
+// pkModalHTML renders the whole picker modal (into __modal) - Zig when linked, else the Go golden.
 func (u *UI) pkModalHTML() string {
 	s := u.pk()
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	body := `<div class=pk-wrap>` +
-		`<div class="pk-side libnav" id=pk-side>` + u.pkSidebarLocked(s) + `</div>` +
-		`<div class=pk-main>` +
-		`<div class=pk-bar>` + pkNavBtnsLocked(s) + `<span id=pk-crumb>` + pkCrumbLocked(s) + `</span></div>` +
-		u.pkToolbarLocked(s) +
-		`<div class=pk-entries id=pk-entries>` + u.pkEntriesLocked(s) + `</div>` +
-		`</div></div>`
-	return modal(s.title, body, `<div id=pk-foot class=pk-foot-l>`+pkFootLocked(s)+`</div>`)
+	st := u.pkBrowseState(s)
+	s.mu.Unlock()
+	if zigui.Available() {
+		if h, ok := zigWire("RenderPkBrowseV2", wirePkBrowse(st), zigui.RenderPkBrowseV2,
+			zigui.RenderPkBrowse, func() []byte { return stateJSON(st) }); ok {
+			return h
+		}
+	}
+	return pkBrowseHTMLOf(st)
 }
 
-// pkPatchEntries re-renders just the entries + footer count fragment (no focus loss).
+// pkBrowseHTMLOf is the pure full-modal renderer.
+func pkBrowseHTMLOf(st pkBrowseSt) string {
+	body := `<div class=pk-wrap>` +
+		`<div class="pk-side libnav" id=pk-side>` + pkSidebarHTMLOf(st.Groups) + `</div>` +
+		`<div class=pk-main>` +
+		`<div class=pk-bar>` + pkNavBtnsHTML() + `<span id=pk-crumb>` + pkCrumbHTMLOf(st.Crumbs) + `</span></div>` +
+		pkToolbarHTMLOf(st) +
+		`<div class=pk-entries id=pk-entries>` + pkEntriesHTMLOf(st) + `</div>` +
+		`</div></div>`
+	return modal(st.Title, body, `<div id=pk-foot class=pk-foot-l>`+pkFootHTMLOf(st)+`</div>`)
+}
+
+// pkPatchEntries re-renders just the entries fragment (no focus loss) + scrolls the highlight in.
 func (u *UI) pkPatchEntries() {
 	s := u.pk()
 	s.mu.Lock()
@@ -41,9 +53,11 @@ func (u *UI) pkPatchEntries() {
 		s.mu.Unlock()
 		return
 	}
-	h := u.pkEntriesLocked(s)
+	st := pkBrowseSt{Grid: s.grid, ColName: i18n.T("picker.col.name"), ColMod: i18n.T("picker.col.modified"),
+		ColSize: i18n.T("picker.col.size"), ColType: i18n.T("picker.col.type")}
+	u.pkEntriesState(s, &st)
 	s.mu.Unlock()
-	u.eval("window.__patch('pk-entries'," + jsQuote(h) + ")")
+	u.eval("window.__patch('pk-entries'," + jsQuote(pkEntriesHTMLOf(st)) + ");var _h=document.getElementById('pk-hl');if(_h)_h.scrollIntoView({block:'nearest'})")
 }
 
 func (u *UI) pkPatchFoot() {
@@ -54,84 +68,48 @@ func (u *UI) pkPatchFoot() {
 		s.mu.Unlock()
 		return
 	}
-	h := pkFootLocked(s)
+	var st pkBrowseSt
+	st.Cancel = i18n.T("common.cancel")
+	pkFootState(s, &st)
 	s.mu.Unlock()
-	u.eval("window.__patch('pk-foot'," + jsQuote(h) + ")")
+	u.eval("window.__patch('pk-foot'," + jsQuote(pkFootHTMLOf(st)) + ")")
 }
 
 // ── sidebar ──
 
-func (u *UI) pkSidebarLocked(s *pkState) string {
+func pkSidebarHTMLOf(groups []pkGroupSt) string {
 	var b strings.Builder
-	// QUICK ACCESS - OS pinned + frequent folders
-	if qa := shellplaces.Places(); len(qa) > 0 {
-		b.WriteString(navHd(i18n.T("picker.group.quickAccess")))
-		n := 0
-		for _, p := range qa {
-			ic := "📌"
-			if !p.Pinned {
-				ic = "🕘"
+	for _, g := range groups {
+		b.WriteString(navHd(g.Header))
+		for _, r := range g.Rows {
+			if r.Unpin != "" {
+				cls := "libnav-it"
+				if r.On {
+					cls += " on"
+				}
+				b.WriteString(`<div class="` + cls + `"><span class=libnav-ic data-act="` + html.EscapeString(r.Act) + `">` + r.Icon +
+					`</span><span class=libnav-t data-act="` + html.EscapeString(r.Act) + `">` + html.EscapeString(r.Label) + `</span>` +
+					btn("✕", "ghost", r.Unpin, "") + `</div>`)
+				continue
 			}
-			b.WriteString(navIt("pk-nav:"+p.Path, ic, p.Name, "", strings.EqualFold(p.Path, s.dir)))
-			if n++; n >= pkSideQA {
-				break
-			}
-		}
-	}
-	// PLACES - known folders + drives
-	b.WriteString(navHd(i18n.T("picker.group.places")))
-	d := localmedia.Defaults()
-	for _, kv := range [][2]string{{"home", d.Home}, {"desktop", d.Desktop}, {"documents", d.Documents},
-		{"downloads", d.Downloads}, {"music", d.Music}, {"videos", d.Videos}, {"pictures", d.Pictures}} {
-		if kv[1] == "" {
-			continue
-		}
-		b.WriteString(navIt("pk-nav:"+kv[1], "⌂", i18n.T("library.browse."+kv[0]), "", strings.EqualFold(kv[1], s.dir)))
-	}
-	for _, dr := range libDrives() {
-		b.WriteString(navIt("pk-nav:"+dr, "💾", dr, "", strings.EqualFold(dr, s.dir)))
-	}
-	// RECENT - this app's last folders
-	if rec := u.pkRecent(); len(rec) > 0 {
-		b.WriteString(navHd(i18n.T("picker.group.recent")))
-		for _, r := range rec {
-			b.WriteString(navIt("pk-nav:"+r, "🕘", filepath.Base(r), "", strings.EqualFold(r, s.dir)))
-		}
-	}
-	// PINNED - the app's own bookmarks, unpin inline
-	if marks := u.libMarks(u.lib()).List(); len(marks) > 0 {
-		b.WriteString(navHd(i18n.T("library.nav.pinned")))
-		for _, m := range marks {
-			b.WriteString(pkPinRow(m, strings.EqualFold(m.Path, s.dir)))
+			b.WriteString(navIt(r.Act, r.Icon, r.Label, "", r.On))
 		}
 	}
 	return b.String()
 }
 
-// pkPinRow is a PINNED sidebar row with a trailing unpin ✕ (navIt has no trailing slot).
-func pkPinRow(m library.Bookmark, on bool) string {
-	cls := "libnav-it"
-	if on {
-		cls += " on"
-	}
-	return `<div class="` + cls + `"><span class=libnav-ic data-act="pk-nav:` + html.EscapeString(m.Path) + `">★</span>` +
-		`<span class=libnav-t data-act="pk-nav:` + html.EscapeString(m.Path) + `">` + html.EscapeString(m.Label) + `</span>` +
-		btn("✕", "ghost", "pk-unpin:"+m.Path, "") + `</div>`
-}
+// ── nav buttons + breadcrumb ──
 
-// ── breadcrumb + nav buttons ──
-
-func pkNavBtnsLocked(s *pkState) string {
+func pkNavBtnsHTML() string {
 	return btn("‹", "outline", "pk-back", "") + btn("›", "outline", "pk-fwd", "") + btn("↑", "outline", "pk-up", "")
 }
 
-func pkCrumbLocked(s *pkState) string {
+func pkCrumbHTMLOf(crumbs []pkCrumbSt) string {
 	var b strings.Builder
 	b.WriteString(`<span class=lib-crumb>`)
-	segs := pkCrumbSegs(s.dir)
-	for i, seg := range segs {
-		b.WriteString(btn(seg[0], "ghost", "pk-nav:"+seg[1], ""))
-		if i < len(segs)-1 {
+	for i, seg := range crumbs {
+		b.WriteString(btn(seg.Label, "ghost", seg.Act, ""))
+		if i < len(crumbs)-1 {
 			b.WriteString(`<span class=sep>›</span>`)
 		}
 	}
@@ -139,67 +117,25 @@ func pkCrumbLocked(s *pkState) string {
 	return b.String()
 }
 
-// pkCrumbSegs splits dir into (label, cumulative-path) breadcrumb parts.
-func pkCrumbSegs(dir string) [][2]string {
-	dir = filepath.Clean(dir)
-	vol := filepath.VolumeName(dir) // "C:" on win, "" on unix
-	rest := strings.TrimPrefix(dir, vol)
-	rest = strings.Trim(rest, `/\`)
-	var out [][2]string
-	root := vol + string(filepath.Separator)
-	rootLabel := vol
-	if rootLabel == "" {
-		rootLabel = "/"
-	}
-	out = append(out, [2]string{rootLabel, root})
-	if rest == "" {
-		return out
-	}
-	cur := root
-	for _, part := range strings.FieldsFunc(rest, func(r rune) bool { return r == '/' || r == '\\' }) {
-		cur = filepath.Join(cur, part)
-		out = append(out, [2]string{part, cur})
-	}
-	return out
-}
-
 // ── toolbar ──
 
-func (u *UI) pkToolbarLocked(s *pkState) string {
+func pkToolbarHTMLOf(st pkBrowseSt) string {
 	var b strings.Builder
 	b.WriteString(`<div class=pk-bar>`)
-	b.WriteString(`<span class=pk-path>` + fieldRaw("pk-goto", s.dir, i18n.T("picker.pathHint")) + `</span>`)
-	b.WriteString(fieldRaw("pk-search", s.search, i18n.T("picker.searchHint")))
+	b.WriteString(`<span class=pk-path>` + fieldRaw("pk-goto", st.PathVal, st.PathPH) + `</span>`)
+	b.WriteString(fieldRaw("pk-search", st.SearchVal, st.SearchPH))
 	b.WriteString(`</div>`)
 	b.WriteString(`<div class=pk-bar>`)
-	// sort chips
-	for _, sc := range [][2]string{{"name", i18n.T("picker.sort.name")}, {"modified", i18n.T("picker.sort.modified")},
-		{"size", i18n.T("picker.sort.size")}, {"type", i18n.T("picker.sort.type")}} {
-		lbl := sc[1]
-		if s.sortBy == sc[0] {
-			if s.sortDesc {
-				lbl += " ↓"
-			} else {
-				lbl += " ↑"
-			}
-		}
-		b.WriteString(fchip(lbl, "", "pk-sort:"+sc[0], s.sortBy == sc[0]))
+	for _, c := range st.Sorts {
+		b.WriteString(fchip(c.Label, "", c.Act, c.Active))
 	}
-	// view toggle
-	b.WriteString(`<span class=seg>` + fchip(i18n.T("picker.view.list"), "", "pk-view:list", !s.grid) +
-		fchip(i18n.T("picker.view.grid"), "", "pk-view:grid", s.grid) + `</span>`)
-	// hidden + pin
-	b.WriteString(fchip(i18n.T("picker.hidden"), "", "pk-hidden", s.hidden))
-	pinned := u.libMarks(u.lib()).Has(s.dir)
-	pinLbl := i18n.T("picker.pin")
-	if pinned {
-		pinLbl = i18n.T("picker.pinned")
-	}
-	b.WriteString(fchip(pinLbl, "", "pk-pin", pinned))
-	// filter toggle (only when the caller narrowed the type)
-	if len(s.filter.exts) > 0 && s.kind != "dir" {
-		b.WriteString(`<span class=seg>` + fchip(s.filter.label, "", "pk-filter:match", !s.filterAll) +
-			fchip(i18n.T("picker.allFiles"), "", "pk-filter:all", s.filterAll) + `</span>`)
+	b.WriteString(`<span class=seg>` + fchip(st.ViewList.Label, "", st.ViewList.Act, st.ViewList.Active) +
+		fchip(st.ViewGrid.Label, "", st.ViewGrid.Act, st.ViewGrid.Active) + `</span>`)
+	b.WriteString(fchip(st.Hidden.Label, "", st.Hidden.Act, st.Hidden.Active))
+	b.WriteString(fchip(st.Pin.Label, "", st.Pin.Act, st.Pin.Active))
+	if st.HasFilter {
+		b.WriteString(`<span class=seg>` + fchip(st.FilterOne.Label, "", st.FilterOne.Act, st.FilterOne.Active) +
+			fchip(st.FilterAll.Label, "", st.FilterAll.Act, st.FilterAll.Active) + `</span>`)
 	}
 	b.WriteString(`</div>`)
 	return b.String()
@@ -207,79 +143,70 @@ func (u *UI) pkToolbarLocked(s *pkState) string {
 
 // ── entries ──
 
-func (u *UI) pkEntriesLocked(s *pkState) string {
-	if s.listErr != "" {
-		return emptyState(i18n.T("picker.unreadable") + ": " + s.listErr)
-	}
-	vis, total := pkVisible(s)
-	if len(vis) == 0 {
-		return emptyState(i18n.T("picker.empty"))
+func pkEntriesHTMLOf(st pkBrowseSt) string {
+	if st.Empty != "" {
+		return emptyState(st.Empty)
 	}
 	var b strings.Builder
-	if s.grid {
-		b.WriteString(u.pkGridLocked(s, vis))
+	if st.Grid {
+		b.WriteString(pkGridHTMLOf(st.Entries))
 	} else {
-		b.WriteString(u.pkListLocked(s, vis))
+		b.WriteString(pkListHTMLOf(st))
 	}
-	if total > len(vis) {
-		b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("picker.showingNofM", i18n.A{"n": fmt.Sprint(len(vis)), "m": fmt.Sprint(total)})) + `</p>`)
+	if st.More != "" {
+		b.WriteString(`<p class=page-sub>` + html.EscapeString(st.More) + `</p>`)
 	}
 	return b.String()
 }
 
-func (u *UI) pkListLocked(s *pkState, vis []localmedia.Entry) string {
+func pkListHTMLOf(st pkBrowseSt) string {
 	var b strings.Builder
-	b.WriteString(`<div class=pk-cols><span>` + html.EscapeString(i18n.T("picker.col.name")) + `</span><span>` +
-		html.EscapeString(i18n.T("picker.col.modified")) + `</span><span>` + html.EscapeString(i18n.T("picker.col.size")) +
-		`</span><span>` + html.EscapeString(i18n.T("picker.col.type")) + `</span></div>`)
-	for _, e := range vis {
-		selCls, checkbox := "", ""
-		act := "pk-open:" + e.Path
-		if e.IsDirectory {
-			act = "pk-nav:" + e.Path
+	b.WriteString(`<div class=pk-cols><span>` + html.EscapeString(st.ColName) + `</span><span>` +
+		html.EscapeString(st.ColMod) + `</span><span>` + html.EscapeString(st.ColSize) +
+		`</span><span>` + html.EscapeString(st.ColType) + `</span></div>`)
+	for _, e := range st.Entries {
+		cls, attr := "pk-row", ""
+		if e.Sel {
+			cls += " sel"
 		}
-		if s.kind == "multi" && !e.IsDirectory {
+		if e.HL {
+			cls += " hl"
+			attr = ` id=pk-hl aria-selected=true`
+		}
+		cb := ""
+		if e.SelAct != "" {
 			ck := ""
-			if s.sel[e.Path] {
+			if e.Checked {
 				ck = " checked"
 			}
-			checkbox = `<input type=checkbox data-act="pk-sel:` + html.EscapeString(e.Path) + `"` + ck + `>`
+			cb = `<input type=checkbox data-act="` + html.EscapeString(e.SelAct) + `"` + ck + `>`
 		}
-		if (s.kind == "file" && s.selOne == e.Path) || (s.kind == "multi" && s.sel[e.Path]) {
-			selCls = " sel"
-		}
-		size := ""
-		if !e.IsDirectory {
-			size = humanSize(e.SizeBytes)
-		}
-		b.WriteString(`<div class="pk-row` + selCls + `" data-act="` + html.EscapeString(act) + `">` +
-			`<span class=pk-row-n>` + checkbox + `<span>` + pkGlyph(e) + `</span><span class=t>` + html.EscapeString(e.Name) + `</span></span>` +
-			`<span class=pk-row-m>` + html.EscapeString(pkShortMod(e.ModifiedAt)) + `</span>` +
-			`<span class=pk-row-s>` + html.EscapeString(size) + `</span>` +
-			`<span class=pk-row-k>` + html.EscapeString(pkTypeLabel(e)) + `</span></div>`)
+		b.WriteString(`<div class="` + cls + `" data-act="` + html.EscapeString(e.Act) + `"` + attr + `>` +
+			`<span class=pk-row-n>` + cb + `<span>` + e.Glyph + `</span><span class=t>` + html.EscapeString(e.Name) + `</span></span>` +
+			`<span class=pk-row-m>` + html.EscapeString(e.Modified) + `</span>` +
+			`<span class=pk-row-s>` + html.EscapeString(e.Size) + `</span>` +
+			`<span class=pk-row-k>` + html.EscapeString(e.Type) + `</span></div>`)
 	}
 	return b.String()
 }
 
-func (u *UI) pkGridLocked(s *pkState, vis []localmedia.Entry) string {
+func pkGridHTMLOf(entries []pkEntrySt) string {
 	var b strings.Builder
 	b.WriteString(`<div class=lib-grid>`)
-	for _, e := range vis {
-		act := "pk-open:" + e.Path
-		if e.IsDirectory {
-			act = "pk-nav:" + e.Path
+	for _, e := range entries {
+		cls, attr := "gcard", ""
+		if e.Sel {
+			cls += " pk-tile sel"
 		}
-		tileCls := "gcard"
-		if (s.kind == "file" && s.selOne == e.Path) || (s.kind == "multi" && s.sel[e.Path]) {
-			tileCls += " pk-tile sel"
+		if e.HL {
+			cls += " hl"
+			attr = ` id=pk-hl aria-selected=true`
 		}
-		ic := pkGlyph(e)
-		if e.Kind == "image" {
-			if url := u.imgURL(e.Path, 160); url != "" {
-				ic = `<img src="` + html.EscapeString(url) + `" loading=lazy alt="">`
-			}
+		ic := e.Glyph
+		if e.Img != "" {
+			ic = `<img src="` + html.EscapeString(e.Img) + `" loading=lazy alt="">`
 		}
-		b.WriteString(`<div class="` + tileCls + `" data-act="` + html.EscapeString(act) + `"><div class=gcard-ic>` + ic +
+		b.WriteString(`<div class="` + cls + `" data-act="` + html.EscapeString(e.Act) + `"` + attr + `><div class=gcard-ic>` + ic +
 			`</div><div class=gcard-t>` + html.EscapeString(e.Name) + `</div></div>`)
 	}
 	b.WriteString(`</div>`)
@@ -288,48 +215,75 @@ func (u *UI) pkGridLocked(s *pkState, vis []localmedia.Entry) string {
 
 // ── footer ──
 
-func pkFootLocked(s *pkState) string {
-	readout, primary := "", ""
-	switch s.kind {
-	case "dir":
-		readout = s.dir
-		primary = btn(i18n.T("picker.chooseFolder"), "primary", "pk-choose", "")
-	case "file":
-		readout = s.selOne
-		primary = btn(i18n.T("picker.choose"), "primary", "pk-choose", "")
-	case "multi":
-		readout = i18n.T("picker.selectedN", i18n.A{"n": fmt.Sprint(len(s.sel))})
-		primary = btn(i18n.T("picker.choose"), "primary", "pk-choose", "")
-	case "save":
-		ph := i18n.T("picker.filename")
-		if s.saveExt != "" {
-			ph = "*." + s.saveExt
-		}
-		readout = `<span class=pk-read>` + html.EscapeString(s.dir) + `</span>` + fieldRaw("pk-name", s.saveName, ph)
-		lbl := i18n.T("picker.save")
-		if s.confirmOW {
-			lbl = i18n.T("picker.overwrite")
-		}
-		primary = btn(lbl, "primary", "pk-choose", "")
-	}
+func pkFootHTMLOf(st pkBrowseSt) string {
 	var b strings.Builder
-	if s.kind != "save" {
-		b.WriteString(`<span class=pk-read>` + html.EscapeString(readout) + `</span>`)
+	if st.SaveMode {
+		b.WriteString(`<span class=pk-read>` + html.EscapeString(st.Readout) + `</span>` + fieldRaw("pk-name", st.SaveVal, st.SavePH))
 	} else {
-		b.WriteString(readout)
+		b.WriteString(`<span class=pk-read>` + html.EscapeString(st.Readout) + `</span>`)
 	}
-	if s.confirmOW {
-		b.WriteString(badge(i18n.T("picker.overwriteWarn"), "warning"))
+	if st.Badge != "" {
+		b.WriteString(badge(st.Badge, "warning"))
 	}
-	if pkNativeAvailable() {
-		b.WriteString(btn(i18n.T("picker.systemDialog"), "ghost", "pk-sys", ""))
+	if st.SysDialog != "" {
+		b.WriteString(btn(st.SysDialog, "ghost", "pk-sys", ""))
 	}
-	b.WriteString(btn(i18n.T("common.cancel"), "outline", "modal-close", ""))
-	b.WriteString(primary)
+	b.WriteString(btn(st.Cancel, "outline", "modal-close", ""))
+	b.WriteString(btn(st.Primary, "primary", "pk-choose", ""))
 	return b.String()
 }
 
-// ── entry helpers ──
+// ── entry helpers (shared with pick_browser_state.go) ──
+
+func pkGlyph(e localmedia.Entry) string {
+	switch e.Kind {
+	case "directory":
+		return "📁"
+	case "audio":
+		return "🎵"
+	case "video":
+		return "🎬"
+	case "image":
+		return "🖼"
+	default:
+		return "📄"
+	}
+}
+
+func pkTypeLabel(e localmedia.Entry) string {
+	if e.IsDirectory {
+		return i18n.T("picker.type.folder")
+	}
+	if e.Extension != "" {
+		return strings.ToUpper(e.Extension)
+	}
+	return i18n.T("picker.type.file")
+}
+
+func pkShortMod(rfc string) string {
+	if len(rfc) < 16 {
+		return rfc
+	}
+	return rfc[:10] + " " + rfc[11:16]
+}
+
+func humanSize(n int64) string {
+	const k = 1024
+	switch {
+	case n < k:
+		return fmt.Sprintf("%d B", n)
+	case n < k*k:
+		return fmt.Sprintf("%.0f KB", float64(n)/k)
+	case n < k*k*k:
+		return fmt.Sprintf("%.1f MB", float64(n)/(k*k))
+	default:
+		return fmt.Sprintf("%.1f GB", float64(n)/(k*k*k))
+	}
+}
+
+func pkNativeAvailable() bool { return nativePickerAvailable() }
+
+// ── visible-entry computation (filter + sort + cap); used by the resolver + keyboard nav ──
 
 // pkVisible filters (search + ext + dir-kind) and sorts the cached entries; returns the capped view
 // and the pre-cap total. Caller holds s.mu.
@@ -370,12 +324,34 @@ func extIn(ext string, exts []string) bool {
 	return false
 }
 
+// pkCrumbSegs splits dir into (label, cumulative-path) breadcrumb parts.
+func pkCrumbSegs(dir string) [][2]string {
+	dir = filepath.Clean(dir)
+	vol := filepath.VolumeName(dir) // "C:" on win, "" on unix
+	rest := strings.Trim(strings.TrimPrefix(dir, vol), `/\`)
+	root := vol + string(filepath.Separator)
+	rootLabel := vol
+	if rootLabel == "" {
+		rootLabel = "/"
+	}
+	out := [][2]string{{rootLabel, root}}
+	if rest == "" {
+		return out
+	}
+	cur := root
+	for _, part := range strings.FieldsFunc(rest, func(r rune) bool { return r == '/' || r == '\\' }) {
+		cur = filepath.Join(cur, part)
+		out = append(out, [2]string{part, cur})
+	}
+	return out
+}
+
 // sortEntries orders dirs-first, then by the chosen key/direction.
 func sortEntries(es []localmedia.Entry, by string, desc bool) {
 	sort.SliceStable(es, func(i, j int) bool {
 		a, b := es[i], es[j]
 		if a.IsDirectory != b.IsDirectory {
-			return a.IsDirectory // dirs always first
+			return a.IsDirectory
 		}
 		var less bool
 		switch by {
@@ -398,52 +374,3 @@ func sortEntries(es []localmedia.Entry, by string, desc bool) {
 		return less
 	})
 }
-
-func pkGlyph(e localmedia.Entry) string {
-	switch e.Kind {
-	case "directory":
-		return "📁"
-	case "audio":
-		return "🎵"
-	case "video":
-		return "🎬"
-	case "image":
-		return "🖼"
-	default:
-		return "📄"
-	}
-}
-
-func pkTypeLabel(e localmedia.Entry) string {
-	if e.IsDirectory {
-		return i18n.T("picker.type.folder")
-	}
-	if e.Extension != "" {
-		return strings.ToUpper(e.Extension)
-	}
-	return i18n.T("picker.type.file")
-}
-
-// pkShortMod trims an RFC3339 modified stamp to "YYYY-MM-DD HH:MM".
-func pkShortMod(rfc string) string {
-	if len(rfc) < 16 {
-		return rfc
-	}
-	return rfc[:10] + " " + rfc[11:16]
-}
-
-func humanSize(n int64) string {
-	const k = 1024
-	switch {
-	case n < k:
-		return fmt.Sprintf("%d B", n)
-	case n < k*k:
-		return fmt.Sprintf("%.0f KB", float64(n)/k)
-	case n < k*k*k:
-		return fmt.Sprintf("%.1f MB", float64(n)/(k*k))
-	default:
-		return fmt.Sprintf("%.1f GB", float64(n)/(k*k*k))
-	}
-}
-
-func pkNativeAvailable() bool { return nativePickerAvailable() }
