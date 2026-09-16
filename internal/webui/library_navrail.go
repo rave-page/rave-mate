@@ -17,6 +17,7 @@ import (
 
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/libdb"
+	"rave.page/mate/internal/shellplaces"
 )
 
 const libNavMaxRows = 80 // per group; megadirs / huge playlist sets stay scannable
@@ -76,6 +77,21 @@ func (u *UI) libNavCollection(st *libNavSt, s *libSt) {
 func (u *UI) libNavBrowse(st *libNavSt, s *libSt) {
 	dir := u.libDirOr()
 	home, _ := os.UserHomeDir()
+	// QUICK ACCESS: the OS pinned + frequent folders (shellplaces) - the SAME source the in-app
+	// picker's QUICK ACCESS group uses, so both hosts show the same system pins (pinned first).
+	if qa := shellplaces.Places(); len(qa) > 0 {
+		st.add(navHdRow(i18n.T("picker.group.quickAccess")))
+		for i, p := range qa {
+			if i >= libNavMaxRows {
+				break
+			}
+			ic := "📌"
+			if !p.Pinned {
+				ic = "🕘"
+			}
+			st.add(navItRow("lib-nav:"+p.Path, ic, p.Name, "", strings.EqualFold(p.Path, dir)))
+		}
+	}
 	st.add(navHdRow(i18n.T("library.nav.places")))
 	for _, q := range [][2]string{{"home", ""}, {"desktop", "Desktop"}, {"downloads", "Downloads"}, {"music", "Music"}, {"videos", "Videos"}, {"pictures", "Pictures"}} {
 		p := home
@@ -83,6 +99,13 @@ func (u *UI) libNavBrowse(st *libNavSt, s *libSt) {
 			p = filepath.Join(home, q[1])
 		}
 		st.add(navItRow("lib-nav:"+p, "⌂", i18n.T("library.browse."+q[0]), "", p == dir))
+	}
+	// RECENT: this app's last-visited folders (the SAME store the picker records + reads).
+	if rec := u.pkRecent(); len(rec) > 0 {
+		st.add(navHdRow(i18n.T("picker.group.recent")))
+		for _, r := range rec {
+			st.add(navItRow("lib-nav:"+r, "🕘", filepath.Base(r), "", strings.EqualFold(r, dir)))
+		}
 	}
 	if marks := u.libMarks(s).List(); len(marks) > 0 {
 		st.add(navHdRow(i18n.T("library.nav.pinned")))

@@ -36,10 +36,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"rave.page/mate/internal/libdb"
+	"rave.page/mate/internal/localmedia"
 	"rave.page/mate/internal/musiclib"
 )
 
@@ -393,24 +393,22 @@ func (u *UI) libBrowseEntries(s *libSt, dir string) (fes []libFe, errRead, ok bo
 				s.mu.Unlock()
 				return // dir untouched since the cached listing was read
 			}
-			entries, err := os.ReadDir(dir)
-			var out []libFe
-			for _, e := range entries {
-				name := e.Name()
-				if strings.HasPrefix(name, ".") {
-					continue
-				}
-				fi, serr := e.Info()
-				if serr != nil {
-					continue
-				}
-				out = append(out, libFe{name, filepath.Join(dir, name), libKind(name, fi.IsDir()), fi.IsDir(), fi.Size(), fi.ModTime()})
+			// One listing implementation: localmedia.ListDirectory (the same read that backs the
+			// picker + studio + remotectl), instead of a second os.ReadDir loop. Classification
+			// stays libKind so the Library's KIND filter + grid sub ("DIR", .aif/.wma as AUDIO) are
+			// byte-unchanged; the shared piece is the directory read, not the taxonomy.
+			lst := localmedia.ListDirectory(dir, false)
+			out := make([]libFe, 0, len(lst.Entries))
+			for _, e := range lst.Entries {
+				mod, _ := time.Parse(time.RFC3339, e.ModifiedAt)
+				out = append(out, libFe{e.Name, e.Path, libKind(e.Name, e.IsDirectory), e.IsDirectory, e.SizeBytes, mod})
 			}
+			readErr := lst.Error != ""
 			s.mu.Lock()
-			changed := s.browseDir != dir || s.browseErr != (err != nil) || !slices.Equal(s.browseFes, out)
+			changed := s.browseDir != dir || s.browseErr != readErr || !slices.Equal(s.browseFes, out)
 			s.browseBusy, s.browseReads = false, s.browseReads+1
 			s.browseDir, s.browseMod = dir, stamp
-			s.browseErr = err != nil
+			s.browseErr = readErr
 			s.browseFes = out
 			s.mu.Unlock()
 			if changed && !u.stopped() { // replace the placeholder / refresh a listing that moved
