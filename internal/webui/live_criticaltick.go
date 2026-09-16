@@ -35,6 +35,11 @@ func (u *UI) liveCriticalTick() {
 		// recorder armed/duration/file - the general tick's #live-rec-state, kept honest while streaming.
 		u.tickPatch(&js, "live-rec-state", html.EscapeString(ts.RecState))
 	}
+	// Route health / frozen-picture verdict: the single most streaming-critical fragment - a route
+	// freezes DURING a stream, and every rate/volume counter reads healthy while it does (P3).
+	if rs := u.liveRouteState(); len(rs.Rows) > 0 {
+		u.tickPatch(&js, "live-route", liveFrag("route", rs, wireLiveRoute, liveRouteFragHTML))
+	}
 	u.flushTick(&js)
 	u.freezeAbleLink() // P5: stop the client rAF phrase-bar loop the gated-shut general push left running
 }

@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash         uint32 = 0xe99d534a
+	wireSchemaHash         uint32 = 0x023a496b
 	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -119,6 +119,7 @@ const (
 	wireMsgEdvReframe      uint16 = 115 // Editor video reframe/area-select modal body
 	wireMsgEdvFrame        uint16 = 116 // reframe modal frame block (#edv-frame inner)
 	wireMsgVrcEmotes       uint16 = 117 // #vrc-emotes animated-emoji flipbook creator (visual: player+trim, crop, filmstrip, preview)
+	wireMsgLiveRoute       uint16 = 125 // #live-route fragment (route-health / frozen-picture landmark)
 )
 
 func (v agApp) encodeWire(w *zigui.WireWriter) {
@@ -256,6 +257,10 @@ func (v liveSignalsSt) encodeWire(w *zigui.WireWriter) {
 	w.List(1, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
 }
 
+func (v liveRouteSt) encodeWire(w *zigui.WireWriter) {
+	w.List(1, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
 func (v liveCockpitRow) encodeWire(w *zigui.WireWriter) {
 	w.Str(1, v.Variant)
 	w.Str(2, v.Name)
@@ -358,6 +363,9 @@ func (v liveState) encodeWire(w *zigui.WireWriter) {
 	w.Str(36, v.GroupDecks)
 	w.Str(37, v.GroupSignals)
 	w.Str(38, v.GroupSystem)
+	w.Bool(39, v.HasRoute)
+	w.Str(40, v.RouteTitle)
+	w.Struct(41, func() { v.Route.encodeWire(w) })
 }
 
 func (v moCamRow) encodeWire(w *zigui.WireWriter) {
@@ -4751,6 +4759,13 @@ func wireVrcEmotes(v vrcEmotesSt) []byte {
 	return w.Finish()
 }
 
+// wireLiveRoute encodes liveRouteSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireLiveRoute(v liveRouteSt) []byte {
+	w := zigui.NewWireWriter(wireMsgLiveRoute, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
 // ── retained-doc delta channel (B7 increment ii; internal/zigui/wiregen/retain.go) ──
 //
 // hashWire/wireEq/deltaWire exist only for the messages reachable from a retain-flagged
@@ -5371,6 +5386,39 @@ func (v liveSignalsSt) deltaWire(w *zigui.WireWriter, prev *liveSignalsSt) {
 	}
 }
 
+func (v liveRouteSt) hashWire(h *zigui.WireHasher) {
+	h.List(1, len(v.Rows))
+	for i := range v.Rows {
+		v.Rows[i].hashWire(h)
+	}
+}
+
+func (v liveRouteSt) wireEq(o *liveRouteSt) bool {
+	if len(v.Rows) != len(o.Rows) {
+		return false
+	}
+	for i0 := range v.Rows {
+		if !v.Rows[i0].wireEq(&o.Rows[i0]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (v liveRouteSt) deltaWire(w *zigui.WireWriter, prev *liveRouteSt) {
+	chg0 := len(v.Rows) != len(prev.Rows)
+	for i0 := 0; !chg0 && i0 < len(v.Rows); i0++ {
+		chg0 = !v.Rows[i0].wireEq(&prev.Rows[i0])
+	}
+	if chg0 {
+		if len(v.Rows) == 0 {
+			w.Clear(1)
+		} else {
+			w.List(1, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+		}
+	}
+}
+
 func (v liveCockpitRow) hashWire(h *zigui.WireHasher) {
 	h.Str(1, v.Variant)
 	h.Str(2, v.Name)
@@ -5887,6 +5935,10 @@ func (v liveState) hashWire(h *zigui.WireHasher) {
 	h.Str(36, v.GroupDecks)
 	h.Str(37, v.GroupSignals)
 	h.Str(38, v.GroupSystem)
+	h.Bool(39, v.HasRoute)
+	h.Str(40, v.RouteTitle)
+	h.Sub(41)
+	v.Route.hashWire(h)
 }
 
 func (v liveState) wireEq(o *liveState) bool {
@@ -6014,6 +6066,15 @@ func (v liveState) wireEq(o *liveState) bool {
 		return false
 	}
 	if v.GroupSystem != o.GroupSystem {
+		return false
+	}
+	if v.HasRoute != o.HasRoute {
+		return false
+	}
+	if v.RouteTitle != o.RouteTitle {
+		return false
+	}
+	if !v.Route.wireEq(&o.Route) {
 		return false
 	}
 	return true
@@ -6232,6 +6293,21 @@ func (v liveState) deltaWire(w *zigui.WireWriter, prev *liveState) {
 			w.Str(38, v.GroupSystem)
 		}
 	}
+	if v.HasRoute != prev.HasRoute {
+		if !v.HasRoute {
+			w.Clear(39)
+		} else {
+			w.Bool(39, v.HasRoute)
+		}
+	}
+	if v.RouteTitle != prev.RouteTitle {
+		if v.RouteTitle == "" {
+			w.Clear(40)
+		} else {
+			w.Str(40, v.RouteTitle)
+		}
+	}
+	w.Struct(41, func() { v.Route.deltaWire(w, &prev.Route) })
 }
 
 func (v uiBtn) hashWire(h *zigui.WireHasher) {

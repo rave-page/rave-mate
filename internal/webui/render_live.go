@@ -11,6 +11,7 @@ import (
 
 	"rave.page/mate/internal/audiorec"
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/peerbridge"
 	"rave.page/mate/internal/session"
 	"rave.page/mate/internal/zigui"
@@ -100,6 +101,11 @@ type liveSignalsSt struct {
 	Rows []liveKV `json:"rows"`
 }
 
+// liveRouteSt is the route-health / frozen-picture landmark (one status row per live media route).
+type liveRouteSt struct {
+	Rows []liveSRow `json:"rows"`
+}
+
 // liveCockpitRow is one OBS instance row.
 type liveCockpitRow struct {
 	Variant   string `json:"variant"`
@@ -172,6 +178,9 @@ type liveState struct {
 	HasCockpit   bool            `json:"hasCockpit"`
 	CockpitTitle string          `json:"cockpitTitle"`
 	Cockpit      liveCockpitSt   `json:"cockpit"`
+	HasRoute     bool            `json:"hasRoute"`
+	RouteTitle   string          `json:"routeTitle"`
+	Route        liveRouteSt     `json:"route"`
 	HasLink      bool            `json:"hasLink"`
 	LinkTitle    string          `json:"linkTitle"`
 	Link         liveLinkSt      `json:"link"`
@@ -207,6 +216,7 @@ func (u *UI) liveState() liveState {
 		DecksTitle: i18n.T("live.decks.title"), Decks: u.liveDecksState(),
 		Signals:      liveSignalsSt{Rows: []liveKV{}},
 		Cockpit:      liveCockpitSt{Rows: []liveCockpitRow{}},
+		Route:        liveRouteSt{Rows: []liveSRow{}},
 		Link:         liveLinkSt{Sources: []liveSRow{}},
 		Strip:        u.liveStripState(),
 		GroupStream:  i18n.T("live.group.stream"),
@@ -221,6 +231,11 @@ func (u *UI) liveState() liveState {
 	if u.svc.OBSControl != nil {
 		st.HasCockpit, st.CockpitTitle = true, i18n.T("live.cockpit.title")
 		st.Cockpit = u.liveCockpitState()
+	}
+	// Route health only appears when a media route is actually live - the "is the picture frozen"
+	// landmark (P3) has nothing to say otherwise.
+	if rs := u.liveRouteState(); len(rs.Rows) > 0 {
+		st.HasRoute, st.RouteTitle, st.Route = true, i18n.T("live.route.title"), rs
 	}
 	if u.svc.AbleLink != nil {
 		st.HasLink, st.LinkTitle = true, i18n.T("live.ablelink.title")
@@ -268,6 +283,10 @@ func liveHTML(st liveState) string {
 	if st.HasCockpit {
 		b.WriteString(liveSubLabel(st.CockpitTitle, ""))
 		b.WriteString(`<div id=live-cockpit>` + liveCockpitFragHTML(st.Cockpit) + `</div>`)
+	}
+	if st.HasRoute {
+		b.WriteString(liveSubLabel(st.RouteTitle, ""))
+		b.WriteString(`<div id=live-route>` + liveRouteFragHTML(st.Route) + `</div>`)
 	}
 	b.WriteString(`</section>`)
 
@@ -973,6 +992,70 @@ func liveCockpitFragHTML(st liveCockpitSt) string {
 		b.WriteString(`<div class=row><span class=row-label>` + dot(r.Variant) + ` ` + html.EscapeString(r.Name) +
 			` <span class=np-artist>` + html.EscapeString(r.State) + `</span></span>` +
 			btnRow(btn(r.StreamLbl, "outline", r.StreamAct, ""), btn(r.RecLbl, "outline", r.RecAct, "")) + `</div>`)
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// ── route health / frozen-picture landmark (P3) ──
+
+// liveRouteState resolves one status row per live media route: "is the picture live, or frozen?".
+// Lifted compact from the Peers panel (fmtPipeLine/fmtContentLine) - the same PubStalledMs oracle
+// the full route panel uses, because every rate/volume counter reads healthy on a frozen picture.
+func (u *UI) liveRouteState() liveRouteSt {
+	st := liveRouteSt{Rows: []liveSRow{}}
+	if u.svc.Media == nil {
+		return st
+	}
+	stats := u.svc.Media.Stats()
+	if len(stats) == 0 {
+		return st
+	}
+	byNode := map[string]string{}
+	for _, c := range u.peerConns() {
+		byNode[c.NodeID] = c.Nickname
+	}
+	resolve := func(id string) string { return peerName(byNode[id], id) }
+	sort.Slice(stats, func(i, j int) bool { return stats[i].Session < stats[j].Session })
+	for _, s := range stats {
+		st.Rows = append(st.Rows, liveRouteRow(s, resolve))
+	}
+	return st
+}
+
+// liveRouteRow is the compact per-route verdict: dot (health) + direction/peer + "fps · verdict".
+// Frozen picture is the headline (published frames + fps read healthy while one bit-identical frame
+// ships forever), then a degrade reason, then real (non-cap) drops; else "live".
+func liveRouteRow(s medialink.RouteStat, resolve func(string) string) liveSRow {
+	arrow := "◂"
+	if s.Direction == "send" {
+		arrow = "▸"
+	}
+	variant, verdict := "success", i18n.T("live.route.live")
+	if p := s.Pipe; p != nil {
+		switch {
+		case p.PubFrames > 0 && p.PubStalledMs >= frozenPictureMs:
+			variant, verdict = "error", i18n.T("live.route.frozen", i18n.A{"secs": fmt.Sprintf("%.0f", float64(p.PubStalledMs)/1000)})
+		case p.DegradeReason != "":
+			variant, verdict = "warning", i18n.T("live.route.degraded", i18n.A{"reason": p.DegradeReason})
+		case p.RealDrops() > 0:
+			variant, verdict = "warning", i18n.T("live.route.dropping", i18n.A{"n": fmt.Sprint(p.RealDrops())})
+		}
+	}
+	line := i18n.T("live.route.line", i18n.A{"fps": fmt.Sprintf("%.0f", s.WireFPS), "verdict": verdict})
+	return liveSR(variant, arrow+" "+resolve(s.Peer), line)
+}
+
+func (u *UI) routeHealthHTML() string {
+	return liveFrag("route", u.liveRouteState(), wireLiveRoute, liveRouteFragHTML)
+}
+
+// liveRouteFragHTML is the pure route-health renderer (one statusRow per route).
+func liveRouteFragHTML(st liveRouteSt) string {
+	var b strings.Builder
+	b.WriteString(`<div class="rp-card">`)
+	for _, r := range st.Rows {
+		b.WriteString(liveStatusRow(r))
 	}
 	b.WriteString(`</div>`)
 	return b.String()

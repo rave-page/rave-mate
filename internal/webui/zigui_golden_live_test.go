@@ -42,6 +42,7 @@ func liveFixtures() map[string]liveState {
 			}},
 			Signals:     liveSignalsSt{Rows: []liveKV{}},
 			Cockpit:     liveCockpitSt{Rows: []liveCockpitRow{}},
+			Route:       liveRouteSt{Rows: []liveSRow{}},
 			Link:        liveLinkSt{Sources: []liveSRow{}},
 			Strip:       liveStripSt{},
 			GroupStream: "Stream & picture", GroupDecks: "Decks",
@@ -95,6 +96,11 @@ func liveFixtures() map[string]liveState {
 			{Variant: "success", Name: "vj-box", State: "Ready",
 				StreamLbl: "Start stream", StreamAct: "obs-stream:n2", RecLbl: "Stop recording", RecAct: "obs-record:n2"},
 		}}
+	populated.HasRoute, populated.RouteTitle = true, "Picture"
+	populated.Route = liveRouteSt{Rows: []liveSRow{
+		liveSR("error", "▸ vj-box", "38 fps · picture frozen 5s"),
+		liveSR("success", "◂ studio-pc", "60 fps · live"),
+	}}
 	populated.Link = liveLinkSt{Available: true, Fill: pbarPct(37.5), Cap: "Beat 7 / 16",
 		Session: liveSR("success", "Session", "128.0 BPM · 2 peers · enabled"), ResyncLbl: "Resync",
 		Sources: []liveSRow{
@@ -147,6 +153,8 @@ func liveFixtures() map[string]liveState {
 		{Variant: "error", Name: `stu&dio "pc" <1>`, State: `Str&eaming <6000>`,
 			StreamLbl: `Sto&p "stream"`, StreamAct: `obs-stream:n&"1'<>`, RecLbl: `St&art rec"`, RecAct: `obs-record:n&"1'<>`},
 	}}
+	escaping.HasRoute, escaping.RouteTitle = true, `Pi&cture <"x">`
+	escaping.Route = liveRouteSt{Rows: []liveSRow{liveSR("error", `▸ vj&-box "1"`, `38 fps · fro&zen <5>s`)}}
 	escaping.Link = liveLinkSt{Available: true, Fill: pbarPct(100.126), Cap: `Be&at 7 / <16>`,
 		Session: liveSR(`success`, `Se&ssion "x"`, `128.0 & <"enabled">`), ResyncLbl: `Re&sync<>`,
 		Sources: []liveSRow{liveSR("error", `so&urce "1"`, `error: <not found> & "x" · err -3ms · 0 corr/min`)}}
@@ -228,6 +236,7 @@ func TestZigLiveGolden(t *testing.T) {
 			assertFrag(t, "decks", st.Decks, liveDecksFragHTML)
 			assertFrag(t, "signals", st.Signals, liveSignalsFragHTML)
 			assertFrag(t, "cockpit", st.Cockpit, liveCockpitFragHTML)
+			assertFrag(t, "route", st.Route, liveRouteFragHTML)
 			assertFrag(t, "link", st.Link, liveLinkFragHTML)
 			assertFrag(t, "graph", st.Net, liveGraphFragHTML)
 			assertFrag(t, "graph", st.Tim, liveGraphFragHTML)

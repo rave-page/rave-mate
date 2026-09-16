@@ -130,6 +130,9 @@ func (u *UI) liveTickLegacy(js *strings.Builder, st liveTickSt) {
 	if st.Live.HasCockpit {
 		u.tickPatch(js, "live-cockpit", liveFrag("cockpit", st.Live.Cockpit, wireLiveCockpit, liveCockpitFragHTML))
 	}
+	if st.Live.HasRoute {
+		u.tickPatch(js, "live-route", liveFrag("route", st.Live.Route, wireLiveRoute, liveRouteFragHTML))
+	}
 	if st.Live.HasLink {
 		u.tickPatch(js, "live-ablelink", liveFrag("link", st.Live.Link, wireLiveLink, liveLinkFragHTML))
 	}

@@ -55,6 +55,9 @@ func legacyLiveFrags(st liveTickSt, zig bool) []zigui.Frag {
 	if l.HasCockpit {
 		frag("live-cockpit", "cockpit", wireLiveCockpit(l.Cockpit), liveCockpitFragHTML(l.Cockpit))
 	}
+	if l.HasRoute {
+		frag("live-route", "route", wireLiveRoute(l.Route), liveRouteFragHTML(l.Route))
+	}
 	if l.HasLink {
 		frag("live-ablelink", "link", wireLiveLink(l.Link), liveLinkFragHTML(l.Link))
 	}

@@ -77,6 +77,10 @@ pub const Signals = struct {
     rows: []const KV = &.{},
 };
 
+pub const Route = struct {
+    rows: []const SRow = &.{},
+};
+
 pub const CockpitRow = struct {
     variant: []const u8 = "",
     name: []const u8 = "",
@@ -142,6 +146,9 @@ pub const State = struct {
     hasCockpit: bool = false,
     cockpitTitle: []const u8 = "",
     cockpit: Cockpit = .{},
+    hasRoute: bool = false,
+    routeTitle: []const u8 = "",
+    route: Route = .{},
     hasLink: bool = false,
     linkTitle: []const u8 = "",
     link: Link = .{},
@@ -196,6 +203,12 @@ pub fn render(h: *Html, s: State) !void {
         try subLabel(h, s.cockpitTitle, "");
         try h.raw("<div id=live-cockpit>");
         try renderCockpit(h, s.cockpit);
+        try h.raw("</div>");
+    }
+    if (s.hasRoute) {
+        try subLabel(h, s.routeTitle, "");
+        try h.raw("<div id=live-route>");
+        try renderRoute(h, s.route);
         try h.raw("</div>");
     }
     try h.raw("</section>");
@@ -376,6 +389,13 @@ pub fn renderSignals(h: *Html, s: Signals) !void {
         try h.esc(r.v);
         try h.raw("</span></div>");
     }
+    try h.raw("</div>");
+}
+
+/// renderRoute mirrors Go liveRouteFragHTML (#live-route; one statusRow per live media route).
+pub fn renderRoute(h: *Html, s: Route) !void {
+    try h.raw("<div class=\"rp-card\">");
+    for (s.rows) |r| try statusRow(h, r);
     try h.raw("</div>");
 }
 

@@ -1988,6 +1988,14 @@
       "tooltip": "Throughput, last 2 min - PEER = LAN peer link, API = rave.page; SESSION = totals since launch",
       "upRate": "↑ {rate}"
     },
+    "route": {
+      "degraded": "degraded: {reason}",
+      "dropping": "{n} dropped",
+      "frozen": "picture frozen {secs}s",
+      "line": "{fps} fps · {verdict}",
+      "live": "live",
+      "title": "Picture / route health"
+    },
     "nowPlaying": {
       "line2": "DECK {deck}    {elapsed} / {total}",
       "noTrack": "- NO TRACK ON AIR -"

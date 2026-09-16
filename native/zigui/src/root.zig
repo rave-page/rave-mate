@@ -88,6 +88,7 @@ export fn rz_ui_render_live_frag(kind: ?[*]const u8, kind_len: usize, state_json
     if (std.mem.eql(u8, k, "decks")) return renderJSON(live.Decks, live.renderDecks, state_json, len, out_len);
     if (std.mem.eql(u8, k, "signals")) return renderJSON(live.Signals, live.renderSignals, state_json, len, out_len);
     if (std.mem.eql(u8, k, "cockpit")) return renderJSON(live.Cockpit, live.renderCockpit, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "route")) return renderJSON(live.Route, live.renderRoute, state_json, len, out_len);
     if (std.mem.eql(u8, k, "link")) return renderJSON(live.Link, live.renderLink, state_json, len, out_len);
     if (std.mem.eql(u8, k, "graph")) return renderJSON(live.Graph, live.renderGraph, state_json, len, out_len);
     if (std.mem.eql(u8, k, "perf")) return renderJSON(live.Perf, live.renderPerf, state_json, len, out_len);
@@ -829,6 +830,7 @@ export fn rz_ui_render_live_frag_v2(kind: ?[*]const u8, kind_len: usize, state: 
     if (std.mem.eql(u8, k, "decks")) return renderWire(live.Decks, wire_gen.decodeLiveDecks, live.renderDecks, wire_gen.msg_live_decks, state, len, out_len);
     if (std.mem.eql(u8, k, "signals")) return renderWire(live.Signals, wire_gen.decodeLiveSignals, live.renderSignals, wire_gen.msg_live_signals, state, len, out_len);
     if (std.mem.eql(u8, k, "cockpit")) return renderWire(live.Cockpit, wire_gen.decodeLiveCockpit, live.renderCockpit, wire_gen.msg_live_cockpit, state, len, out_len);
+    if (std.mem.eql(u8, k, "route")) return renderWire(live.Route, wire_gen.decodeLiveRoute, live.renderRoute, wire_gen.msg_live_route, state, len, out_len);
     if (std.mem.eql(u8, k, "link")) return renderWire(live.Link, wire_gen.decodeLiveLink, live.renderLink, wire_gen.msg_live_link, state, len, out_len);
     if (std.mem.eql(u8, k, "graph")) return renderWire(live.Graph, wire_gen.decodeLiveGraph, live.renderGraph, wire_gen.msg_live_graph, state, len, out_len);
     if (std.mem.eql(u8, k, "perf")) return renderWire(live.Perf, wire_gen.decodeLivePerf, live.renderPerf, wire_gen.msg_live_perf, state, len, out_len);
