@@ -1,13 +1,13 @@
 {
-  "version": "nightly-aa6d8b8",
-  "build": 332,
-  "commit": "aa6d8b8",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-332-20260916-aa6d8b8.exe",
-  "sha256": "302a0c5baedf35f75f72cd44d1889b682a39618cf036bdc7b0f7c80085120562",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-332-20260916-aa6d8b8.exe",
-  "installer_sha256": "1d9bf4a92acfb47a3145e468163497c974212ff8cda744b148de76722a6be1be",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-332-20260916-aa6d8b8",
-  "linux_sha256": "3acdeff0bae495621590b64f93488d1f362db985267c68da6cb9611c70c39485",
+  "version": "nightly-580be06",
+  "build": 333,
+  "commit": "580be06",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-333-20260916-580be06.exe",
+  "sha256": "23dd4fa6bb0c8e4946f804999d66c9da4ab350f93a8460cc47c0306ad1206b0b",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-333-20260916-580be06.exe",
+  "installer_sha256": "95b8d620581034ff23332a81a13fb94faec0641959fd42d1a34a5c87964ffccb",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-333-20260916-580be06",
+  "linux_sha256": "b010aa09472b6f751f4b2eb1b1a717f2ce0e3b86a8e79942281fa89bdda87df1",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-09-16T00:20:19Z",
-  "notes": "Merge branch 'worktree-agent-a17f1c65ff03c8b7a' into development"
+  "released": "2026-09-16T04:08:19Z",
+  "notes": "webui(live): VRAM meter + governor tier in SYSTEM (P7)"
 }
