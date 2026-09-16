@@ -70,9 +70,27 @@ type Bus struct {
 	broadcast func(payload []byte)                // send to all peers (nil = local-only)
 	sendTo    func(nodeID string, payload []byte) // send to one peer (nil = local-only)
 
+	// Outbound frames leave in seq order. Peers dedup by per-origin monotonic seq and drop a lower
+	// seq that arrives after a higher one as a reorder - for good - so seq allocation and the
+	// transport hand-off must not race across publishers (a status broadcast once overtook a
+	// webcam command and the command was lost). Frames are queued under mu as their seq is
+	// allocated and drained by one goroutine at a time. Bounded: txCap frames, drop-OLDEST (a seq
+	// gap is accepted by peers; a reorder is not), so a wedged transport cannot grow memory.
+	txq      []outFrame
+	draining bool
+
 	// cumulative publish-path counters (Stats - perfmon probe)
-	nPub, nInbound, nDup, nRelayed uint64
+	nPub, nInbound, nDup, nRelayed, nTxDropped uint64
 }
+
+// outFrame is a marshalled envelope waiting for the transport; to="" = broadcast, else directed.
+type outFrame struct {
+	raw []byte
+	to  string
+}
+
+// txCap bounds the outbound queue in frames (each a small JSON envelope; media never rides the bus).
+const txCap = 4096
 
 // New builds a local-only bus for the given node id. Call SetTransport to make it networked.
 func New(log *logbus.Bus, selfNodeID string) *Bus {
@@ -147,15 +165,60 @@ func (b *Bus) Publish(topic string, data json.RawMessage) {
 	b.nPub++
 	env := Envelope{Topic: topic, Origin: b.self, Epoch: b.epoch, Seq: b.seq, Data: data}
 	b.noteSelfLocked() // drop our own echo if a peer relays it back
-	bc := b.broadcast
+	queued := b.broadcast != nil && b.enqueueLocked(env, "")
 	b.mu.Unlock()
 
 	b.fanout(Event{Topic: topic, Origin: b.self, Local: true, Data: data})
-	if bc != nil {
-		if raw, err := json.Marshal(env); err == nil {
-			bc(raw)
-		}
+	if queued {
+		b.drain()
 	}
+}
+
+// enqueueLocked marshals env onto the ordered outbound queue (to="" broadcast, else directed),
+// dropping the oldest frame past txCap. Caller holds b.mu - that is what pins queue order to seq
+// order.
+func (b *Bus) enqueueLocked(env Envelope, to string) bool {
+	raw, err := json.Marshal(env)
+	if err != nil {
+		return false
+	}
+	if len(b.txq) >= txCap {
+		b.txq[0] = outFrame{}
+		b.txq = b.txq[1:]
+		b.nTxDropped++
+	}
+	b.txq = append(b.txq, outFrame{raw: raw, to: to})
+	return true
+}
+
+// drain hands queued frames to the transport in order, one drainer at a time: a publisher that
+// finds a drainer active returns at once (that drainer sends its frame after the one in flight),
+// so a subscriber publishing from inside a delivery neither deadlocks nor overtakes an earlier
+// frame. The transport callback runs with mu released.
+func (b *Bus) drain() {
+	b.mu.Lock()
+	if b.draining {
+		b.mu.Unlock()
+		return
+	}
+	b.draining = true
+	for len(b.txq) > 0 {
+		f := b.txq[0]
+		b.txq[0] = outFrame{}
+		b.txq = b.txq[1:]
+		bc, st := b.broadcast, b.sendTo
+		b.mu.Unlock()
+		switch {
+		case f.to == "" && bc != nil:
+			bc(f.raw)
+		case f.to != "" && st != nil:
+			st(f.to, f.raw)
+		}
+		b.mu.Lock()
+	}
+	b.draining = false
+	b.txq = nil // idle: release the backing array
+	b.mu.Unlock()
 }
 
 // maxRetiredEpochs caps the per-origin superseded-epoch memory (bounds a peer's restart history).
@@ -240,8 +303,8 @@ func (b *Bus) Stats() string {
 	for _, m := range b.subs {
 		subs += len(m)
 	}
-	return fmt.Sprintf("published=%d inbound=%d dupDropped=%d relayed=%d topics=%d subscribers=%d",
-		b.nPub, b.nInbound, b.nDup, b.nRelayed, len(b.subs), subs)
+	return fmt.Sprintf("published=%d inbound=%d dupDropped=%d relayed=%d txDropped=%d topics=%d subscribers=%d",
+		b.nPub, b.nInbound, b.nDup, b.nRelayed, b.nTxDropped, len(b.subs), subs)
 }
 
 // SetLocalCaps replaces the full capability list this node owns, then advertises.
@@ -281,18 +344,17 @@ func (b *Bus) RemoveCap(capability string) {
 // Advertise broadcasts this node's capability list (called on cap change + peer-state change).
 func (b *Bus) Advertise() {
 	b.mu.Lock()
-	caps := append([]string(nil), b.localCap...)
-	bc := b.broadcast
-	if bc == nil {
+	if b.broadcast == nil {
 		b.mu.Unlock()
 		return
 	}
 	b.seq++
-	env := Envelope{Topic: TopicCaps, Origin: b.self, Epoch: b.epoch, Seq: b.seq, Caps: caps}
+	env := Envelope{Topic: TopicCaps, Origin: b.self, Epoch: b.epoch, Seq: b.seq, Caps: append([]string(nil), b.localCap...)}
 	b.noteSelfLocked()
+	queued := b.enqueueLocked(env, "")
 	b.mu.Unlock()
-	if raw, err := json.Marshal(env); err == nil {
-		bc(raw)
+	if queued {
+		b.drain()
 	}
 }
 
@@ -334,22 +396,22 @@ func (b *Bus) PeerCaps() map[string][]string {
 func (b *Bus) SendToCapability(capability, topic string, data json.RawMessage) int {
 	owners := b.Owners(capability)
 	b.mu.Lock()
+	if b.sendTo == nil {
+		b.mu.Unlock()
+		return 0
+	}
 	b.seq++
 	env := Envelope{Topic: topic, Origin: b.self, Epoch: b.epoch, Seq: b.seq, Data: data}
 	b.noteSelfLocked()
-	send := b.sendTo
-	b.mu.Unlock()
-	if send == nil {
-		return 0
-	}
-	raw, err := json.Marshal(env)
-	if err != nil {
-		return 0
-	}
 	n := 0
 	for _, node := range owners {
-		send(node, raw)
-		n++
+		if b.enqueueLocked(env, node) {
+			n++
+		}
+	}
+	b.mu.Unlock()
+	if n > 0 {
+		b.drain()
 	}
 	return n
 }
