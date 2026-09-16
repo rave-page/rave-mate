@@ -27,6 +27,8 @@ the Go helper that emits it. Tokens live in `assets/ds/colors_and_type.css`.
 | Search field | `.rp-field` | per-surface input + debounced action (`settingsSearchInput`, `logSetSearch`, `wsGroupSearch`) | the recipe is canonical; wire the input to a `search:`-style act |
 | Empty state | `.rp-empty` (+ `__icon`/`__title`/`__desc`) | `emptyState(msg)` (`components.go`) | every list gets one — what's missing + next step (P2), never a bare blank |
 | Stat / metric | `.rp-stat` / `.rp-stats-grid` | inline over the recipe | a counter only where the number IS the answer (P7); else draw a shape |
+| Meter (magnitude bar) | `.rp-meter` (+ `__label`/`__track`/`__fill`/`__tick`/`__val`) | `meterHTML` (`components.go`), `c.meter` (`components.zig`) | single hue, length = magnitude, optional threshold tick, tabular readout (P7); width/tick pre-formatted Go-side |
+| Sparkline / small multiples | `.spark` / `.sparkmulti` (`.spark-row`/`.spark-lbl`) | `sparklineSVG`, `sparkMultiHTML` (`render_live.go`) | one spark per series, single brand hue, identity by row+label — never an overlaid multi-hue chart (P4) |
 | File / dir browser | `common.browse` ghost `.rp-btn` + path field | `pick-dir:<target>` / `pick-file:<target>` acts → `internal/localmedia` | the in-app browser (NOT a native OS dialog); reused by automations, run-now, video editor — reuse it, never re-roll |
 | Toast / notify | in-page toast recipe / OS notify | `u.toast(msg)`, `u.Notify(title, body)` (`ui.go`) | in-page for transient; `Notify` for OS-level |
 | Avatar | `.rp-avatar` / `.rp-avatars` | inline over the recipe | circular, soft border |

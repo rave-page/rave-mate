@@ -268,6 +268,38 @@ func statusRow(variant, label, line string) string {
 	return statusRowDL(variant, label, strings.ToLower(label), line)
 }
 
+// meterSt is a resolved .rp-meter: a horizontal magnitude bar in the single brand hue. Width/Tick are
+// pre-formatted percentages Go-side (the Zig twin never formats a float); Tick "" = no threshold mark.
+type meterSt struct {
+	Label string
+	Val   string // tabular readout (the number that IS the answer, P7)
+	Width string // fill width, e.g. "12.5%"
+	Tick  string // threshold position, e.g. "80%"; "" = none
+}
+
+// meterHTML renders the .rp-meter recipe: label · single-hue bar (length = magnitude) · optional
+// threshold tick · tabular readout. The ONE magnitude-bar capability (P7); never a per-call colour.
+func meterHTML(m meterSt) string {
+	tick := ""
+	if m.Tick != "" {
+		tick = `<i class=rp-meter__tick style="left:` + m.Tick + `"></i>`
+	}
+	return `<div class=rp-meter><span class=rp-meter__label>` + html.EscapeString(m.Label) + `</span>` +
+		`<div class=rp-meter__track><div class=rp-meter__fill style="width:` + m.Width + `"></div>` + tick +
+		`</div><span class=rp-meter__val>` + html.EscapeString(m.Val) + `</span></div>`
+}
+
+// meterPct clamps + formats a 0..1 fraction as the meter width/tick ("%.1f%%").
+func meterPct(frac float64) string {
+	if frac < 0 {
+		frac = 0
+	}
+	if frac > 1 {
+		frac = 1
+	}
+	return fmt.Sprintf("%.1f%%", frac*100)
+}
+
 // subTabs renders a segmented control. items = [][value,label]; each button's act = actPrefix+value.
 func subTabs(actPrefix, active string, items ...[2]string) string {
 	var b strings.Builder

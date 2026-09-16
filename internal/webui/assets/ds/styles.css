@@ -1206,3 +1206,52 @@ body {
     font-size: 10px;
 }
 .rp-disclosure[open] > .rp-disclosure__sum::before { content: "\25BE"; } /* ▾ */
+
+/* Meter: one horizontal magnitude bar, single brand hue, length = magnitude (P7). Optional
+   threshold tick marks a limit; the tabular readout carries the exact number (P4 - no per-call
+   colour, category is never a hue). */
+.rp-meter {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.rp-meter__label {
+    flex: 0 0 auto;
+    min-width: 88px;
+    font: 11px 'JetBrains Mono', ui-monospace, monospace;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--rp-muted, #B98AA0);
+    white-space: nowrap;
+}
+.rp-meter__track {
+    position: relative;
+    flex: 1;
+    height: 8px;
+    min-width: 0;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+}
+.rp-meter__fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    height: 100%;
+    border-radius: 4px;
+    background: var(--rp-mint, #08F79B);
+}
+.rp-meter__tick {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--rp-fg, #fafafa);
+}
+.rp-meter__val {
+    flex: 0 0 auto;
+    min-width: 52px;
+    text-align: right;
+    font: 11px 'JetBrains Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    color: var(--rp-fg, #fafafa);
+}

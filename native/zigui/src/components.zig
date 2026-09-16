@@ -80,6 +80,38 @@ pub fn btnRowClose(h: *Html) !void {
     try h.raw("</div>");
 }
 
+/// meter mirrors Go meterHTML (.rp-meter): a single-hue magnitude bar. width/tick are pre-formatted
+/// percentages Go-side (Zig never formats a float); tick "" = no threshold mark.
+pub fn meter(h: *Html, label: []const u8, val: []const u8, width: []const u8, tick: []const u8) !void {
+    try h.raw("<div class=rp-meter><span class=rp-meter__label>");
+    try h.esc(label);
+    try h.raw("</span><div class=rp-meter__track><div class=rp-meter__fill style=\"width:");
+    try h.raw(width);
+    try h.raw("\"></div>");
+    if (tick.len != 0) {
+        try h.raw("<i class=rp-meter__tick style=\"left:");
+        try h.raw(tick);
+        try h.raw("\"></i>");
+    }
+    try h.raw("</div><span class=rp-meter__val>");
+    try h.esc(val);
+    try h.raw("</span></div>");
+}
+
+test "meter: single-hue magnitude bar, optional threshold tick" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try meter(&h, "DROP", "12.5%", "12.5%", "80%");
+    try std.testing.expectEqualStrings("<div class=rp-meter><span class=rp-meter__label>DROP</span>" ++
+        "<div class=rp-meter__track><div class=rp-meter__fill style=\"width:12.5%\"></div>" ++
+        "<i class=rp-meter__tick style=\"left:80%\"></i></div><span class=rp-meter__val>12.5%</span></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try meter(&h, "CONGEST", "0%", "0.0%", "");
+    try std.testing.expectEqualStrings("<div class=rp-meter><span class=rp-meter__label>CONGEST</span>" ++
+        "<div class=rp-meter__track><div class=rp-meter__fill style=\"width:0.0%\"></div></div>" ++
+        "<span class=rp-meter__val>0%</span></div>", h.b.items);
+}
+
 /// btnGated: disabled button whose title names the missing dependency (Go btnGated).
 pub fn btnGated(h: *Html, label: []const u8, why: []const u8) !void {
     try h.raw("<button class=\"rp-btn rp-btn--outline\" disabled title=");
