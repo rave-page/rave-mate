@@ -7,15 +7,50 @@ package medialink
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// pacing records how well a ticker-driven source held its cadence: frames emitted against the
+// frames the wall clock owed. time.Ticker coalesces ticks on a starved runner, so the ratio drops -
+// the 2026-09-16 CI failure delivered 0.67 Mbps of a nominal 0.83 on windows-latest and then judged
+// the panel against a shape the source never produced. Read from the test goroutine, written by the
+// sender goroutine: atomics.
+type pacing struct {
+	start atomic.Int64 // unix nanos of the first frame
+	n     atomic.Int64
+}
+
+func (p *pacing) tick() {
+	if p.start.Load() == 0 {
+		p.start.Store(time.Now().UnixNano())
+	}
+	p.n.Add(1)
+}
+
+// ratio is emitted / owed over the run so far (1.0 = cadence held; <1 = ticks coalesced).
+func (p *pacing) ratio(every time.Duration) float64 {
+	st := p.start.Load()
+	if st == 0 || every <= 0 {
+		return 0
+	}
+	owed := float64(time.Since(time.Unix(0, st))) / float64(every)
+	if owed <= 0 {
+		return 0
+	}
+	return float64(p.n.Load()) / owed
+}
+
+// pacer is satisfied by both test sources; runRateProbe skips when the cadence was not held.
+type pacer interface{ pacingRatio() float64 }
 
 // pacedSource emits a fixed-size frame every interval until ctx dies - a live capture, not a
 // pre-filled slice: burstiness of the arrival pattern is what a rate window has to survive.
 type pacedSource struct {
 	every time.Duration
-	size  int
+	pacing
+	size int
 	// keyEvery: every Nth frame is `keyMul` times larger, so the window sees the same
 	// I-frame/P-frame spikes a real encoder produces.
 	keyEvery int
@@ -33,6 +68,7 @@ func (s *pacedSource) Next(ctx context.Context) (*Frame, error) {
 		return nil, ctx.Err()
 	case <-s.t.C:
 	}
+	s.tick()
 	sz := s.size
 	if s.keyEvery > 0 && s.n%s.keyEvery == 0 {
 		sz *= s.keyMul
@@ -40,6 +76,8 @@ func (s *pacedSource) Next(ctx context.Context) (*Frame, error) {
 	s.n++
 	return &Frame{Kind: KindVideo, Codec: CodecNRGBA, Payload: make([]byte, sz)}, nil
 }
+
+func (s *pacedSource) pacingRatio() float64 { return s.ratio(s.every) }
 
 func (s *pacedSource) Close() error {
 	if s.t != nil {
@@ -58,7 +96,8 @@ func (s *pacedSource) Close() error {
 // A source that also PAUSES between bursts does NOT reproduce it: the window closes on the first
 // frame of the next burst and therefore always spans exactly one burst. Frames must keep coming.
 type clumpSource struct {
-	every      time.Duration // frame cadence (constant)
+	every time.Duration // frame cadence (constant)
+	pacing
 	small      int           // trickle payload
 	clumpEvery time.Duration // one large payload this often
 	clump      int
@@ -76,6 +115,7 @@ func (s *clumpSource) Next(ctx context.Context) (*Frame, error) {
 		return nil, ctx.Err()
 	case <-s.t.C:
 	}
+	s.tick()
 	s.elapsed += s.every
 	size := s.small
 	if s.elapsed-s.last >= s.clumpEvery {
@@ -84,6 +124,8 @@ func (s *clumpSource) Next(ctx context.Context) (*Frame, error) {
 	}
 	return &Frame{Kind: KindAudio, Codec: CodecPCMS16, Payload: make([]byte, size)}, nil
 }
+
+func (s *clumpSource) pacingRatio() float64 { return s.ratio(s.every) }
 
 func (s *clumpSource) Close() error {
 	if s.t != nil {
@@ -192,6 +234,17 @@ func runRateProbe(t *testing.T, src Source) {
 	truth := float64(last.bytes-first.bytes) * 8 / last.at.Sub(first.at).Seconds()
 	if truth <= 0 {
 		t.Fatalf("no traffic on the route: %d → %d bytes", first.bytes, last.bytes)
+	}
+	// Pacing precondition: everything below judges the DISPLAY against a source that kept its
+	// cadence. A starved runner coalesces ticker ticks, the shape thins out, and a reading that
+	// shape never produced fails the field guard. Then the source fell short, not the panel: skip
+	// with the numbers rather than fail on them.
+	if p, ok := src.(pacer); ok {
+		if r := p.pacingRatio(); r < 0.9 {
+			t.Skipf("runner starved the paced source: held %.0f%% of its cadence (delivered %.0f bps) - pacing precondition not met", r*100, truth)
+		} else {
+			t.Logf("source cadence held %.1f%%", r*100)
+		}
 	}
 	var sum float64
 	low := 0
