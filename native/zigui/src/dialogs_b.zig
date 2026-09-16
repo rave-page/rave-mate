@@ -670,6 +670,7 @@ pub const AeModal = struct {
     add: []const c.Btn = &.{},
     hasVerdict: bool = false,
     verdict: []const u8 = "",
+    warn: []const u8 = "", // non-blocking feedback-loop warning (possible loop)
     save: []const u8 = "",
     cancel: []const u8 = "",
 };
@@ -690,6 +691,7 @@ pub fn renderAeModal(h: *Html, st: AeModal) !void {
     for (st.steps) |s| try renderAeStep(h, s);
     try c.btnRowOf(h, st.add);
     if (st.hasVerdict) try c.hint(h, "bad", st.verdict);
+    if (st.warn.len != 0) try c.hint(h, "warn", st.warn);
     try c.sectionClose(h);
     try c.modalFoot(h);
     try c.btnRowOpen(h);

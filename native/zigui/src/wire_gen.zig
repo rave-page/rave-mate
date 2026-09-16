@@ -41,7 +41,7 @@ const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 const pickbrowse = @import("pickbrowse.zig");
 
-pub const schema_hash: u32 = 0x1bade87e;
+pub const schema_hash: u32 = 0x755e25bc;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -2194,6 +2194,7 @@ pub fn decodeAutoCard(r: *wire.Reader, out: *automations.Card) wire.Error!void {
         7 => out.enabled = try r.boolean(t),
         8 => out.state = try r.str(t),
         9 => out.stateVar = try r.str(t),
+        10 => out.warn = try r.str(t),
         else => try r.skip(t),
     };
 }
@@ -4879,6 +4880,7 @@ pub fn decodeAutoEditor(r: *wire.Reader, out: *dialogs_b.AeModal) wire.Error!voi
         13 => out.verdict = try r.str(t),
         14 => out.save = try r.str(t),
         15 => out.cancel = try r.str(t),
+        16 => out.warn = try r.str(t),
         else => try r.skip(t),
     };
 }

@@ -115,8 +115,10 @@ func TestAeMinSizeExactUnlessEdited(t *testing.T) {
 	u := &UI{}
 	u.ae.load(automation.Automation{
 		Label: "A", WatchDir: `C:\x`,
-		Match:   automation.Match{MinSizeBytes: 1500000}, // not a whole number of MB
-		Actions: []automation.Action{{Type: automation.ActionTrimSilence}},
+		Match: automation.Match{MinSizeBytes: 1500000}, // not a whole number of MB
+		// Output OUTSIDE the watched folder: a trim-silence writing back into an any-match watch dir
+		// is a feedback loop the editor now refuses, which is unrelated to this min-size test.
+		Actions: []automation.Action{{Type: automation.ActionTrimSilence, OutputDir: `C:\out`}},
 	})
 	tok := aeOpenForm(u)
 	u.aeField(tok, "label", "renamed") // an edit elsewhere in the form

@@ -324,7 +324,7 @@ func (u *UI) aeBuild() (automation.Automation, error) {
 	if err := automation.ValidateLoudness(acts, u.aePresets()); err != nil {
 		return automation.Automation{}, err
 	}
-	return automation.Automation{
+	a := automation.Automation{
 		ID: s.id, Label: strings.TrimSpace(s.label), WatchDir: s.watch, Enabled: s.enabled,
 		Match: automation.Match{
 			Extensions:      aeParseExts(s.extsTx),
@@ -333,7 +333,12 @@ func (u *UI) aeBuild() (automation.Automation, error) {
 			MinAgeDays:      s.minAge,
 		},
 		Actions: acts,
-	}, nil
+	}
+	// Refuse a definite feedback loop (a step writes a matching file back into the watched folder).
+	if lp := automation.CheckLoop(a, u.aePresets()); lp.Kind == automation.LoopDefinite {
+		return automation.Automation{}, fmt.Errorf("%s", aeLoopError(lp))
+	}
+	return a, nil
 }
 
 // aeSave validates, then persists off the actWorker (Save fsyncs bbolt). tok is the form session
@@ -557,6 +562,19 @@ func (u *UI) aeChainState(st *aeModalSt, s *aeSt, presets []transcode.Preset) {
 		}
 		if err != nil {
 			st.HasVerdict, st.Verdict = true, err.Error()
+		}
+		// Feedback-loop verdict: a definite loop blocks Save (an error verdict, same as aeBuild); a
+		// possible one is a non-blocking warning below the chain.
+		la := automation.Automation{WatchDir: s.watch, Match: automation.Match{
+			Extensions: aeParseExts(s.extsTx), MinSizeBytes: s.minSize, FilenamePattern: s.pattern, MinAgeDays: s.minAge,
+		}, Actions: acts}
+		switch lp := automation.CheckLoop(la, u.aePresets()); lp.Kind {
+		case automation.LoopDefinite:
+			if !st.HasVerdict {
+				st.HasVerdict, st.Verdict = true, aeLoopError(lp)
+			}
+		case automation.LoopPossible:
+			st.Warn = i18n.T("automations.loop.warnPossible", i18n.A{"step": strconv.Itoa(lp.Step), "type": aeTypeLabel(lp.StepType)})
 		}
 	}
 }

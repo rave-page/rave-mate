@@ -35,6 +35,7 @@ type autoCard struct {
 	StatusVar string `json:"statusVar"`
 	State     string `json:"state"` // live coordinator state (running/queued/deferred); "" = idle
 	StateVar  string `json:"stateVar"`
+	Warn      string `json:"warn"` // feedback-loop warning badge text; "" = none
 	Chain     string `json:"chain"`
 	Enabled   bool   `json:"enabled"`
 }
@@ -173,7 +174,7 @@ func (u *UI) autoBodyState() autoBodyState {
 		RunsTitle:  i18n.T("automations.recentRuns"),
 		Labels:     autoLabelsOf(),
 		Coord:      autoCoordStateOf(cs),
-		List:       autoListStateOf(autos, live),
+		List:       autoListStateOf(autos, live, u.aePresets()),
 		Scheds:     autoSchedsStateOf(u.svc.Automations.ListSchedules(), autos, live),
 		Runs:       autoRunsStateOf(u.svc.Automations.Runs(20)),
 	}
@@ -206,7 +207,7 @@ func autoLiveIndex(cs automation.CoordStatus) map[string]autoLive {
 	return m
 }
 
-func autoListStateOf(autos []automation.Automation, live map[string]autoLive) autoListState {
+func autoListStateOf(autos []automation.Automation, live map[string]autoLive, presets automation.PresetResolver) autoListState {
 	st := autoListState{
 		New:   i18n.T("automations.new"),
 		Empty: i18n.T("automations.emptyList"),
@@ -230,6 +231,7 @@ func autoListStateOf(autos []automation.Automation, live map[string]autoLive) au
 			ID: a.ID, Label: autoLabelOf(a.Label), WatchDir: a.WatchDir,
 			Status: a.LastStatus, StatusVar: v,
 			State: lv.State, StateVar: lv.StateVar,
+			Warn:  aeLoopBadge(a, presets),
 			Chain: autoChainSummary(a.Actions), Enabled: a.Enabled,
 		})
 	}
@@ -438,8 +440,11 @@ func autoListHTML(st autoListState, lb autoLabels) string {
 	b.WriteString(`<div class=grid>`)
 	for _, a := range st.Cards {
 		status := ""
+		if a.Warn != "" {
+			status += badge(a.Warn, "warning") // feedback-loop warning leads
+		}
 		if a.State != "" {
-			status += badge(a.State, a.StateVar) // live coordinator state leads the last-run status
+			status += badge(a.State, a.StateVar) // live coordinator state, then the last-run status
 		}
 		if a.Status != "" {
 			status += badge(a.Status, a.StatusVar)
@@ -571,6 +576,31 @@ func autoLastFired(s automation.Schedule) string {
 		return i18n.T("automations.sch.neverFired")
 	}
 	return i18n.T("automations.sch.lastFired", i18n.A{"at": s.LastFiredAt})
+}
+
+// aeLoopError formats the definite-feedback-loop refusal (editor banner + live verdict).
+func aeLoopError(lp automation.LoopReport) string {
+	return i18n.T("automations.loop.errDefinite", i18n.A{
+		"step": strconv.Itoa(lp.Step), "type": aeTypeLabel(lp.StepType), "ext": aeLoopExt(lp.Ext),
+	})
+}
+
+func aeLoopExt(ext string) string {
+	if strings.TrimSpace(ext) == "" {
+		return i18n.T("automations.loop.theOutput")
+	}
+	return ext
+}
+
+// aeLoopBadge returns the short card badge for an automation that self-triggers ("" = none).
+func aeLoopBadge(a automation.Automation, presets automation.PresetResolver) string {
+	switch automation.CheckLoop(a, presets).Kind {
+	case automation.LoopDefinite:
+		return i18n.T("automations.loop.badgeDefinite")
+	case automation.LoopPossible:
+		return i18n.T("automations.loop.badgePossible")
+	}
+	return ""
 }
 
 // autoLabelOf falls back to the "(unnamed)" placeholder - an automation/schedule with a blank

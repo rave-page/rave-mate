@@ -339,10 +339,16 @@ func aeModalFixtures(t *testing.T) map[string]aeModalSt {
 	withErr := all
 	withErr.HasErr, withErr.Err = true, `save failed: bad pattern & "x" <y>'`
 
+	// A transcode whose output (.mp3) lands in the watched folder but doesn't match (.wav) → a
+	// possible-loop WARNING (non-blocking), distinct from the error verdict.
+	loopWarn := mk(automation.Automation{Label: "Loopy", WatchDir: `D:\in`,
+		Match:   automation.Match{Extensions: []string{".wav"}},
+		Actions: []automation.Action{{Type: automation.ActionTranscode, PresetID: "mp3-320"}}})
+
 	return map[string]aeModalSt{
 		"empty": {}, "unavailable": mk(automation.Automation{Enabled: true}),
 		"populated": all, "minAgeWarn": minAge, "invalidChain": invalid, "errBanner": withErr,
-		"escaping": esc, "long": long, "unicode": uni,
+		"escaping": esc, "long": long, "unicode": uni, "loopWarn": loopWarn,
 	}
 }
 

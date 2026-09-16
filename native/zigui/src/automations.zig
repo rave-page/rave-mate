@@ -25,6 +25,7 @@ pub const Card = struct {
     statusVar: []const u8 = "",
     state: []const u8 = "", // live coordinator state (running/queued/deferred); "" = idle
     stateVar: []const u8 = "",
+    warn: []const u8 = "", // feedback-loop warning badge text; "" = none
     chain: []const u8 = "",
     enabled: bool = false,
 };
@@ -180,7 +181,8 @@ fn renderList(h: *Html, s: ListState, lb: Labels) !void {
         try h.raw("</div><div class=np-artist>");
         try h.esc(a.watchDir);
         try h.raw("</div><div class=np-meta>");
-        if (a.state.len != 0) try c.badge(h, a.state, a.stateVar); // live coordinator state leads
+        if (a.warn.len != 0) try c.badge(h, a.warn, "warning"); // feedback-loop warning leads
+        if (a.state.len != 0) try c.badge(h, a.state, a.stateVar); // live coordinator state, then last-run
         if (a.status.len != 0) try c.badge(h, a.status, a.statusVar);
         try h.raw("</div><div class=np-meta>");
         try h.esc(a.chain);

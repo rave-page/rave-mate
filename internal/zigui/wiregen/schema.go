@@ -772,7 +772,7 @@ var schema = []msg{
 	},
 	{
 		name: "AutoCard", goT: "autoCard", zigT: "automations.Card",
-		fs: []field{s(1, "ID", "id"), s(2, "Label", "label"), s(3, "WatchDir", "watchDir"), s(4, "Status", "status"), s(5, "StatusVar", "statusVar"), s(6, "Chain", "chain"), b(7, "Enabled", "enabled"), s(8, "State", "state"), s(9, "StateVar", "stateVar")},
+		fs: []field{s(1, "ID", "id"), s(2, "Label", "label"), s(3, "WatchDir", "watchDir"), s(4, "Status", "status"), s(5, "StatusVar", "statusVar"), s(6, "Chain", "chain"), b(7, "Enabled", "enabled"), s(8, "State", "state"), s(9, "StateVar", "stateVar"), s(10, "Warn", "warn")},
 	},
 	{
 		name: "AutoListState", goT: "autoListState", zigT: "automations.ListState",
@@ -1667,7 +1667,7 @@ var schema = []msg{
 	{
 		name: "AutoEditor", goT: "aeModalSt", zigT: "dialogs_b.AeModal", id: 109,
 		doc: "automation-editor dialog",
-		fs:  []field{s(1, "Title", "title"), b(2, "HasErr", "hasErr"), s(3, "Err", "err"), li(4, "Ident", "ident", "AeBlock"), s(5, "SecMatch", "secMatch"), li(6, "Match", "match", "AeBlock"), s(7, "SecActions", "secActions"), b(8, "NoSteps", "noSteps"), s(9, "NoStepsMsg", "noStepsMsg"), li(10, "Steps", "steps", "AeStep"), li(11, "Add", "add", "UiBtn"), b(12, "HasVerdict", "hasVerdict"), s(13, "Verdict", "verdict"), s(14, "Save", "save"), s(15, "Cancel", "cancel")},
+		fs:  []field{s(1, "Title", "title"), b(2, "HasErr", "hasErr"), s(3, "Err", "err"), li(4, "Ident", "ident", "AeBlock"), s(5, "SecMatch", "secMatch"), li(6, "Match", "match", "AeBlock"), s(7, "SecActions", "secActions"), b(8, "NoSteps", "noSteps"), s(9, "NoStepsMsg", "noStepsMsg"), li(10, "Steps", "steps", "AeStep"), li(11, "Add", "add", "UiBtn"), b(12, "HasVerdict", "hasVerdict"), s(13, "Verdict", "verdict"), s(14, "Save", "save"), s(15, "Cancel", "cancel"), s(16, "Warn", "warn")},
 	},
 	{
 		name: "ArFoot", goT: "arFootSt", zigT: "dialogs_b.ArFoot",

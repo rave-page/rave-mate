@@ -109,6 +109,7 @@ type aeModalSt struct {
 	Add        []uiBtn     `json:"add,omitempty"`
 	HasVerdict bool        `json:"hasVerdict,omitempty"` // engine validators rejected the chain
 	Verdict    string      `json:"verdict,omitempty"`
+	Warn       string      `json:"warn,omitempty"` // non-blocking feedback-loop warning (possible loop)
 	Save       string      `json:"save"`
 	Cancel     string      `json:"cancel"`
 }
@@ -173,6 +174,9 @@ func aeChainHTMLOf(st aeModalSt) string {
 	b.WriteString(uiBtnRow(st.Add))
 	if st.HasVerdict {
 		b.WriteString(hint("bad", st.Verdict))
+	}
+	if st.Warn != "" {
+		b.WriteString(hint("warn", st.Warn))
 	}
 	return b.String()
 }

@@ -312,6 +312,12 @@ func (m *Service) Get(id string) (Automation, bool) {
 }
 
 func (m *Service) Save(a Automation) (Automation, error) {
+	// Refuse a DEFINITE feedback loop up front: a chain that writes a matching file back into the
+	// watched folder re-triggers itself forever. Engine-level backstop for the wire/studio paths;
+	// the webui editor refuses with a localized message before it ever reaches here.
+	if r := CheckLoop(a, m.presets); r.Kind == LoopDefinite {
+		return a, loopSaveError(r)
+	}
 	if a.ID == "" {
 		a.ID = m.nextID("auto")
 		a.CreatedAt = time.Now().UTC().Format(time.RFC3339)
@@ -578,6 +584,12 @@ func (m *Service) onWatchFile(automationID, path string) {
 	if !ok || !a.Enabled || !m.eligible(a, path) {
 		return
 	}
+	// A stored definite loop: the arriving file is what the last run produced. Don't drive it (the
+	// watcher is the loop's motor). Log-only - recording a Run per watch event would spam.
+	if CheckLoop(a, m.presets).Kind == LoopDefinite {
+		m.log.Warn(source, "watch skipped (feedback loop)", map[string]any{"automationId": a.ID, "file": path})
+		return
+	}
 	if m.coord == nil {
 		go func() {
 			defer debuglog.Recover(nil, source, false) // nil bus: service decoupled via Logger iface
@@ -635,6 +647,12 @@ func (m *Service) onSchedule(scheduleID string) {
 // recording one Run per file. trigger is the ONLY difference ("schedule" vs "manual"). Stops early
 // if ctx is cancelled.
 func (m *Service) sweepRun(ctx context.Context, a Automation, trigger string) SweepResult {
+	// A stored definite loop (saved before this check existed) must not fire: it would sweep the
+	// files it produced last time, forever. Record the skip so the reason is visible.
+	if CheckLoop(a, m.presets).Kind == LoopDefinite {
+		m.recordLoopSkip(a, trigger)
+		return SweepResult{AutomationID: a.ID, Trigger: trigger}
+	}
 	res := SweepResult{AutomationID: a.ID, Trigger: trigger}
 	for _, f := range m.sweep(a) {
 		if ctx.Err() != nil {
@@ -690,4 +708,39 @@ func (m *Service) eligible(a Automation, path string) bool {
 		return false
 	}
 	return a.Match.matches(strings.ToLower(filepath.Ext(path)), filepath.Base(path), fi.Size(), fi.ModTime())
+}
+
+// loopSaveError is the engine-level (English) refusal for a definite feedback loop. The webui editor
+// refuses first with a localized message; this backstops the wire/studio Save path.
+func loopSaveError(r LoopReport) error {
+	ext := r.Ext
+	if ext == "" {
+		ext = "the output"
+	}
+	return fmt.Errorf("automation would re-trigger itself: step %d (%s) writes %s into the watched "+
+		"folder, where it matches the rule and starts another run - point that step at an output folder "+
+		"outside the watched folder, or exclude %s from the match", r.Step, r.StepType, ext, ext)
+}
+
+// recordLoopSkip persists a single error Run + last-run summary so a skipped-loop fire is visible
+// (the card shows the error and the reason).
+func (m *Service) recordLoopSkip(a Automation, trigger string) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	run := Run{
+		ID: chainID(a.ID, "", now), AutomationID: a.ID, Trigger: trigger,
+		StartedAt: now, FinishedAt: now, Status: "error",
+		Steps: []StepResult{{Error: "skipped: this automation writes back into its own watched folder " +
+			"and would re-trigger itself (feedback loop) - fix it in the editor"}},
+	}
+	if run.ID == "" {
+		run.ID = m.nextID("run")
+	}
+	_ = m.st.PutJSON(store.BucketRuns, run.ID, run)
+	m.pruneRuns()
+	a.LastRunAt = run.FinishedAt
+	a.LastStatus = "error"
+	a.LastError = run.Steps[0].Error
+	_ = m.st.PutJSON(store.BucketAutomations, a.ID, a)
+	m.invalidateAutos()
+	m.log.Warn(source, "automation skipped (feedback loop)", map[string]any{"automationId": a.ID, "trigger": trigger})
 }

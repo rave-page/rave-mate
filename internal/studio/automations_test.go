@@ -466,13 +466,14 @@ func TestStudioAutomationsOldClientCannotEraseUnknownFields(t *testing.T) {
 // become preserve-on-everything.
 func TestStudioAutomationsExplicitClearStillWorks(t *testing.T) {
 	cl, autos, dir := newAutosServer(t)
+	out := t.TempDir() // transcode output OUTSIDE the watch dir - else [transcode-alongside, delete] self-triggers
 
 	created := cl.call("automations.create", map[string]any{
 		"input": map[string]any{
 			"label": "x", "watchDirectory": dir,
 			"match": map[string]any{"minAgeDays": 30},
 			"actions": []any{
-				map[string]any{"type": "transcode", "presetId": "p1", "loudnessOn": true, "loudnessI": -9},
+				map[string]any{"type": "transcode", "presetId": "p1", "outputDirectory": out, "loudnessOn": true, "loudnessI": -9},
 				map[string]any{"type": "delete"},
 			},
 		},
@@ -483,7 +484,7 @@ func TestStudioAutomationsExplicitClearStillWorks(t *testing.T) {
 	cl.call("automations.update", map[string]any{"id": autoID, "patch": map[string]any{
 		"match": map[string]any{"minAgeDays": 0},
 		"actions": []any{
-			map[string]any{"type": "transcode", "presetId": "p1", "loudnessOn": false},
+			map[string]any{"type": "transcode", "presetId": "p1", "outputDirectory": out, "loudnessOn": false},
 			map[string]any{"type": "delete"},
 		},
 	}})
@@ -502,12 +503,13 @@ func TestStudioAutomationsExplicitClearStillWorks(t *testing.T) {
 // than a guess at which action a value belonged to.
 func TestStudioAutomationsEditedChainIsAuthoritative(t *testing.T) {
 	cl, autos, dir := newAutosServer(t)
+	out := t.TempDir() // transcode output OUTSIDE the watch dir - else [transcode-alongside, delete] self-triggers
 
 	created := cl.call("automations.create", map[string]any{
 		"input": map[string]any{
 			"label": "x", "watchDirectory": dir,
 			"actions": []any{
-				map[string]any{"type": "transcode", "presetId": "p1", "loudnessOn": true, "loudnessI": -9},
+				map[string]any{"type": "transcode", "presetId": "p1", "outputDirectory": out, "loudnessOn": true, "loudnessI": -9},
 				map[string]any{"type": "delete"},
 			},
 		},
@@ -517,7 +519,7 @@ func TestStudioAutomationsEditedChainIsAuthoritative(t *testing.T) {
 	// Same length + types, but the preset changed: the client edited a chain it can't fully express.
 	cl.call("automations.update", map[string]any{"id": autoID, "patch": map[string]any{
 		"actions": []any{
-			map[string]any{"type": "transcode", "presetId": "p2"},
+			map[string]any{"type": "transcode", "presetId": "p2", "outputDirectory": out},
 			map[string]any{"type": "delete"},
 		},
 	}})
@@ -591,8 +593,9 @@ func TestStudioAutomationsValidation(t *testing.T) {
 		t.Fatal("legacy-shaped chain must still save")
 	}
 	// The loudness rule is NARROW: on a preset that re-encodes, the same override is legitimate.
+	// Output OUTSIDE the watch dir so it isn't a feedback loop (unrelated to the loudness rule).
 	if res := cl.call("automations.create", mk([]any{
-		map[string]any{"type": "transcode", "presetId": "audioAac", "loudnessOn": true, "loudnessI": -14},
+		map[string]any{"type": "transcode", "presetId": "audioAac", "outputDirectory": t.TempDir(), "loudnessOn": true, "loudnessI": -14},
 	})); res["id"] == "" {
 		t.Fatal("a LUFS target on a re-encoding preset must save")
 	}
@@ -610,11 +613,12 @@ func TestStudioAutomationsLoudnessCheckSparesLegacyToggles(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	autos := automation.NewManager(st, nil, testPresets, logbus.New(50))
 
-	// Seeded straight into the engine, as a pre-rule client would have left it.
+	// Seeded straight into the engine, as a pre-rule client would have left it. Output OUTSIDE the
+	// watch dir - a transcode alongside would be a feedback loop the Save guard now refuses.
 	seeded, err := autos.Save(automation.Automation{
 		Label: "legacy", WatchDir: dir, Enabled: true,
 		Actions: []automation.Action{{Type: automation.ActionTranscode, PresetID: "remux",
-			LoudnessOn: true, LoudnessI: -14}},
+			OutputDir: t.TempDir(), LoudnessOn: true, LoudnessI: -14}},
 	})
 	if err != nil {
 		t.Fatalf("seed: %v", err)

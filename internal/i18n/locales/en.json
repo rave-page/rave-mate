@@ -74,6 +74,13 @@
       "waitStreaming": "deferred while a stream is live",
       "coalescedAt": "coalesced at {at}"
     },
+    "loop": {
+      "badgeDefinite": "self-triggering",
+      "badgePossible": "may re-trigger",
+      "theOutput": "the output",
+      "errDefinite": "Step {step} ({type}) writes {ext} into the watched folder, where it matches the rule and re-triggers this automation. Point that step at a folder outside the watched folder, or exclude {ext} from the match.",
+      "warnPossible": "Step {step} ({type}) writes into the watched folder. If its output ever matches the rule, this automation re-triggers itself - point it at a folder outside the watched folder."
+    },
     "manual": "(manual)",
     "noRuns": "No runs yet",
     "noSchedules": "No schedules",

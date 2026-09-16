@@ -71,6 +71,8 @@ func autoFixtures() map[string]autoState {
 	}
 	populated.Body.List.Cards[0].State, populated.Body.List.Cards[0].StateVar = "running", "info"
 	populated.Body.List.Cards[2].State, populated.Body.List.Cards[2].StateVar = "queued", "secondary"
+	populated.Body.List.Cards[1].Warn = "may re-trigger"  // possible feedback loop
+	populated.Body.List.Cards[2].Warn = "self-triggering" // definite (stored) loop
 	populated.Body.Scheds.Cards[0].Coalesced = "coalesced at 03:00"
 
 	escaping := base()
@@ -100,6 +102,7 @@ func autoFixtures() map[string]autoState {
 		{Dot: "info", Label: `R&un "now"<>`, Line: `sw&eep '<">`, Badge: `st&"at`, BadgeVar: "info"},
 	}}
 	escaping.Body.List.Cards[0].State, escaping.Body.List.Cards[0].StateVar = `r&un"<>`, "info"
+	escaping.Body.List.Cards[0].Warn = `lo&op "may"<>`
 	escaping.Body.Scheds.Cards[0].Coalesced = `co&al "at"<>`
 
 	long := base()

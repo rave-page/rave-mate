@@ -155,7 +155,9 @@ func TestTranscodeThenDeleteKeepsOutput(t *testing.T) {
 	if err := ValidateActions(acts); err != nil {
 		t.Fatalf("transcode + delete is the user's literal ask and must validate: %v", err)
 	}
-	a, err := m.Save(Automation{Label: "conv", WatchDir: dir, Actions: acts})
+	// Match .wav so the .mp3 output left in the watch dir does NOT re-match (only a possible loop,
+	// which Save allows) - the realistic shape for "transcode a wav then drop the source".
+	a, err := m.Save(Automation{Label: "conv", WatchDir: dir, Match: Match{Extensions: []string{".wav"}}, Actions: acts})
 	if err != nil {
 		t.Fatalf("save: %v", err)
 	}
