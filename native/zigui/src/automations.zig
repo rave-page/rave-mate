@@ -23,6 +23,8 @@ pub const Card = struct {
     watchDir: []const u8 = "",
     status: []const u8 = "", // "" = no badge
     statusVar: []const u8 = "",
+    state: []const u8 = "", // live coordinator state (running/queued/deferred); "" = idle
+    stateVar: []const u8 = "",
     chain: []const u8 = "",
     enabled: bool = false,
 };
@@ -42,6 +44,7 @@ pub const SchedCard = struct {
     trigger: []const u8 = "",
     gates: []const u8 = "",
     lastFired: []const u8 = "",
+    coalesced: []const u8 = "", // "coalesced at HH:MM" when a pending sweep folds; "" otherwise
     warnTone: []const u8 = "", // "" = no warning
     warnText: []const u8 = "",
     enabled: bool = false,
@@ -67,11 +70,25 @@ pub const RunsState = struct {
     rows: []const RunRow = &.{},
 };
 
+pub const CoordRow = struct {
+    dot: []const u8 = "",
+    label: []const u8 = "",
+    line: []const u8 = "",
+    badge: []const u8 = "",
+    badgeVar: []const u8 = "",
+};
+
+pub const Coord = struct {
+    title: []const u8 = "",
+    rows: []const CoordRow = &.{},
+};
+
 pub const Body = struct {
     listTitle: []const u8 = "",
     schedTitle: []const u8 = "",
     runsTitle: []const u8 = "",
     labels: Labels = .{},
+    coord: Coord = .{},
     list: ListState = .{},
     scheds: SchedsState = .{},
     runs: RunsState = .{},
@@ -100,6 +117,7 @@ pub fn render(h: *Html, s: State) !void {
 
 /// renderBody mirrors Go autoBodyHTML (#auto-body inner, the version-gated tick patch).
 pub fn renderBody(h: *Html, s: Body) !void {
+    try renderCoord(h, s.coord);
     try c.sectionOpen(h, s.listTitle);
     try renderList(h, s.list, s.labels);
     try c.sectionClose(h);
@@ -108,6 +126,26 @@ pub fn renderBody(h: *Html, s: Body) !void {
     try c.sectionClose(h);
     try c.sectionOpen(h, s.runsTitle);
     try renderRuns(h, s.runs);
+    try c.sectionClose(h);
+}
+
+/// renderCoord mirrors Go autoCoordHTML: the live status region (running · queued). Nothing when idle.
+fn renderCoord(h: *Html, s: Coord) !void {
+    if (s.rows.len == 0) return;
+    try c.sectionOpen(h, s.title);
+    try h.raw("<div class=\"rp-card\">");
+    for (s.rows) |r| {
+        try h.raw("<div class=kv><span class=kv-k>");
+        try c.dot(h, r.dot);
+        try h.raw(" ");
+        try h.esc(r.label);
+        try h.raw(" <span class=np-artist>");
+        try h.esc(r.line);
+        try h.raw("</span></span><span class=kv-v>");
+        try c.badge(h, r.badge, r.badgeVar);
+        try h.raw("</span></div>");
+    }
+    try h.raw("</div>");
     try c.sectionClose(h);
 }
 
@@ -142,6 +180,7 @@ fn renderList(h: *Html, s: ListState, lb: Labels) !void {
         try h.raw("</div><div class=np-artist>");
         try h.esc(a.watchDir);
         try h.raw("</div><div class=np-meta>");
+        if (a.state.len != 0) try c.badge(h, a.state, a.stateVar); // live coordinator state leads
         if (a.status.len != 0) try c.badge(h, a.status, a.statusVar);
         try h.raw("</div><div class=np-meta>");
         try h.esc(a.chain);
@@ -180,6 +219,10 @@ fn renderScheds(h: *Html, s: SchedsState, lb: Labels) !void {
         try h.esc(sc.gates);
         try h.raw("</div><div class=np-meta>");
         try h.esc(sc.lastFired);
+        if (sc.coalesced.len != 0) {
+            try h.raw(" ");
+            try c.badge(h, sc.coalesced, "secondary");
+        }
         try h.raw("</div>");
         if (sc.warnTone.len != 0) try c.hint(h, sc.warnTone, sc.warnText);
         try toggleAct(h, lb, "auto-sch-tgl:", sc.id, sc.enabled);

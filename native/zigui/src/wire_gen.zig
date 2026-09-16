@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0x0899aaed;
+pub const schema_hash: u32 = 0xccb1a6fc;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -2190,6 +2190,8 @@ pub fn decodeAutoCard(r: *wire.Reader, out: *automations.Card) wire.Error!void {
         5 => out.statusVar = try r.str(t),
         6 => out.chain = try r.str(t),
         7 => out.enabled = try r.boolean(t),
+        8 => out.state = try r.str(t),
+        9 => out.stateVar = try r.str(t),
         else => try r.skip(t),
     };
 }
@@ -2216,6 +2218,7 @@ pub fn decodeAutoSchedCard(r: *wire.Reader, out: *automations.SchedCard) wire.Er
         9 => out.warnTone = try r.str(t),
         10 => out.warnText = try r.str(t),
         11 => out.enabled = try r.boolean(t),
+        12 => out.coalesced = try r.str(t),
         else => try r.skip(t),
     };
 }
@@ -2249,6 +2252,25 @@ pub fn decodeAutoRunsState(r: *wire.Reader, out: *automations.RunsState) wire.Er
     };
 }
 
+pub fn decodeAutoCoordRow(r: *wire.Reader, out: *automations.CoordRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.dot = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.line = try r.str(t),
+        4 => out.badge = try r.str(t),
+        5 => out.badgeVar = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoCoord(r: *wire.Reader, out: *automations.Coord) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.rows = try r.list(automations.CoordRow, decodeAutoCoordRow, t),
+        else => try r.skip(t),
+    };
+}
+
 pub fn decodeAutoBodyState(r: *wire.Reader, out: *automations.Body) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.listTitle = try r.str(t),
@@ -2258,6 +2280,7 @@ pub fn decodeAutoBodyState(r: *wire.Reader, out: *automations.Body) wire.Error!v
         5 => out.list = try r.sub(automations.ListState, decodeAutoListState, t),
         6 => out.scheds = try r.sub(automations.SchedsState, decodeAutoSchedsState, t),
         7 => out.runs = try r.sub(automations.RunsState, decodeAutoRunsState, t),
+        8 => out.coord = try r.sub(automations.Coord, decodeAutoCoord, t),
         else => try r.skip(t),
     };
 }

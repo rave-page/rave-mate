@@ -293,8 +293,25 @@ func (u *UI) arModalHTMLLocked(s *arSt) string {
 }
 
 // arConflict asks the run coordinator whether a rules-first sweep of a would have to wait right
-// now, and for the human reason. Phase-2 stub: no coordinator yet, so never a conflict.
-func (u *UI) arConflict(_ automation.Automation) (bool, string) { return false, "" }
+// now, and builds the human reason line shown above the primary ("Will wait — <auto> is …").
+func (u *UI) arConflict(a automation.Automation) (bool, string) {
+	if u.svc.Automations == nil {
+		return false, ""
+	}
+	sc, ok := u.svc.Automations.CoordConflict(a.ID)
+	if !ok || !sc.Blocked {
+		return false, ""
+	}
+	activity := i18n.T("automations.run.actRunning")
+	if sc.OtherHeavy && sc.OtherFile != "" {
+		activity = i18n.T("automations.run.actTranscode", i18n.A{"file": sc.OtherFile})
+	}
+	label := sc.OtherLabel
+	if strings.TrimSpace(label) == "" {
+		label = i18n.T("automations.unnamed")
+	}
+	return true, i18n.T("automations.run.conflictWait", i18n.A{"label": label, "activity": activity})
+}
 
 // arPreviewShown caps how many preview rows the modal lists before folding the rest into "and N more".
 const arPreviewShown = 8

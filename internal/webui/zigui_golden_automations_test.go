@@ -23,6 +23,7 @@ func autoFixtures() map[string]autoState {
 			Body: autoBodyState{
 				ListTitle: "Automations", SchedTitle: "Schedules", RunsTitle: "Recent runs",
 				Labels: labels,
+				Coord:  autoCoordState{Title: "Now", Rows: []autoCoordRow{}},
 				List:   autoListState{New: "New automation", Empty: "No automations yet", Cards: []autoCard{}},
 				Scheds: autoSchedsState{New: "New schedule", GateWhy: "Create an automation first",
 					Empty: "No schedules yet", Cards: []autoSchedCard{}},
@@ -63,6 +64,14 @@ func autoFixtures() map[string]autoState {
 		{Name: "set-03.wav", Trigger: "schedule", Status: "running", Variant: "info"},
 		{Name: "set-04.wav", Trigger: "schedule", Status: "queued", Variant: "secondary"},
 	}
+	// live coordinator state: one running, one queued behind it; the cards + schedule reflect it.
+	populated.Body.Coord.Rows = []autoCoordRow{
+		{Dot: "info", Label: "Set captures", Line: "schedule sweep", Badge: "running", BadgeVar: "info"},
+		{Dot: "secondary", Label: "Purge", Line: "waiting for Set captures", Badge: "queued", BadgeVar: "secondary"},
+	}
+	populated.Body.List.Cards[0].State, populated.Body.List.Cards[0].StateVar = "running", "info"
+	populated.Body.List.Cards[2].State, populated.Body.List.Cards[2].StateVar = "queued", "secondary"
+	populated.Body.Scheds.Cards[0].Coalesced = "coalesced at 03:00"
 
 	escaping := base()
 	escaping.Title = `Auto&mations <"live">`
@@ -87,6 +96,11 @@ func autoFixtures() map[string]autoState {
 	escaping.Body.Runs.Rows = []autoRunRow{
 		{Name: `f&ile "1"<>.wav`, Trigger: `tr&igger'<">`, Status: `st&at"`, Variant: "error"},
 	}
+	escaping.Body.Coord = autoCoordState{Title: `N&ow "live"<>`, Rows: []autoCoordRow{
+		{Dot: "info", Label: `R&un "now"<>`, Line: `sw&eep '<">`, Badge: `st&"at`, BadgeVar: "info"},
+	}}
+	escaping.Body.List.Cards[0].State, escaping.Body.List.Cards[0].StateVar = `r&un"<>`, "info"
+	escaping.Body.Scheds.Cards[0].Coalesced = `co&al "at"<>`
 
 	long := base()
 	longS := strings.Repeat("very-long-", 120)

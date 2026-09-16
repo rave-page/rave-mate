@@ -59,6 +59,20 @@
   },
   "automations": {
     "emptyList": "No automations yet",
+    "coord": {
+      "title": "Now",
+      "running": "running",
+      "queued": "queued",
+      "deferred": "deferred",
+      "coalesced": "coalesced",
+      "onFile": "{trigger} · {file}",
+      "sweep": "{trigger} sweep",
+      "waitCurrent": "waiting for its current run",
+      "waitPath": "waiting for {label}",
+      "waitHeavy": "waiting for a transcode slot",
+      "waitStreaming": "deferred while a stream is live",
+      "coalescedAt": "coalesced at {at}"
+    },
     "manual": "(manual)",
     "noRuns": "No runs yet",
     "noSchedules": "No schedules",
@@ -158,6 +172,7 @@
       "orphanWarn": "The automation this schedule ran no longer exists, so every fire is skipped - it does nothing and cannot be repaired by switching it on. Point it at another automation with Edit, or delete it. (Deleting an automation now takes its schedules with it; this one predates that.)",
       "neverFired": "Never fired",
       "lastFired": "Last fired {at}",
+      "coalesced": "coalesced at {at}",
       "sumInterval": "every {n} min",
       "sumDaily": "daily at {at}",
       "sumIdle": "when idle {n} min",

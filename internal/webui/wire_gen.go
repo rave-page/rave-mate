@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash         uint32 = 0x0899aaed
+	wireSchemaHash         uint32 = 0xccb1a6fc
 	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -1767,6 +1767,8 @@ func (v autoCard) encodeWire(w *zigui.WireWriter) {
 	w.Str(5, v.StatusVar)
 	w.Str(6, v.Chain)
 	w.Bool(7, v.Enabled)
+	w.Str(8, v.State)
+	w.Str(9, v.StateVar)
 }
 
 func (v autoListState) encodeWire(w *zigui.WireWriter) {
@@ -1787,6 +1789,7 @@ func (v autoSchedCard) encodeWire(w *zigui.WireWriter) {
 	w.Str(9, v.WarnTone)
 	w.Str(10, v.WarnText)
 	w.Bool(11, v.Enabled)
+	w.Str(12, v.Coalesced)
 }
 
 func (v autoSchedsState) encodeWire(w *zigui.WireWriter) {
@@ -1809,6 +1812,19 @@ func (v autoRunsState) encodeWire(w *zigui.WireWriter) {
 	w.List(2, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
 }
 
+func (v autoCoordRow) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Dot)
+	w.Str(2, v.Label)
+	w.Str(3, v.Line)
+	w.Str(4, v.Badge)
+	w.Str(5, v.BadgeVar)
+}
+
+func (v autoCoordState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.List(2, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
 func (v autoBodyState) encodeWire(w *zigui.WireWriter) {
 	w.Str(1, v.ListTitle)
 	w.Str(2, v.SchedTitle)
@@ -1817,6 +1833,7 @@ func (v autoBodyState) encodeWire(w *zigui.WireWriter) {
 	w.Struct(5, func() { v.List.encodeWire(w) })
 	w.Struct(6, func() { v.Scheds.encodeWire(w) })
 	w.Struct(7, func() { v.Runs.encodeWire(w) })
+	w.Struct(8, func() { v.Coord.encodeWire(w) })
 }
 
 func (v autoState) encodeWire(w *zigui.WireWriter) {

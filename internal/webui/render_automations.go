@@ -33,6 +33,8 @@ type autoCard struct {
 	WatchDir  string `json:"watchDir"`
 	Status    string `json:"status"` // LastStatus; "" = no badge
 	StatusVar string `json:"statusVar"`
+	State     string `json:"state"` // live coordinator state (running/queued/deferred); "" = idle
+	StateVar  string `json:"stateVar"`
 	Chain     string `json:"chain"`
 	Enabled   bool   `json:"enabled"`
 }
@@ -54,7 +56,8 @@ type autoSchedCard struct {
 	Trigger   string `json:"trigger"`
 	Gates     string `json:"gates"`
 	LastFired string `json:"lastFired"`
-	WarnTone  string `json:"warnTone"` // "" = no warning
+	Coalesced string `json:"coalesced"` // "coalesced at HH:MM" when a pending sweep is folded; "" otherwise
+	WarnTone  string `json:"warnTone"`  // "" = no warning
 	WarnText  string `json:"warnText"`
 	Enabled   bool   `json:"enabled"`
 }
@@ -83,12 +86,29 @@ type autoRunsState struct {
 	Rows  []autoRunRow `json:"rows"`
 }
 
+// autoCoordRow is one live run in the coordinator status region (running or queued).
+type autoCoordRow struct {
+	Dot      string `json:"dot"` // status-dot variant
+	Label    string `json:"label"`
+	Line     string `json:"line"` // trigger·file, or the wait reason
+	Badge    string `json:"badge"`
+	BadgeVar string `json:"badgeVar"`
+}
+
+// autoCoordState is the live status region (running · queued). Empty rows ⇒ nothing running, so the
+// section is omitted entirely (nothing to say when idle).
+type autoCoordState struct {
+	Title string         `json:"title"`
+	Rows  []autoCoordRow `json:"rows"`
+}
+
 // autoBodyState is the #auto-body inner state (version-gated ~1 Hz tick patch target).
 type autoBodyState struct {
 	ListTitle  string          `json:"listTitle"`
 	SchedTitle string          `json:"schedTitle"`
 	RunsTitle  string          `json:"runsTitle"`
 	Labels     autoLabels      `json:"labels"`
+	Coord      autoCoordState  `json:"coord"`
 	List       autoListState   `json:"list"`
 	Scheds     autoSchedsState `json:"scheds"`
 	Runs       autoRunsState   `json:"runs"`
@@ -107,6 +127,7 @@ type autoState struct {
 // fails the Zig slice parse (and would silently drop the tab to the Go fallback).
 func emptyAutoBody() autoBodyState {
 	return autoBodyState{
+		Coord:  autoCoordState{Rows: []autoCoordRow{}},
 		List:   autoListState{Cards: []autoCard{}},
 		Scheds: autoSchedsState{Cards: []autoSchedCard{}},
 		Runs:   autoRunsState{Rows: []autoRunRow{}},
@@ -144,18 +165,48 @@ func (u *UI) automationsState() autoState {
 // their target from it.
 func (u *UI) autoBodyState() autoBodyState {
 	autos := u.svc.Automations.List()
+	cs := u.svc.Automations.CoordStatus()
+	live := autoLiveIndex(cs)
 	return autoBodyState{
 		ListTitle:  i18n.T("tab.automations"),
 		SchedTitle: i18n.T("automations.schedules"),
 		RunsTitle:  i18n.T("automations.recentRuns"),
 		Labels:     autoLabelsOf(),
-		List:       autoListStateOf(autos),
-		Scheds:     autoSchedsStateOf(u.svc.Automations.ListSchedules(), autos),
+		Coord:      autoCoordStateOf(cs),
+		List:       autoListStateOf(autos, live),
+		Scheds:     autoSchedsStateOf(u.svc.Automations.ListSchedules(), autos, live),
 		Runs:       autoRunsStateOf(u.svc.Automations.Runs(20)),
 	}
 }
 
-func autoListStateOf(autos []automation.Automation) autoListState {
+// autoLive is an automation's live coordinator state, indexed by automation id.
+type autoLive struct {
+	State       string // running/queued/deferred (localized); "" = idle
+	StateVar    string
+	CoalescedAt string // "HH:MM" when a pending sweep of this automation is coalesced
+}
+
+// autoLiveIndex maps automation id → its live state from a coordinator snapshot. Running wins over
+// queued (an automation can appear queued for a coalesced follow-up while running).
+func autoLiveIndex(cs automation.CoordStatus) map[string]autoLive {
+	m := make(map[string]autoLive, len(cs.Running)+len(cs.Queued))
+	for _, q := range cs.Queued {
+		l := autoLive{State: i18n.T("automations.coord.queued"), StateVar: "secondary"}
+		if q.Reason == automation.ReasonStreaming {
+			l.State = i18n.T("automations.coord.deferred")
+		}
+		if q.Coalesced {
+			l.CoalescedAt = q.CoalescedAt
+		}
+		m[q.AutomationID] = l
+	}
+	for _, r := range cs.Running {
+		m[r.AutomationID] = autoLive{State: i18n.T("automations.coord.running"), StateVar: "info", CoalescedAt: m[r.AutomationID].CoalescedAt}
+	}
+	return m
+}
+
+func autoListStateOf(autos []automation.Automation, live map[string]autoLive) autoListState {
 	st := autoListState{
 		New:   i18n.T("automations.new"),
 		Empty: i18n.T("automations.emptyList"),
@@ -174,13 +225,61 @@ func autoListStateOf(autos []automation.Automation) autoListState {
 				v = "warning"
 			}
 		}
+		lv := live[a.ID]
 		st.Cards = append(st.Cards, autoCard{
 			ID: a.ID, Label: autoLabelOf(a.Label), WatchDir: a.WatchDir,
 			Status: a.LastStatus, StatusVar: v,
+			State: lv.State, StateVar: lv.StateVar,
 			Chain: autoChainSummary(a.Actions), Enabled: a.Enabled,
 		})
 	}
 	return st
+}
+
+// autoCoordStateOf builds the live status region (running first, then queued with reasons).
+func autoCoordStateOf(cs automation.CoordStatus) autoCoordState {
+	st := autoCoordState{Title: i18n.T("automations.coord.title"), Rows: make([]autoCoordRow, 0, len(cs.Running)+len(cs.Queued))}
+	for _, r := range cs.Running {
+		st.Rows = append(st.Rows, autoCoordRow{
+			Dot: "info", Label: autoLabelOf(r.Label), Line: autoCoordLine(r.Trigger, r.File),
+			Badge: i18n.T("automations.coord.running"), BadgeVar: "info",
+		})
+	}
+	for _, q := range cs.Queued {
+		badge, bvar := i18n.T("automations.coord.queued"), "secondary"
+		if q.Reason == automation.ReasonStreaming {
+			badge = i18n.T("automations.coord.deferred")
+		}
+		if q.Coalesced {
+			badge = i18n.T("automations.coord.coalesced")
+		}
+		st.Rows = append(st.Rows, autoCoordRow{
+			Dot: "secondary", Label: autoLabelOf(q.Label), Line: autoCoordReason(q), Badge: badge, BadgeVar: bvar,
+		})
+	}
+	return st
+}
+
+// autoCoordLine renders a running row's sub-line: "trigger" for a sweep, "trigger · file" for one file.
+func autoCoordLine(trigger, file string) string {
+	if file == "" {
+		return i18n.T("automations.coord.sweep", i18n.A{"trigger": trigger})
+	}
+	return i18n.T("automations.coord.onFile", i18n.A{"trigger": trigger, "file": file})
+}
+
+// autoCoordReason renders a queued row's wait reason.
+func autoCoordReason(q automation.CoordQueued) string {
+	switch q.Reason {
+	case automation.ReasonPath:
+		return i18n.T("automations.coord.waitPath", i18n.A{"label": autoLabelOf(q.BlockLabel)})
+	case automation.ReasonHeavy:
+		return i18n.T("automations.coord.waitHeavy")
+	case automation.ReasonStreaming:
+		return i18n.T("automations.coord.waitStreaming")
+	default:
+		return i18n.T("automations.coord.waitCurrent")
+	}
 }
 
 // autoSchedsStateOf resolves the schedule cards. autos supplies each schedule's target
@@ -190,7 +289,7 @@ func autoListStateOf(autos []automation.Automation) autoListState {
 // section on len(autos)>0 hid every existing schedule - and its delete/toggle controls - while the
 // scheduler kept firing them: a nightly delete-purge with no UI to see or stop it. The cards
 // render regardless; only the New button is gated.
-func autoSchedsStateOf(scheds []automation.Schedule, autos []automation.Automation) autoSchedsState {
+func autoSchedsStateOf(scheds []automation.Schedule, autos []automation.Automation, live map[string]autoLive) autoSchedsState {
 	st := autoSchedsState{
 		New:     i18n.T("automations.sch.new"),
 		Gated:   len(autos) == 0,
@@ -209,6 +308,9 @@ func autoSchedsStateOf(scheds []automation.Schedule, autos []automation.Automati
 			StateText: i18n.T("common.off"), StateVar: "secondary",
 			Trigger: autoTriggerSummary(s), Gates: autoGateSummary(s),
 			LastFired: autoLastFired(s), Enabled: s.Enabled,
+		}
+		if at := live[s.AutomationID].CoalescedAt; at != "" {
+			c.Coalesced = i18n.T("automations.sch.coalesced", i18n.A{"at": at})
 		}
 		switch {
 		case !ok:
@@ -277,7 +379,7 @@ func (u *UI) autoBody() string {
 
 // autoSchedulesHTML renders the schedules section for the given data (ctl/behaviour tests).
 func (u *UI) autoSchedulesHTML(scheds []automation.Schedule, autos []automation.Automation) string {
-	return autoSchedsHTML(autoSchedsStateOf(scheds, autos), autoLabelsOf())
+	return autoSchedsHTML(autoSchedsStateOf(scheds, autos, nil), autoLabelsOf())
 }
 
 // automationsHTML is the pure Go renderer (golden reference; byte-identical to Zig).
@@ -290,9 +392,27 @@ func automationsHTML(st autoState) string {
 
 // autoBodyHTML is the pure #auto-body inner renderer.
 func autoBodyHTML(st autoBodyState) string {
-	return section(st.ListTitle, autoListHTML(st.List, st.Labels)) +
+	return autoCoordHTML(st.Coord) +
+		section(st.ListTitle, autoListHTML(st.List, st.Labels)) +
 		section(st.SchedTitle, autoSchedsHTML(st.Scheds, st.Labels)) +
 		section(st.RunsTitle, autoRunsHTML(st.Runs))
+}
+
+// autoCoordHTML renders the live status region (running · queued with reasons). Renders nothing
+// when idle - there is nothing to say, and a permanent empty box is noise.
+func autoCoordHTML(st autoCoordState) string {
+	if len(st.Rows) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="rp-card">`)
+	for _, r := range st.Rows {
+		b.WriteString(`<div class=kv><span class=kv-k>` + dot(r.Dot) + ` ` + html.EscapeString(r.Label) +
+			` <span class=np-artist>` + html.EscapeString(r.Line) + `</span></span>` +
+			`<span class=kv-v>` + badge(r.Badge, r.BadgeVar) + `</span></div>`)
+	}
+	b.WriteString(`</div>`)
+	return section(st.Title, b.String())
 }
 
 func autoListHTML(st autoListState, lb autoLabels) string {
@@ -305,8 +425,11 @@ func autoListHTML(st autoListState, lb autoLabels) string {
 	b.WriteString(`<div class=grid>`)
 	for _, a := range st.Cards {
 		status := ""
+		if a.State != "" {
+			status += badge(a.State, a.StateVar) // live coordinator state leads the last-run status
+		}
 		if a.Status != "" {
-			status = badge(a.Status, a.StatusVar)
+			status += badge(a.Status, a.StatusVar)
 		}
 		b.WriteString(`<div class="rp-card"><div class=card-label>` + html.EscapeString(a.Label) + `</div>` +
 			`<div class=np-artist>` + html.EscapeString(a.WatchDir) + `</div>` +
@@ -341,11 +464,15 @@ func autoSchedsHTML(st autoSchedsState, lb autoLabels) string {
 		if s.WarnTone != "" {
 			warn = hint(s.WarnTone, s.WarnText)
 		}
+		coalesced := ""
+		if s.Coalesced != "" {
+			coalesced = ` ` + badge(s.Coalesced, "secondary")
+		}
 		b.WriteString(`<div class="rp-card"><div class=card-label>` + html.EscapeString(s.Label) + `</div>` +
 			`<div class=np-artist>` + html.EscapeString(s.Target) + `</div>` +
 			`<div class=np-meta>` + badge(s.StateText, s.StateVar) + ` ` + html.EscapeString(s.Trigger) + `</div>` +
 			`<div class=np-meta>` + html.EscapeString(s.Gates) + `</div>` +
-			`<div class=np-meta>` + html.EscapeString(s.LastFired) + `</div>` + warn +
+			`<div class=np-meta>` + html.EscapeString(s.LastFired) + coalesced + `</div>` + warn +
 			toggleRowDL(lb.Enabled, lb.EnabledDL, "auto-sch-tgl:"+s.ID, s.Enabled) +
 			btnRow(btn(lb.Edit, "outline", "auto-sch-edit:"+s.ID, ""),
 				btn(lb.Delete, "destructive", "auto-sch-del:"+s.ID, "")) + `</div>`)

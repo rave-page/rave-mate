@@ -201,6 +201,10 @@ type Manager interface {
 	// "manual-file") - the secondary Run-now path.
 	RunManual(ctx context.Context, id, filePath string) (Run, error)
 	Runs(limit int) []Run // recent runs across all automations, newest first
+	// CoordStatus snapshots what the run coordinator is running + has queued (UI status region).
+	CoordStatus() CoordStatus
+	// CoordConflict reports whether a rules sweep of id would wait now, and on what (Run-now line).
+	CoordConflict(id string) (SweepConflict, bool)
 	ListSchedules() []Schedule
 	SaveSchedule(s Schedule) (Schedule, error)
 	DeleteSchedule(id string) error

@@ -441,6 +441,7 @@ func TestOnScheduleSkipsDisabledAutomation(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 	m.onSchedule(s.ID)
+	waitRunsAtLeast(t, m, 1) // onSchedule now sweeps through the coordinator (async)
 	if _, err := os.Stat(filepath.Join(dest, "set.wav")); err != nil {
 		t.Fatalf("an enabled automation must still run on its schedule: %v", err)
 	}

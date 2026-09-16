@@ -134,6 +134,7 @@ func TestRunSweepEqualsScheduleFire(t *testing.T) {
 		t.Fatalf("save sched: %v", err)
 	}
 	sm.onSchedule(sch.ID)
+	waitRunsAtLeast(t, sm, 3) // onSchedule sweeps through the coordinator (async)
 
 	// Same files copied by both paths; the non-matching files untouched by both.
 	manualOut := baseNames(lsDir(t, filepath.Join(mdir, "out")))
@@ -177,6 +178,20 @@ func TestRunManualBypassesMatch(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "out", "note-a.txt")); err != nil {
 		t.Fatalf("manual file not copied: %v", err)
 	}
+}
+
+// waitRunsAtLeast polls until the service has recorded ≥ n runs (schedule/watch fire through the
+// coordinator asynchronously now).
+func waitRunsAtLeast(t *testing.T, m *Service, n int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(m.Runs(0)) >= n {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d runs, got %d", n, len(m.Runs(0)))
 }
 
 func lsDir(t *testing.T, dir string) []string {

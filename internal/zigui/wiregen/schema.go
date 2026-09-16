@@ -772,7 +772,7 @@ var schema = []msg{
 	},
 	{
 		name: "AutoCard", goT: "autoCard", zigT: "automations.Card",
-		fs: []field{s(1, "ID", "id"), s(2, "Label", "label"), s(3, "WatchDir", "watchDir"), s(4, "Status", "status"), s(5, "StatusVar", "statusVar"), s(6, "Chain", "chain"), b(7, "Enabled", "enabled")},
+		fs: []field{s(1, "ID", "id"), s(2, "Label", "label"), s(3, "WatchDir", "watchDir"), s(4, "Status", "status"), s(5, "StatusVar", "statusVar"), s(6, "Chain", "chain"), b(7, "Enabled", "enabled"), s(8, "State", "state"), s(9, "StateVar", "stateVar")},
 	},
 	{
 		name: "AutoListState", goT: "autoListState", zigT: "automations.ListState",
@@ -780,7 +780,7 @@ var schema = []msg{
 	},
 	{
 		name: "AutoSchedCard", goT: "autoSchedCard", zigT: "automations.SchedCard",
-		fs: []field{s(1, "ID", "id"), s(2, "Label", "label"), s(3, "Target", "target"), s(4, "StateText", "stateText"), s(5, "StateVar", "stateVar"), s(6, "Trigger", "trigger"), s(7, "Gates", "gates"), s(8, "LastFired", "lastFired"), s(9, "WarnTone", "warnTone"), s(10, "WarnText", "warnText"), b(11, "Enabled", "enabled")},
+		fs: []field{s(1, "ID", "id"), s(2, "Label", "label"), s(3, "Target", "target"), s(4, "StateText", "stateText"), s(5, "StateVar", "stateVar"), s(6, "Trigger", "trigger"), s(7, "Gates", "gates"), s(8, "LastFired", "lastFired"), s(9, "WarnTone", "warnTone"), s(10, "WarnText", "warnText"), b(11, "Enabled", "enabled"), s(12, "Coalesced", "coalesced")},
 	},
 	{
 		name: "AutoSchedsState", goT: "autoSchedsState", zigT: "automations.SchedsState",
@@ -795,9 +795,17 @@ var schema = []msg{
 		fs: []field{s(1, "Empty", "empty"), li(2, "Rows", "rows", "AutoRunRow")},
 	},
 	{
+		name: "AutoCoordRow", goT: "autoCoordRow", zigT: "automations.CoordRow",
+		fs: []field{s(1, "Dot", "dot"), s(2, "Label", "label"), s(3, "Line", "line"), s(4, "Badge", "badge"), s(5, "BadgeVar", "badgeVar")},
+	},
+	{
+		name: "AutoCoord", goT: "autoCoordState", zigT: "automations.Coord",
+		fs: []field{s(1, "Title", "title"), li(2, "Rows", "rows", "AutoCoordRow")},
+	},
+	{
 		name: "AutoBodyState", goT: "autoBodyState", zigT: "automations.Body", id: 42,
 		doc: "#auto-body (version-gated ~1 Hz tick)",
-		fs:  []field{s(1, "ListTitle", "listTitle"), s(2, "SchedTitle", "schedTitle"), s(3, "RunsTitle", "runsTitle"), st(4, "Labels", "labels", "AutoLabels"), st(5, "List", "list", "AutoListState"), st(6, "Scheds", "scheds", "AutoSchedsState"), st(7, "Runs", "runs", "AutoRunsState")},
+		fs:  []field{s(1, "ListTitle", "listTitle"), s(2, "SchedTitle", "schedTitle"), s(3, "RunsTitle", "runsTitle"), st(4, "Labels", "labels", "AutoLabels"), st(5, "List", "list", "AutoListState"), st(6, "Scheds", "scheds", "AutoSchedsState"), st(7, "Runs", "runs", "AutoRunsState"), st(8, "Coord", "coord", "AutoCoord")},
 	},
 	{
 		name: "AutoState", goT: "autoState", zigT: "automations.State", id: 41,

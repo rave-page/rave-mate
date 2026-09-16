@@ -70,8 +70,17 @@ func (m *Service) StartRun(mode RunMode, id, filePath string) (string, error) {
 	}
 	m.active[rc.runID] = rc
 	m.runsMu.Unlock()
+	// Register with the coordinator so unattended runs defer to this attended one (it holds a slot
+	// for its lifetime). Admitted immediately - a human is driving it, it is never queued.
+	var cj *coordJob
+	if m.coord != nil {
+		cj = m.coord.trackInteractive(a, filePath)
+	}
 	go func() {
 		defer debuglog.Recover(nil, source, false) // nil bus: service decoupled via Logger iface
+		if cj != nil {
+			defer m.coord.done(cj)
+		}
 		m.runInteractive(m.baseCtx(), rc, string(mode))
 	}()
 	return rc.runID, nil
