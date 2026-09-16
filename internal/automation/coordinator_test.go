@@ -2,6 +2,7 @@ package automation
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -101,8 +102,10 @@ func TestCoordPathOverlapSerializes(t *testing.T) {
 	c := newCoordinator(4, nil)
 	defer c.stop()
 	relA := make(chan struct{})
-	rA := c.submit(blockJob(cc, "A", false, false, relA, `D:\rec`))
-	rB := c.submit(blockJob(cc, "B", false, false, nil, `D:\rec\sub`)) // nested under A → waits
+	// OS-native paths: a Windows literal is one opaque name on Linux (ubuntu CI caught this).
+	rec := filepath.Join(t.TempDir(), "rec")
+	rA := c.submit(blockJob(cc, "A", false, false, relA, rec))
+	rB := c.submit(blockJob(cc, "B", false, false, nil, filepath.Join(rec, "sub"))) // nested under A → waits
 	if rA.queued || !rB.queued || rB.reason != reasonPath {
 		t.Fatalf("A=%+v B=%+v", rA, rB)
 	}
@@ -226,8 +229,9 @@ func TestCoordInteractiveHoldsSlot(t *testing.T) {
 	cc := &coordCtrl{}
 	c := newCoordinator(1, nil)
 	defer c.stop()
-	a := Automation{ID: "A", Label: "A", WatchDir: `D:\rec`, Actions: []Action{{Type: ActionTranscode, PresetID: "x"}}}
-	ij := c.trackInteractive(a, `D:\rec\live.wav`)
+	rec := filepath.Join(t.TempDir(), "rec")
+	a := Automation{ID: "A", Label: "A", WatchDir: rec, Actions: []Action{{Type: ActionTranscode, PresetID: "x"}}}
+	ij := c.trackInteractive(a, filepath.Join(rec, "live.wav"))
 	// a background sweep of the same automation coalesces behind the interactive run
 	r := c.submit(&coordJob{autoID: "A", label: "A", dirs: chainDirs(a), heavy: true, coalescable: true,
 		ctx: context.Background(), run: func(context.Context) []Run { cc.record("A"); return nil }})
