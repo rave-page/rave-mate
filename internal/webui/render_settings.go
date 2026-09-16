@@ -1246,8 +1246,10 @@ func (u *UI) rtspBlocks() []setBlock {
 	note := html.EscapeString(i18n.T("settings.body.rtsp.note")) + ` rtspt://&lt;this machine's IP&gt;` +
 		html.EscapeString(f.ResolvedListenAddr()) + html.EscapeString(f.ResolvedPath())
 	return []setBlock{
-		sbFpair(sbField(i18n.T("settings.body.rtsp.videoSource"), "set:rtsp-source", f.Source, "text"),
-			sbField(i18n.T("settings.body.rtsp.inputFormat"), "set:rtsp-format", f.InputFormat, "text")),
+		// Source can be a file, URL, "desktop" or a device - the Browse… button helps the file case
+		// (in-app picker), while a URL/device is still typeable.
+		sbPathRow(i18n.T("settings.body.rtsp.videoSource"), "set:rtsp-source", f.Source, "file"),
+		sbField(i18n.T("settings.body.rtsp.inputFormat"), "set:rtsp-format", f.InputFormat, "text"),
 		sbToggleTip(i18n.T("settings.body.rtsp.passthrough"), "set:rtsp-passthrough", f.Passthrough, tipTopicSt("rtsp-passthrough")),
 		sbFpair(sbField(i18n.T("settings.body.common.listenAddr"), "set:rtsp-listen", f.ListenAddr, "text"),
 			sbField(i18n.T("settings.body.rtsp.streamPath"), "set:rtsp-path", f.Path, "text")),

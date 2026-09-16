@@ -120,6 +120,7 @@ pub const XferSet = struct {
     autoLbl: []const u8 = "",
     dir: c.Field = .{},
     defaultDir: []const u8 = "",
+    browse: []const u8 = "",
 };
 
 pub const XferPend = struct {
@@ -463,6 +464,7 @@ fn renderXferSet(h: *Html, s: XferSet) !void {
     try c.subTabs(h, "peers-xfer-mode:", s.mode, &modes);
     try h.raw("</div>");
     try c.fieldOf(h, s.dir);
+    try c.btn(h, s.browse, "ghost", "pick-dir:peers-xfer-dir", "");
     try h.raw("<div class=np-artist>");
     try h.esc(s.defaultDir);
     try h.raw("</div></div>");

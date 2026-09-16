@@ -66,6 +66,7 @@ func peersFixtures() map[string]peersSt {
 			AcceptLbl: "Accept", Mode: "ask", AskLbl: "Ask", AutoLbl: "Automatic",
 			Dir:        newField("Save to", "peers-xfer-dir", "", "text"),
 			DefaultDir: "Default: C:\\Users\\dj\\Downloads",
+			Browse:     "Browse…",
 		},
 	}
 
@@ -167,6 +168,7 @@ func peersFixtures() map[string]peersSt {
 			AcceptLbl: "Accept", Mode: "auto", AskLbl: "Ask", AutoLbl: "Automatic",
 			Dir:        newField("Save to", "peers-xfer-dir", "D:\\incoming", "text"),
 			DefaultDir: "Default: C:\\Users\\dj\\Downloads",
+			Browse:     "Browse…",
 		},
 		Pend: []xferPendSt{
 			{Line: "Studio PC wants to send set.wav (2 files, 1.2 GB)",
@@ -289,6 +291,7 @@ func peersFixtures() map[string]peersSt {
 			AcceptLbl: `A&ccept"`, Mode: "ask", AskLbl: `A&sk'`, AutoLbl: `A&uto<">`,
 			Dir:        uiField{Label: `S&ave to"`, DL: `s&ave to"`, Act: "peers-xfer-dir", Value: `D:\p&th<"x">`, Type: "text"},
 			DefaultDir: `Default: C:\U&sers\"dj"`,
+			Browse:     `B&rowse<"…">`,
 		},
 		Pend: []xferPendSt{
 			{Line: `A&B wants to send "s'et".wav`,
@@ -358,6 +361,7 @@ func peersFixtures() map[string]peersSt {
 			AcceptLbl: longS, Mode: "auto", AskLbl: longS, AutoLbl: longS,
 			Dir:        newField(longS, "peers-xfer-dir", strings.Repeat("d/", 400), "text"),
 			DefaultDir: longS,
+			Browse:     longS,
 		},
 		Pend: []xferPendSt{{Line: longS, Btns: []uiBtn{{Label: longS, Variant: "go", Act: strings.Repeat("xfer-accept:t", 60), Val: "1"}}}},
 		Rows: []xferProgSt{{Title: longS, Bar: true, BarPct: progressPct(0.999999), BarCap: longS,
@@ -411,6 +415,7 @@ func peersFixtures() map[string]peersSt {
 			AcceptLbl: "受け入れる", Mode: "auto", AskLbl: "спросить", AutoLbl: "автоматически",
 			Dir:        newField("Сохранить в", "peers-xfer-dir", "D:\\Музыка\\входящие", "text"),
 			DefaultDir: "По умолчанию: C:\\Загрузки",
+			Browse:     "Обзор…",
 		},
 		Rows: []xferProgSt{{Title: "⇩ сет.wav от Студія", Bar: true, BarPct: progressPct(0.25),
 			BarCap: "4.2 МБ / 10.0 МБ · 1.1 МБ/с", Btn: uiBtn{Label: "Скасувати", Variant: "ghost", Act: "xfer-cancel:т☂"}}},

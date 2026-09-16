@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0x4229635f;
+pub const schema_hash: u32 = 0x9a6827b7;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -2416,6 +2416,7 @@ pub fn decodeXferSet(r: *wire.Reader, out: *peers.XferSet) wire.Error!void {
         6 => out.autoLbl = try r.str(t),
         7 => out.dir = try r.sub(c.Field, decodeUiField, t),
         8 => out.defaultDir = try r.str(t),
+        9 => out.browse = try r.str(t),
         else => try r.skip(t),
     };
 }

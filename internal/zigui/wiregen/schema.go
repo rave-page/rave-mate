@@ -855,7 +855,7 @@ var schema = []msg{
 	},
 	{
 		name: "XferSet", goT: "xferSetSt", zigT: "peers.XferSet",
-		fs: []field{b(1, "Show", "show"), st(2, "Enabled", "enabled", "UiToggle"), s(3, "AcceptLbl", "acceptLbl"), s(4, "Mode", "mode"), s(5, "AskLbl", "askLbl"), s(6, "AutoLbl", "autoLbl"), st(7, "Dir", "dir", "UiField"), s(8, "DefaultDir", "defaultDir")},
+		fs: []field{b(1, "Show", "show"), st(2, "Enabled", "enabled", "UiToggle"), s(3, "AcceptLbl", "acceptLbl"), s(4, "Mode", "mode"), s(5, "AskLbl", "askLbl"), s(6, "AutoLbl", "autoLbl"), st(7, "Dir", "dir", "UiField"), s(8, "DefaultDir", "defaultDir"), s(9, "Browse", "browse")},
 	},
 	{
 		name: "XferPend", goT: "xferPendSt", zigT: "peers.XferPend",
