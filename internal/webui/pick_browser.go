@@ -90,7 +90,6 @@ type pkState struct {
 	// listing cache: read off the act lane (a cold share must not wedge it)
 	entries []localmedia.Entry
 	listErr string
-	total   int // pre-cap count
 	gen     int // navigation generation; a stale bg read is dropped
 }
 
@@ -330,7 +329,7 @@ func (u *UI) pkSort(key string) {
 		s.sortBy, s.sortDesc = key, false
 	}
 	s.mu.Unlock()
-	u.pkPatchEntries()
+	u.pkRerender() // the sort chip's active/direction state lives in the toolbar, not #pk-entries
 }
 
 func (u *UI) pkView(grid bool) {
@@ -338,7 +337,7 @@ func (u *UI) pkView(grid bool) {
 	s.mu.Lock()
 	s.grid = grid
 	s.mu.Unlock()
-	u.pkPatchEntries()
+	u.pkRerender() // the List/Grid toggle's active state is in the toolbar
 }
 
 func (u *UI) pkFilterAll(all bool) {
@@ -346,7 +345,18 @@ func (u *UI) pkFilterAll(all bool) {
 	s.mu.Lock()
 	s.filterAll = all
 	s.mu.Unlock()
-	u.pkPatchEntries()
+	u.pkRerender() // the filter chip's active state is in the toolbar
+}
+
+// pkRerender re-renders the whole picker modal (toolbar chip states + entries). For chip clicks
+// where losing input focus is irrelevant; pkSetSearch keeps patching only #pk-entries so the
+// search box holds focus while typing.
+func (u *UI) pkRerender() {
+	s := u.pk()
+	s.mu.Lock()
+	tok := s.pkTok
+	s.mu.Unlock()
+	u.updateModalIf(tok, func() string { return u.pkModalHTML() })
 }
 
 func (u *UI) pkToggleHidden() {

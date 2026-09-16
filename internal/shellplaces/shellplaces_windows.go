@@ -52,6 +52,7 @@ const (
 	sigdnNormalDisplay = 0x0
 
 	sfgaoFolder = 0x20000000
+	sfgaoStream = 0x00400000 // set for .zip/.cab "compressed folder" items - exclude them
 
 	// IUnknown / IShellItem / IEnumShellItems vtable slots
 	slotRelease        = 2
@@ -92,7 +93,7 @@ func systemPlaces() []Place {
 
 	switch hr, _, _ := procCoInitializeEx.Call(0, coinitApartmentThreaded); uint32(hr) {
 	case 0, sFalse:
-		defer procCoUninitialize.Call()
+		defer func() { _, _, _ = procCoUninitialize.Call() }()
 	case rpcEChangedMode: // a different apartment on this thread - reuse it, don't tear it down
 	default:
 		return nil
@@ -137,8 +138,10 @@ func systemPlaces() []Place {
 // placeFromItem keeps folder items only and resolves the filesystem path + display name.
 func placeFromItem(child *comObj) (Place, bool) {
 	var attrs uint32
-	// GetAttributes(SFGAO_FOLDER): rv S_OK iff the item IS a folder; S_FALSE otherwise.
-	if hr := child.call(slotGetAttributes, sfgaoFolder, uintptr(unsafe.Pointer(&attrs))); int32(hr) < 0 || attrs&sfgaoFolder == 0 {
+	// GetAttributes(SFGAO_FOLDER|SFGAO_STREAM): keep real filesystem folders (FOLDER set), drop
+	// archive "compressed folders" like .zip/.cab (STREAM also set) - they're recent files, not dirs.
+	if hr := child.call(slotGetAttributes, sfgaoFolder|sfgaoStream, uintptr(unsafe.Pointer(&attrs))); int32(hr) < 0 ||
+		attrs&sfgaoFolder == 0 || attrs&sfgaoStream != 0 {
 		return Place{}, false
 	}
 	var pp *uint16
@@ -146,13 +149,13 @@ func placeFromItem(child *comObj) (Place, bool) {
 		return Place{}, false // virtual folder with no filesystem path - skip
 	}
 	path := pwToString(pp)
-	procCoTaskMemFree.Call(uintptr(unsafe.Pointer(pp)))
+	_, _, _ = procCoTaskMemFree.Call(uintptr(unsafe.Pointer(pp)))
 
 	name := ""
 	var pn *uint16
 	if hr := child.call(slotGetDisplayName, sigdnNormalDisplay, uintptr(unsafe.Pointer(&pn))); int32(hr) >= 0 && pn != nil {
 		name = pwToString(pn)
-		procCoTaskMemFree.Call(uintptr(unsafe.Pointer(pn)))
+		_, _, _ = procCoTaskMemFree.Call(uintptr(unsafe.Pointer(pn)))
 	}
 	if path == "" {
 		return Place{}, false
