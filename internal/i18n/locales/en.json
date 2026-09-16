@@ -2044,7 +2044,9 @@
       "recOn": "REC ⏺",
       "tc": "TC {tc}",
       "twitchConnecting": "Twitch …",
-      "twitchUser": "Twitch {login}"
+      "twitchUser": "Twitch {login}",
+      "twitchViewers": "{count} viewers",
+      "twitchVia": "via {peer}"
     },
     "subtitle": "Mid-set cockpit - everything happening now, one page",
     "sysperf": {

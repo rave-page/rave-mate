@@ -1357,13 +1357,20 @@ func (u *UI) stripRight() string {
 	if m := u.svc.Twitch; m != nil && u.svc.Cfg != nil && u.svc.Cfg.Features.Twitch.Enabled {
 		switch {
 		case m.SignedIn() && m.Self().Login != "":
-			p = append(p, i18n.T("live.strip.twitchUser", i18n.A{"login": m.Self().Login}))
+			line := i18n.T("live.strip.twitchUser", i18n.A{"login": m.Self().Login})
+			if via := m.Via(); via != "" { // federated: a paired peer owns the Twitch session
+				line += " " + i18n.T("live.strip.twitchVia", i18n.A{"peer": via})
+			}
+			if vi := m.LiveInfo(); vi.Live { // viewers only while the stream is actually live
+				line += " · " + i18n.T("live.strip.twitchViewers", i18n.A{"count": fmt.Sprint(vi.ViewerCount)})
+			}
+			p = append(p, line)
 		case m.SignedIn():
 			p = append(p, i18n.T("live.strip.twitchConnecting"))
 		}
 	}
 	// P8: system headroom is a shape in the SYSTEM well (#live-perf2 "HEADROOM" line); the strip no
-	// longer repeats the free-CPU/RAM figure. Kept ambient: Twitch login only.
+	// longer repeats the free-CPU/RAM figure. Kept ambient: Twitch login + viewers.
 	return strings.Join(p, " · ")
 }
 
