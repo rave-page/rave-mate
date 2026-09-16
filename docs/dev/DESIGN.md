@@ -178,6 +178,25 @@ Dated changes to the rules themselves. An entry here overrides older prose above
   golden (v1 JSON + v2 RZW1) pin them byte-for-byte. Coordinator rules: `.devnotes/
   SCHEDULE_CONDITIONS_SUMMARY.md` § Run coordinator.
 
+- **2026-09-16 — self-feeding automations are refused at the source, not merely bounded.** The
+  run coordinator caps how badly a mis-set automation can misbehave, but an automation whose
+  chain writes a matching file back into its own watch folder (transcode alongside, copy-to of a
+  produced file into the watched tree) is a feedback loop: every fire produces the input of the
+  next. `automation.CheckLoop` threads the working file through the chain and classifies the
+  resting place — DEFINITE when an unconditional producer leaves a file whose extension re-passes
+  the Match inside the watched tree (empty extension list = any); POSSIBLE when the output
+  extension may not match, or the producer can skip (trim-silence converges when there is no
+  silence); NONE when the output leaves the folder (the flagship transcode → move to archive →
+  delete) or a move/copy only relocates the ORIGINAL. A definite loop is refused at Save — the
+  editor banner + live verdict name the step, the extension and the fix, and `Service.Save`
+  backstops the wire/studio path — while a possible loop saves with a non-blocking warning under
+  the chain. Stored definite loops (saved before the check existed) never fire: `sweepRun` records
+  the skip as an error run so the card shows why, `onWatchFile` logs and drops. Cards carry a
+  `.rp-badge` warning ("self-triggering" / "may re-trigger") — state, not a control (P16); the
+  refusal is a verdict, same shape as the existing preset/watch-folder errors, never a modal.
+  Wire: `AutoCard`(10) and `AutoEditor`(16) each gain an appended `Warn` string; Go render + Zig
+  mirror + goldens pin it. Rules: `internal/automation/loop.go`.
+
 - **2026-09-16 — via-peer session federation UI.** When an external-platform feature (VRChat,
   Twitch, World-Sync) is served by a paired instance because there is no local session, the
   surface shows the borrowed identity as a state **badge** (`.rp-badge` / `statusRow`), a **hint**
