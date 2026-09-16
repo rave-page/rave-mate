@@ -3,6 +3,7 @@ package webui
 import (
 	"context"
 	"encoding/json"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -48,18 +49,21 @@ func init() {
 	onPrefix("pick-apply:", func(u *UI, m actMsg) { u.pickApply(m.arg("pick-apply:"), m.Val) })
 }
 
-// runPick shows the native dialog off-thread, then schedules the chosen path back onto the act
-// lane. Headless remote sessions refuse: a native dialog would pop on the CONTROLLED machine's
-// desktop - the one surface remote mode must never touch.
+// runPick opens the in-app file browser (pick_browser.go) - THE file browser, replacing the native
+// OS dialog everywhere. It browses THIS daemon's filesystem in-app, so it works headless and in
+// remote/virtual sessions (no desktop dialog pops on the controlled machine). The native dialog
+// survives only as the "System dialog…" escape hatch (Windows), reached via runNativePick.
 func (u *UI) runPick(kind, container, target string) {
+	u.pickOpen(kind, container, target)
+}
+
+// runNativePick is the escape hatch: shows the native OS dialog off-thread, then schedules the
+// chosen path back through the unchanged pickApply return-trip (its stale-token guard). ask is the
+// modal that owned the Browse button.
+func (u *UI) runNativePick(kind, container, target string, ask modalTok) {
 	if target == "" {
 		return
 	}
-	if u.virtual() {
-		u.toast(i18n.T("library.mirror.noPicker"))
-		return
-	}
-	tok := u.modalCur() // on the act lane: the modal that owns the Browse button being clicked
 	u.bg(func() {
 		// Not u.actx(): browsing can take well over 30 s. A modal dialog can't be force-closed on
 		// timeout anyway - the deadline only unblocks an abandoned call.
@@ -72,10 +76,10 @@ func (u *UI) runPick(kind, container, target string) {
 		switch kind {
 		case "dir":
 			p, err = u.PickDirectory(ctx)
-		case "file":
-			p, err = u.PickFile(ctx)
 		case "save":
 			p, err = u.ChooseSavePath(ctx, "", container)
+		default: // file, multi (native has no multi-select - one file)
+			p, err = u.PickFile(ctx)
 		}
 		if err != nil {
 			u.logErr("pick "+kind, err)
@@ -85,9 +89,13 @@ func (u *UI) runPick(kind, container, target string) {
 		if p == "" || u.stopped() { // user cancelled, or the window is gone
 			return
 		}
-		u.redispatch("pick-apply:"+strconv.FormatUint(u.pickPut(pickReq{tok, target}), 10), p)
+		u.redispatch("pick-apply:"+strconv.FormatUint(u.pickPut(pickReq{ask, target}), 10), p)
 	})
 }
+
+// nativePickerAvailable reports whether the native OS dialog exists on this platform (Windows only;
+// pickers.go stubs it elsewhere). Gates the "System dialog…" escape hatch.
+func nativePickerAvailable() bool { return runtime.GOOS == "windows" }
 
 // pickPut registers a returning dialog's request and yields its id.
 func (u *UI) pickPut(r pickReq) uint64 {

@@ -133,3 +133,26 @@
 .pb-label { font: 600 10px/1 var(--font-display,Orbitron), sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--rp-muted); }
 .pb-hint { font: 10px var(--font-mono, monospace); color: var(--rp-muted); }
 .pb-grp { border-top: 1px dashed var(--rp-faint); padding-top: var(--space-2); }
+
+/* in-app file/dir picker modal (pick_browser.go): the ONE file browser, hosted in a modal.
+   Wide layout only when the modal holds a .pk-wrap; two-pane (sidebar + main). */
+.modal:has(.pk-wrap) { width: min(940px, calc(100vw - 32px)); }
+.pk-wrap { display: grid; grid-template-columns: 190px 1fr; gap: 14px; height: min(560px, 70vh); }
+.pk-side { overflow-y: auto; border-right: 1px solid rgba(255,255,255,.08); padding-right: 8px; }
+.pk-side .libnav-hd:first-child { margin-top: 0; }
+.pk-main { display: flex; flex-direction: column; min-width: 0; gap: 8px; }
+.pk-entries { flex: 1; overflow-y: auto; min-height: 0; }
+.pk-path { flex: 1; min-width: 120px; }
+.pk-read { flex: 1; min-width: 0; font: 11px var(--font-mono, monospace); color: var(--rp-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pk-cols { display: grid; grid-template-columns: 1fr auto auto 72px; gap: 6px 12px; font: 10px/1 var(--font-display,Orbitron), sans-serif;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--rp-muted); padding: 2px 6px; }
+.pk-row { display: grid; grid-template-columns: 1fr auto auto 72px; gap: 6px 12px; align-items: center;
+  padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+.pk-row:hover { background: rgba(255,255,255,.05); }
+.pk-row.sel { background: rgba(247,8,100,.16); }
+.pk-row-n { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.pk-row-n span.t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pk-row-m, .pk-row-s, .pk-row-k { font: 11px var(--font-mono, monospace); color: var(--rp-muted); text-align: right; }
+.pk-row-k { text-align: left; }
+.pk-tile.sel { outline: 2px solid var(--color-brand-base, #F70864); outline-offset: -2px; }

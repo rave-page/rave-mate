@@ -192,3 +192,82 @@ func TestRunNowFileRefusedAfterSessionReplaced(t *testing.T) {
 		t.Fatalf("a file picked for automation A armed automation B's delete chain: %q", u.ar.file)
 	}
 }
+
+// ── in-app browser (pick_browser.go) apply flow ──
+// The in-app picker is a MODAL that supersedes the asker, so it cannot reuse pickApply's
+// "asker still on screen" guard. Instead pkApply RESTORES the asker's modal identity before the
+// target act re-runs. These pin that both a tok-guarded modal form and a page target apply right.
+
+// TestInAppPickAppliesToModalForm: a dir chosen in the in-app browser lands on the editor form that
+// opened it, and the editor modal's identity is restored (so its updateModalIf re-render lands).
+func TestInAppPickAppliesToModalForm(t *testing.T) {
+	u, _ := newTestHeadless(t)
+	u.ae.load(automation.Automation{Label: "A"})
+	editor := aeOpenForm(u) // Browse clicked here: pickOpen pins `editor` as the asker
+
+	// the picker modal took the slot; the user navigated to C:\picked
+	s := u.pk()
+	tok := u.openModalAs(pkOwner, "")
+	s.mu.Lock()
+	s.open, s.kind, s.target, s.askTok, s.dir, s.pkTok = true, "dir", "auto-ed:watch", editor, `C:\picked`, tok
+	s.mu.Unlock()
+
+	u.pkChoose()
+
+	u.ae.mu.Lock()
+	watch := u.ae.watch
+	u.ae.mu.Unlock()
+	if watch != `C:\picked` {
+		t.Fatalf("the in-app pick did not reach the editor form: watch=%q", watch)
+	}
+	if u.modalCur() != editor {
+		t.Fatal("the asker modal's identity was not restored, so its re-render would be dropped")
+	}
+	if !strings.Contains(u.aeModalHTML(), `C:\picked`) {
+		t.Fatal("the editor modal does not show the picked folder")
+	}
+}
+
+// TestInAppPickToPageTarget: a page-level Browse (no modal asker) applies through the else path -
+// the target act runs and main re-renders, exactly like the native page pick.
+func TestInAppPickToPageTarget(t *testing.T) {
+	u, _ := newTestHeadless(t)
+	u.re.mu.Lock()
+	u.re.kind, u.re.src, u.re.preset, u.re.dest = "dir", `C:\A`, "remux", `C:\old`
+	u.re.mu.Unlock()
+
+	u.pkApply(modalTok{}, "re-dest", []string{`C:\picked`}) // zero asker token = page target
+
+	u.re.mu.Lock()
+	dest := u.re.dest
+	u.re.mu.Unlock()
+	if dest != `C:\picked` {
+		t.Fatalf("page-target apply failed: dest=%q", dest)
+	}
+}
+
+// TestInAppPickChooseIsOneShot: pkChoose clears the session, so a second Choose can't re-fire the
+// same pick into the form.
+func TestInAppPickChooseIsOneShot(t *testing.T) {
+	u, _ := newTestHeadless(t)
+	u.ae.load(automation.Automation{Label: "A"})
+	editor := aeOpenForm(u)
+	s := u.pk()
+	tok := u.openModalAs(pkOwner, "")
+	s.mu.Lock()
+	s.open, s.kind, s.target, s.askTok, s.dir, s.pkTok = true, "dir", "auto-ed:watch", editor, `C:\one`, tok
+	s.mu.Unlock()
+
+	u.pkChoose()
+	// second choose: session closed, dir now different - must not overwrite the applied value
+	s.mu.Lock()
+	s.dir = `C:\two`
+	s.mu.Unlock()
+	u.pkChoose()
+
+	u.ae.mu.Lock()
+	defer u.ae.mu.Unlock()
+	if u.ae.watch != `C:\one` {
+		t.Fatalf("a replayed Choose re-applied: watch=%q, want C:\\one", u.ae.watch)
+	}
+}
