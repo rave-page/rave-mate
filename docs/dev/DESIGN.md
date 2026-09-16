@@ -138,6 +138,29 @@ notes.
 
 Dated changes to the rules themselves. An entry here overrides older prose above.
 
+- **2026-09-16 — Run now = schedule semantics; single-file is the secondary; runs are
+  coordinated.** The Automations "Run now" modal used to make you pick ONE file (`RunManual`, no
+  match rules). It now DEFAULTS to the automation's own conditions — a sweep identical to a
+  schedule fire (`Service.RunSweep` → the shared `sweepRun`, so manual and scheduled can never
+  diverge) — and renders the active conditions as `.rp-badge` state badges, a bounded live preview
+  (name · age · size, "and N more", a total line), a real `.rp-empty` with why-hints when nothing
+  matches, exactly ONE filled primary "Run on N files", and a secondary switch back to the
+  single-file flow (`RunManual`, trigger `manual-file`, keeping the ignores-match copy). Every run
+  path (schedule sweep, watch-file, manual sweep, manual file, interactive) funnels through the new
+  `internal/automation` run coordinator: an automation never overlaps itself (a second sweep
+  coalesces into one pending run, shown "coalesced at HH:MM"), path-overlapping automations
+  serialize, heavy (ffmpeg) chains share `MaxHeavyRuns` slots (default 1) and defer while a stream
+  is live — reusing the ONE `governor.BackgroundAllowed` gate, never a second — and the queue is
+  bounded. The tab gained a live status region (running · queued with reasons; version-gated
+  tick), a per-card state badge (running/queued/deferred), schedule rows show coalesced, and the
+  Run-now modal states a pending conflict BEFORE you press Run ("Will wait — …", the primary
+  becomes "Queue run"). Badges are state, chips are controls (P16), one filled primary (P16), the
+  preview + queue + coalescing are all bounded. Wire: `AutoRunNow`(110) + `AutoBodyState`(42)
+  appended fields; nested `ArBadge`/`ArPrevRow`/`AutoCoord(Row)` added; no new root id (the new
+  state nests under the existing dialog/tab roots). Go `render_*.go` + `native/zigui` mirror +
+  golden (v1 JSON + v2 RZW1) pin them byte-for-byte. Coordinator rules: `.devnotes/
+  SCHEDULE_CONDITIONS_SUMMARY.md` § Run coordinator.
+
 - **2026-09-16 — via-peer session federation UI.** When an external-platform feature (VRChat,
   Twitch, World-Sync) is served by a paired instance because there is no local session, the
   surface shows the borrowed identity as a state **badge** (`.rp-badge` / `statusRow`), a **hint**
