@@ -1,13 +1,13 @@
 {
-  "version": "nightly-1ae2ebb",
-  "build": 346,
-  "commit": "1ae2ebb",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-346-20260916-1ae2ebb.exe",
-  "sha256": "da2c18ad0ba925ae023264bd9ce8717b24c90e07ad4246980bb8dc8aaa5a64a6",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-346-20260916-1ae2ebb.exe",
-  "installer_sha256": "801f44b950c8d9018baa50a1a5962e5c058d694a06f075d63b47681c1216fa28",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-346-20260916-1ae2ebb",
-  "linux_sha256": "598199bd380c9f0a7129ee57eb74fcce522dfe38c19820e8f412a20dfc81a6c7",
+  "version": "nightly-d5a5a60",
+  "build": 347,
+  "commit": "d5a5a60",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-347-20260916-d5a5a60.exe",
+  "sha256": "bbf33678010ae59e30582678eafc9b98f1be1c3b7bf4407a55bf9da3d661d2d3",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-347-20260916-d5a5a60.exe",
+  "installer_sha256": "65fd178119c1036ed8e872edc3ea564f9351a98680fe627bce43c210c8417a76",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-347-20260916-d5a5a60",
+  "linux_sha256": "fe3a035878e442824af6fca8231d9147a2b9840e0a7178d621a761ba1bdfb6d1",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-09-16T13:11:58Z",
-  "notes": "docs(design): decision-log entry for the automation feedback-loop guard"
+  "released": "2026-09-16T15:10:29Z",
+  "notes": "eventbus: hand frames to the transport in seq order (peer dropped reordered frames)"
 }
