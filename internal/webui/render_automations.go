@@ -257,8 +257,21 @@ func autoCoordStateOf(cs automation.CoordStatus) autoCoordState {
 			Dot: "secondary", Label: autoLabelOf(q.Label), Line: autoCoordReason(q), Badge: badge, BadgeVar: bvar,
 		})
 	}
+	// Bound the on-screen region: the coordinator queue is already capped, but a mis-set
+	// transcode-into-its-own-watch-dir feedback loop can still fill it with many rows. Show a cap +
+	// a "+N" summary so the status region never grows tall on screen.
+	if len(st.Rows) > autoCoordRowCap {
+		extra := len(st.Rows) - (autoCoordRowCap - 1)
+		st.Rows = st.Rows[:autoCoordRowCap-1]
+		st.Rows = append(st.Rows, autoCoordRow{
+			Dot: "secondary", Label: i18n.T("automations.coord.more"), Badge: "+" + strconv.Itoa(extra), BadgeVar: "secondary",
+		})
+	}
 	return st
 }
+
+// autoCoordRowCap bounds how many live rows the status region shows (rest fold into a "+N" summary).
+const autoCoordRowCap = 10
 
 // autoCoordLine renders a running row's sub-line: "trigger" for a sweep, "trigger · file" for one file.
 func autoCoordLine(trigger, file string) string {

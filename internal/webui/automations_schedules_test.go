@@ -8,6 +8,27 @@ import (
 	"rave.page/mate/internal/automation"
 )
 
+// TestAutoCoordStateCapsRows: a feedback loop can queue many jobs; the status region caps the rows
+// and folds the rest into a "+N" summary (the queue itself is bounded elsewhere).
+func TestAutoCoordStateCapsRows(t *testing.T) {
+	cs := automation.CoordStatus{Running: []automation.CoordRunning{{Label: "A", Trigger: "manual"}}}
+	for i := 0; i < 20; i++ {
+		cs.Queued = append(cs.Queued, automation.CoordQueued{Label: "A", Reason: automation.ReasonCurrent})
+	}
+	st := autoCoordStateOf(cs)
+	if len(st.Rows) != autoCoordRowCap {
+		t.Fatalf("rows = %d, want %d", len(st.Rows), autoCoordRowCap)
+	}
+	last := st.Rows[len(st.Rows)-1]
+	if !strings.HasPrefix(last.Badge, "+") {
+		t.Fatalf("last row should be the +N summary: %+v", last)
+	}
+	// 1 running + 20 queued = 21 rows; cap 10 → 9 shown + a summary of 21-9 = 12.
+	if last.Badge != "+12" {
+		t.Fatalf("summary badge = %q, want +12", last.Badge)
+	}
+}
+
 // seed returns a form holding a minimal valid interval schedule.
 func seed(u *UI) {
 	u.as.label, u.as.autoID, u.as.kind = "Nightly sweep", "auto-1", automation.ScheduleInterval

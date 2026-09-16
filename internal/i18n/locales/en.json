@@ -65,6 +65,7 @@
       "queued": "queued",
       "deferred": "deferred",
       "coalesced": "coalesced",
+      "more": "…and more",
       "onFile": "{trigger} · {file}",
       "sweep": "{trigger} sweep",
       "waitCurrent": "waiting for its current run",
