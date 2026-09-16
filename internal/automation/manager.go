@@ -401,13 +401,54 @@ func (m *Service) Runs(limit int) []Run {
 	return append([]Run(nil), m.runsCache[:n]...) // defensive copy; master stays immutable
 }
 
-// RunManual runs an automation over one file on demand.
+// previewFileCap bounds the SweepPreview.Files listing (the UI shows a handful + "and N more").
+// Total/TotalBytes still count EVERY match; only the returned per-file slice is capped.
+const previewFileCap = 200
+
+// Preview lists the files a sweep would act on now - the same match rules over the same watch dir
+// a schedule fire uses (Run-now's rules-first mode renders this). Read-only; no run recorded.
+func (m *Service) Preview(id string) (SweepPreview, error) {
+	a, ok := m.Get(id)
+	if !ok {
+		return SweepPreview{}, fmt.Errorf("automation %q not found", id)
+	}
+	return m.previewOf(a), nil
+}
+
+// previewOf builds the bounded preview from the full match set (one ReadDir + stat per entry,
+// shared with the sweep run path via sweepEntries - never a second eligibility implementation).
+func (m *Service) previewOf(a Automation) SweepPreview {
+	entries := m.sweepEntries(a)
+	p := SweepPreview{AutomationID: a.ID, WatchDir: a.WatchDir, Match: a.Match, Total: len(entries)}
+	for i := range entries {
+		p.TotalBytes += entries[i].Size
+	}
+	if len(entries) > previewFileCap {
+		entries = entries[:previewFileCap]
+	}
+	p.Files = entries
+	return p
+}
+
+// RunSweep runs the automation over EVERY currently-matching file on demand - the DEFAULT Run-now,
+// byte-for-byte the same work a schedule fire does (both call sweepRun), differing only in the
+// trigger label ("manual" vs "schedule"). Records one Run per file, exactly like a schedule.
+func (m *Service) RunSweep(ctx context.Context, id string) (SweepResult, error) {
+	a, ok := m.Get(id)
+	if !ok {
+		return SweepResult{}, fmt.Errorf("automation %q not found", id)
+	}
+	return m.sweepRun(ctx, a, "manual"), nil
+}
+
+// RunManual runs the chain over one hand-picked file, bypassing the match rules (no eligible()
+// check) - the SECONDARY Run-now path, trigger "manual-file". The default is RunSweep.
 func (m *Service) RunManual(ctx context.Context, id, filePath string) (Run, error) {
 	a, ok := m.Get(id)
 	if !ok {
 		return Run{}, fmt.Errorf("automation %q not found", id)
 	}
-	return m.execute(ctx, a, filePath, "manual"), nil
+	return m.execute(ctx, a, filePath, "manual-file"), nil
 }
 
 // execute runs the chain, persists the Run + the automation's last-run summary.
@@ -492,29 +533,56 @@ func (m *Service) onSchedule(scheduleID string) {
 	_ = m.st.PutJSON(store.BucketSchedules, s.ID, s)
 	m.invalidateScheds() // LastFiredAt changed
 
-	ctx := m.baseCtx()
-	for _, f := range m.sweep(a) {
-		if ctx.Err() != nil {
-			return
-		}
-		m.execute(ctx, a, f, "schedule")
-	}
+	m.sweepRun(m.baseCtx(), a, "schedule")
 }
 
-// sweep lists eligible files directly under the automation's watch dir.
+// sweepRun is the ONE sweep→execute loop schedule fires and manual Run-now sweeps both take, so
+// the two can never diverge: list the watch dir's matching files, run the chain over each,
+// recording one Run per file. trigger is the ONLY difference ("schedule" vs "manual"). Stops early
+// if ctx is cancelled.
+func (m *Service) sweepRun(ctx context.Context, a Automation, trigger string) SweepResult {
+	res := SweepResult{AutomationID: a.ID, Trigger: trigger}
+	for _, f := range m.sweep(a) {
+		if ctx.Err() != nil {
+			return res
+		}
+		res.Runs = append(res.Runs, m.execute(ctx, a, f, trigger))
+	}
+	return res
+}
+
+// sweep lists eligible files directly under the automation's watch dir (paths only). The single
+// canonical listing is sweepEntries (one stat per file, feeding both the run and the preview).
 func (m *Service) sweep(a Automation) []string {
+	ents := m.sweepEntries(a)
+	out := make([]string, 0, len(ents))
+	for i := range ents {
+		out = append(out, ents[i].Path)
+	}
+	return out
+}
+
+// sweepEntries is the canonical watch-dir match: ReadDir, stat each regular file once, keep those
+// passing a.Match. It backs both the sweep run (sweep) and the preview (previewOf) so a sweep and
+// its preview can never disagree about which files match. The stat also carries the size/mtime the
+// preview renders - no second stat.
+func (m *Service) sweepEntries(a Automation) []SweepFile {
 	ents, err := os.ReadDir(a.WatchDir)
 	if err != nil {
 		return nil
 	}
-	var out []string
+	var out []SweepFile
 	for _, e := range ents {
 		if e.IsDir() {
 			continue
 		}
 		p := filepath.Join(a.WatchDir, e.Name())
-		if m.eligible(a, p) {
-			out = append(out, p)
+		fi, err := os.Stat(p)
+		if err != nil || fi.IsDir() {
+			continue
+		}
+		if a.Match.matches(strings.ToLower(filepath.Ext(p)), filepath.Base(p), fi.Size(), fi.ModTime()) {
+			out = append(out, SweepFile{Path: p, Name: e.Name(), Size: fi.Size(), ModTime: fi.ModTime()})
 		}
 	}
 	return out
