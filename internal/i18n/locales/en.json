@@ -4094,7 +4094,9 @@
     "send": "Send",
     "sendPlaceholder": "Send a message to chat…",
     "status": {
+      "signInHint": "Sign in under Settings › Integrations",
       "signedInAs": "Signed in as {name}",
+      "signedOut": "Not signed in",
       "viaPeer": "Session served by peer {peer} - all features work as if signed in here. Login stays on that instance.",
       "local": "session held on this instance"
     },

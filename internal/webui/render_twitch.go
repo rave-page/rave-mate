@@ -228,6 +228,11 @@ func (u *UI) twStatus(st *twState) {
 		st.HasStatus, st.StatusVariant = true, "success"
 		st.StatusLabel = i18n.T("twitch.status.signedInAs", i18n.A{"name": orDash(name)})
 		st.StatusLine = i18n.T("twitch.status.local")
+	default:
+		// P12: signed-out is a legible state, not a blank - say where to sign in.
+		st.HasStatus, st.StatusVariant = true, "muted"
+		st.StatusLabel = i18n.T("twitch.status.signedOut")
+		st.StatusLine = i18n.T("twitch.status.signInHint")
 	}
 	if st.HasStatus {
 		st.StatusDL = strings.ToLower(st.StatusLabel)

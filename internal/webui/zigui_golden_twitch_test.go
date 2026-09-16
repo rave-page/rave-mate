@@ -147,6 +147,14 @@ func twFixtures() map[string]twState {
 	localStatus.StatusDL = "signed in as raverdj"
 	localStatus.StatusLine = "session held on this instance"
 
+	// signed out: the status region is present with a muted dot + a where-to-sign-in hint (P12).
+	signedOut := base()
+	signedOut.HasStatus = true
+	signedOut.StatusVariant = "muted"
+	signedOut.StatusLabel = "Not signed in"
+	signedOut.StatusDL = "not signed in"
+	signedOut.StatusLine = "Sign in under Settings › Integrations"
+
 	return map[string]twState{
 		"unavailable": unavailable,
 		"empty":       empty,
@@ -157,6 +165,7 @@ func twFixtures() map[string]twState {
 		"unicode":     unicode,
 		"viaPeer":     viaPeer,
 		"localStatus": localStatus,
+		"signedOut":   signedOut,
 	}
 }
 
