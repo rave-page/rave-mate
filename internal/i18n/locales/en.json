@@ -2046,6 +2046,7 @@
       "obsRec": "OBS ⏺ {dur}",
       "recOn": "REC ⏺",
       "tc": "TC {tc}",
+      "twitchChatRate": "{rate} msg/min",
       "twitchConnecting": "Twitch …",
       "twitchUser": "Twitch {login}",
       "twitchViewers": "{count} viewers",

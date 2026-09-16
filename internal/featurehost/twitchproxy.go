@@ -32,6 +32,7 @@ type TwitchProxy struct {
 	log     *logbus.Bus
 	bus     *eventbus.Bus
 	chatlog *twitch.ChatLog
+	rate    twitch.ChatRate // bounded 60 s chat-message window (Live strip "N msg/min"); zero value ready
 
 	mu          sync.Mutex
 	st          twitchState
@@ -70,13 +71,21 @@ func NewTwitchProxy(log *logbus.Bus, bus *eventbus.Bus, chatlog *twitch.ChatLog,
 		return nil, err
 	}
 	p.host = h
-	if bus != nil && chatlog != nil {
+	if bus != nil {
 		// Persist chat + alerts from the bus, not the child pipe: captures this instance's
 		// events AND a paired peer's (bus fanout includes local publishes). Low-throughput
-		// single-writer file append - fine on the subscriber goroutine.
+		// single-writer file append - fine on the subscriber goroutine. The same tap feeds the
+		// bounded chat-rate window, so the Live strip's "N msg/min" is right for local AND
+		// federated chat.
 		logEv := func(e eventbus.Event) {
 			var ev twitch.Event
-			if json.Unmarshal(e.Data, &ev) == nil {
+			if json.Unmarshal(e.Data, &ev) != nil {
+				return
+			}
+			if ev.Kind == twitch.KindChat {
+				p.rate.Add(time.Now())
+			}
+			if chatlog != nil {
 				chatlog.Append(ev)
 			}
 		}
@@ -109,7 +118,10 @@ func (p *TwitchProxy) onEv(data json.RawMessage) {
 		hook(ev)
 	}
 	if p.bus == nil {
-		// No bus = no subscriber-side persistence; append directly so history still works.
+		// No bus = no subscriber-side persistence; count + append directly so history still works.
+		if ev.Kind == twitch.KindChat {
+			p.rate.Add(time.Now())
+		}
 		if p.chatlog != nil {
 			p.chatlog.Append(ev)
 		}
@@ -220,6 +232,10 @@ func (p *TwitchProxy) LiveInfo() twitch.ViewerInfo {
 	defer p.mu.Unlock()
 	return p.lastViewers
 }
+
+// ChatRate reports chat messages seen in the last 60 s (local session or a federated peer's -
+// both flow through the bus tap). Alerts are not counted.
+func (p *TwitchProxy) ChatRate() int { return p.rate.PerMinute(time.Now()) }
 
 // SetFederated arms federation: cli tunnels ops to the serving peer, self is that peer's Twitch
 // identity, name is its "via" label. A local session always overrides (fedClient returns nil).

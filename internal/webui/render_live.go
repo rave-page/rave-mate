@@ -1441,8 +1441,9 @@ func (u *UI) stripRight() string {
 			if via := m.Via(); via != "" { // federated: a paired peer owns the Twitch session
 				line += " " + i18n.T("live.strip.twitchVia", i18n.A{"peer": via})
 			}
-			if vi := m.LiveInfo(); vi.Live { // viewers only while the stream is actually live
+			if vi := m.LiveInfo(); vi.Live { // viewers + chat rate only while the stream is actually live
 				line += " · " + i18n.T("live.strip.twitchViewers", i18n.A{"count": fmt.Sprint(vi.ViewerCount)})
+				line += " · " + i18n.T("live.strip.twitchChatRate", i18n.A{"rate": fmt.Sprint(m.ChatRate())})
 			}
 			p = append(p, line)
 		case m.SignedIn():
