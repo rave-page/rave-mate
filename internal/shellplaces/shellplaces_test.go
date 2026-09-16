@@ -46,11 +46,18 @@ func TestParseXDGUserDirs(t *testing.T) {
 }
 
 func TestNormalizePinnedFirstAndDedup(t *testing.T) {
+	// OS-native paths (a Windows literal is one opaque name on Linux). The duplicate is a case
+	// variant where the filesystem is case-insensitive, an exact repeat elsewhere.
+	home := filepath.Join(string(filepath.Separator), "home", "dy")
+	dup := filepath.Join(home, "Downloads")
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		dup = filepath.Join(home, "downloads")
+	}
 	in := []Place{
-		{Path: `C:\Users\dy\Downloads`, Pinned: false},
-		{Path: `C:\Users\dy\Music`, Name: "Music", Pinned: true},
-		{Path: `C:\Users\dy\downloads`, Pinned: false}, // dup (case-insensitive)
-		{Path: "  ", Pinned: false},                    // blank dropped
+		{Path: filepath.Join(home, "Downloads"), Pinned: false},
+		{Path: filepath.Join(home, "Music"), Name: "Music", Pinned: true},
+		{Path: dup, Pinned: false},  // dup
+		{Path: "  ", Pinned: false}, // blank dropped
 	}
 	got := normalize(in)
 	if len(got) != 2 {
