@@ -10,6 +10,7 @@ import (
 	"bufio"
 	"net/url"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -75,7 +76,10 @@ func normalize(in []Place) []Place {
 		if strings.TrimSpace(p.Path) == "" {
 			continue
 		}
-		key := strings.ToLower(filepath.Clean(p.Path))
+		key := filepath.Clean(p.Path)
+		if runtime.GOOS == "windows" || runtime.GOOS == "darwin" { // case-insensitive filesystems only
+			key = strings.ToLower(key)
+		}
 		if seen[key] {
 			continue
 		}

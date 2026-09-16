@@ -198,11 +198,17 @@ func TestProbePacingIsCostProportional(t *testing.T) {
 		t.Errorf("free probe ran %d times, want >=10 (demand rate, not gated by its sibling)", got)
 	}
 
-	time.Sleep(probeBudget * d) // past the gap: it must be eligible again, so this is a gap not a latch
-	u.kickProbes()
+	// Past the gap it must be eligible again - a gap, not a latch. The gap is probeBudget x the probe's
+	// MEASURED cost, and a loaded runner measures a 20 ms sleep as far more (windows-latest flaked
+	// here), so poll-kick up to a generous deadline instead of asserting at one instant.
+	deadline = time.Now().Add(probeBudget*d*10 + 2*time.Second)
+	for atomic.LoadInt32(&slow) < 2 && time.Now().Before(deadline) {
+		u.kickProbes()
+		time.Sleep(probeBudget * d / 4)
+	}
 	waitProbesIdle(t, u, 5*time.Second)
 	if got := atomic.LoadInt32(&slow); got != 2 {
-		t.Errorf("slow probe ran %d times after its gap elapsed, want 2", got)
+		t.Errorf("slow probe ran %d times after its gap elapsed, want 2 (a gap, not a latch)", got)
 	}
 }
 

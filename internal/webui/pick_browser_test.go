@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"runtime"
 	"testing"
 
 	"rave.page/mate/internal/localmedia"
@@ -35,11 +36,17 @@ func TestHumanSize(t *testing.T) {
 }
 
 func TestPkCrumbSegs(t *testing.T) {
-	segs := pkCrumbSegs(`C:\Users\dy\Music`)
+	// OS-native path: the crumb root is the volume on Windows ("C:") and "/" elsewhere. A Windows
+	// literal on Linux is one opaque name - what ubuntu CI caught.
+	dir, root := "/home/dy/Music", "/"
+	if runtime.GOOS == "windows" {
+		dir, root = `C:\Users\dy\Music`, "C:"
+	}
+	segs := pkCrumbSegs(dir)
 	if len(segs) != 4 {
 		t.Fatalf("want 4 crumb segments, got %d: %+v", len(segs), segs)
 	}
-	if segs[0][0] != "C:" || segs[len(segs)-1][0] != "Music" {
+	if segs[0][0] != root || segs[len(segs)-1][0] != "Music" {
 		t.Errorf("crumb ends = %q..%q", segs[0][0], segs[len(segs)-1][0])
 	}
 	// each cumulative path deepens
