@@ -1209,6 +1209,8 @@ func (u *UI) liveVramState() (liveVramSt, bool) {
 func governorTier() string {
 	s := governor.Snapshot()
 	switch {
+	case s.Streaming && s.StreamAssumed: // OBS merely open (no obs-websocket) - say so, don't claim a live stream
+		return i18n.T("live.vram.tierObsOpen")
 	case s.Streaming:
 		return i18n.T("live.vram.tierStreaming")
 	case s.Minimized || !s.Focused:

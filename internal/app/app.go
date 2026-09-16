@@ -2292,8 +2292,9 @@ func watchStreaming(ctx context.Context, obsW *featurehost.ObsProxy, log *logbus
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			live := streamLive(ctx, obsW, act)
+			live, assumed := streamLive(ctx, obsW, act)
 			governor.SetStreaming(live)
+			governor.SetStreamAssumed(live && assumed) // the Live readout says "OBS open - assumed live" instead of "streaming"
 			if drv != nil {
 				// Start spawns the stream child + hits the API; cap it so a stuck call can't wedge
 				// the sampler (governor keeps flipping next tick).
@@ -2306,21 +2307,21 @@ func watchStreaming(ctx context.Context, obsW *featurehost.ObsProxy, log *logbus
 }
 
 // streamLive reports whether a stream is live now (see watchStreaming for the two-tier logic).
-func streamLive(ctx context.Context, obsW *featurehost.ObsProxy, act sysactivity.Activity) bool {
+func streamLive(ctx context.Context, obsW *featurehost.ObsProxy, act sysactivity.Activity) (live, assumed bool) {
 	if obsW != nil {
 		sctx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 		st, err := obsW.GetStreamStatus(sctx)
 		cancel()
 		if err == nil {
-			return st.Active // authoritative when obs-websocket is reachable
+			return st.Active, false // authoritative when obs-websocket is reachable
 		}
 	}
 	// Fallback: OBS process presence.
 	set, ok := act.RunningProcesses()
 	if !ok {
-		return false
+		return false, false
 	}
-	return sysactivity.Running(set, "obs64") || sysactivity.Running(set, "obs")
+	return sysactivity.Running(set, "obs64") || sysactivity.Running(set, "obs"), true // process presence only: assumed live
 }
 
 // syncFinishedSet fingerprints a finished recording's linked capture audio (per-track spans,

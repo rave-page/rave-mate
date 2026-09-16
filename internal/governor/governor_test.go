@@ -179,3 +179,21 @@ func TestWhenBackgroundAllowed_DedupByKey(t *testing.T) {
 	_ = first
 	_ = second
 }
+
+// TestStreamAssumedIsAnnotationOnly: the "assumed live" flag rides beside Streaming for the UI
+// readout and never changes a gating decision or the Streaming bit itself.
+func TestStreamAssumedIsAnnotationOnly(t *testing.T) {
+	t.Cleanup(func() { SetStreaming(false); SetStreamAssumed(false) })
+	SetStreaming(true)
+	SetStreamAssumed(true)
+	if s := Snapshot(); !s.Streaming || !s.StreamAssumed {
+		t.Fatalf("Snapshot()=%+v, want Streaming+StreamAssumed", s)
+	}
+	if UIAnimAllowed() {
+		t.Fatal("UIAnimAllowed must still be false while Streaming, annotation or not")
+	}
+	SetStreamAssumed(false)
+	if s := Snapshot(); !s.Streaming || s.StreamAssumed {
+		t.Fatalf("clearing the annotation must not touch Streaming: %+v", s)
+	}
+}

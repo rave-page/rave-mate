@@ -40,18 +40,20 @@ import (
 
 // Signals is an immutable snapshot of the governor's inputs.
 type Signals struct {
-	Focused   bool // rave-mate window is the foreground/active window
-	Minimized bool // rave-mate window is minimized (iconic)
-	SizeMove  bool // user is dragging/resizing the window right now
-	Streaming bool // an OBS stream is live on this machine
+	Focused       bool // rave-mate window is the foreground/active window
+	Minimized     bool // rave-mate window is minimized (iconic)
+	SizeMove      bool // user is dragging/resizing the window right now
+	Streaming     bool // an OBS stream is live on this machine
+	StreamAssumed bool // Streaming rests on OBS process presence only (obs-websocket unreachable): assumed live, not confirmed
 }
 
 type gov struct {
-	mu        sync.Mutex
-	focused   bool
-	minimized bool
-	sizeMove  bool
-	streaming bool
+	mu            sync.Mutex
+	focused       bool
+	minimized     bool
+	sizeMove      bool
+	streaming     bool
+	streamAssumed bool
 
 	deferred map[string]func() // background work parked while streaming, keyed for dedup
 	log      *logbus.Bus
@@ -109,7 +111,7 @@ func set(field *bool, v bool, name string) {
 		resume = g.drainDeferred() // stream ended - release parked background work
 	}
 	log := g.log
-	sig := Signals{Focused: g.focused, Minimized: g.minimized, SizeMove: g.sizeMove, Streaming: g.streaming}
+	sig := Signals{Focused: g.focused, Minimized: g.minimized, SizeMove: g.sizeMove, Streaming: g.streaming, StreamAssumed: g.streamAssumed}
 	watchers := make([]func(Signals), len(g.watchers))
 	copy(watchers, g.watchers)
 	g.mu.Unlock()
@@ -143,6 +145,15 @@ func SetSizeMove(b bool) { set(&g.sizeMove, b, "sizemove") }
 // parked via WhenBackgroundAllowed is released.
 func SetStreaming(b bool) { set(&g.streaming, b, "streaming") }
 
+// SetStreamAssumed annotates HOW Streaming was detected: true = OBS process presence only (the
+// obs-websocket bridge was unreachable), i.e. "OBS open, assumed live" rather than a confirmed
+// stream. Pure annotation for the UI readout + logs - it changes no gating decision.
+func SetStreamAssumed(b bool) {
+	g.mu.Lock()
+	g.streamAssumed = b
+	g.mu.Unlock()
+}
+
 // OnChange registers a listener for signal changes (called after the priority decision is applied,
 // outside the lock). Used where a signal must reach ANOTHER process that cannot observe it - the
 // webui procShell forwards Streaming to its window child so the child's own governor reaches the
@@ -160,7 +171,7 @@ func OnChange(fn func(Signals)) {
 func Snapshot() Signals {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return Signals{Focused: g.focused, Minimized: g.minimized, SizeMove: g.sizeMove, Streaming: g.streaming}
+	return Signals{Focused: g.focused, Minimized: g.minimized, SizeMove: g.sizeMove, Streaming: g.streaming, StreamAssumed: g.streamAssumed}
 }
 
 // UIAnimAllowed reports whether the ~1 Hz webui graph/tick refresh should run. Paused when the

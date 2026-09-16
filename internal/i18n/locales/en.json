@@ -2060,6 +2060,7 @@
       "line": "{adapter} · {free} GB free · {tier}",
       "tierBackground": "background (throttled)",
       "tierNormal": "normal",
+      "tierObsOpen": "OBS open - assumed live (throttled)",
       "tierStreaming": "streaming (throttled)",
       "title": "GPU memory"
     },
