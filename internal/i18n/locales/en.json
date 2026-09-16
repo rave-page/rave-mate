@@ -2055,6 +2055,14 @@
     "sysperf": {
       "title": "System performance"
     },
+    "vram": {
+      "label": "VRAM",
+      "line": "{adapter} · {free} GB free · {tier}",
+      "tierBackground": "background (throttled)",
+      "tierNormal": "normal",
+      "tierStreaming": "streaming (throttled)",
+      "title": "GPU memory"
+    },
     "timing": {
       "noPeers": "no peers connected",
       "title": "Timing",

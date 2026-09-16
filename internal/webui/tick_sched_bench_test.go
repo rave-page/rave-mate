@@ -71,6 +71,9 @@ func legacyLiveFrags(st liveTickSt, zig bool) []zigui.Frag {
 	if l.HasPerf {
 		frag("live-perf2", "perf", wireLivePerf(l.Perf), livePerfFragHTML(l.Perf))
 	}
+	if l.HasVram {
+		frag("live-vram", "vram", wireLiveVram(l.Vram), liveVramFragHTML(l.Vram))
+	}
 	frag("live-strip", "strip", wireLiveStrip(l.Strip), liveStripFragHTML(l.Strip))
 	return out
 }

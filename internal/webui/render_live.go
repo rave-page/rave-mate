@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"rave.page/mate/internal/audiorec"
+	"rave.page/mate/internal/governor"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/obscontrol"
@@ -112,6 +113,12 @@ type liveRecCardSt struct {
 	Rows []liveSRow `json:"rows"`
 }
 
+// liveVramSt is the GPU-memory pressure well: a used/budget meter + an adapter/headroom/governor line.
+type liveVramSt struct {
+	Meter meterSt `json:"meter"`
+	Line  string  `json:"line"`
+}
+
 // liveCockpitRow is one OBS instance row.
 type liveCockpitRow struct {
 	Variant   string    `json:"variant"`
@@ -208,6 +215,9 @@ type liveState struct {
 	PerfTip      string          `json:"perfTip"`             // legacy RAW tooltip markup (bridge)
 	PerfTipS     *tipSt          `json:"perfTipSt,omitempty"` // structured tooltip - wins over PerfTip
 	Perf         livePerfSt      `json:"perf"`
+	HasVram      bool            `json:"hasVram"`
+	VramTitle    string          `json:"vramTitle"`
+	Vram         liveVramSt      `json:"vram"`
 	Strip        liveStripSt     `json:"strip"`
 	// P1 chunk titles: the Live surface groups into four named chunks (+ the ambient strip). Resolved
 	// here so both renderers get the localized name; empty in a fixture just yields an empty header.
@@ -265,6 +275,9 @@ func (u *UI) liveState() liveState {
 	if u.svc.Perf != nil {
 		st.HasPerf, st.PerfTitle, st.PerfTipS = true, i18n.T("live.sysperf.title"), tipTopicSt("perf-graph")
 		st.Perf = u.livePerfState()
+	}
+	if v, ok := u.liveVramState(); ok {
+		st.HasVram, st.VramTitle, st.Vram = true, i18n.T("live.vram.title"), v
 	}
 	return st
 }
@@ -341,6 +354,10 @@ func liveHTML(st liveState) string {
 	if st.HasPerf {
 		b.WriteString(liveSubLabel(st.PerfTitle, tipOr(st.PerfTipS, st.PerfTip)))
 		b.WriteString(`<div id=live-perf2>` + livePerfFragHTML(st.Perf) + `</div>`)
+	}
+	if st.HasVram {
+		b.WriteString(liveSubLabel(st.VramTitle, ""))
+		b.WriteString(`<div id=live-vram>` + liveVramFragHTML(st.Vram) + `</div>`)
 	}
 	b.WriteString(`</details>`)
 
@@ -1160,6 +1177,56 @@ func (u *UI) recCardHTML() string {
 
 // liveRecCardFragHTML is the pure armed-recorder renderer.
 func liveRecCardFragHTML(st liveRecCardSt) string { return liveSRowsCard(st.Rows) }
+
+// ── VRAM pressure + governor tier (P7) - the 2026-09-11 saturation incident made visible ──
+
+// liveVramState resolves the GPU-memory meter: used/budget of the primary adapter (the watchdog
+// target), a 90%-saturation tick, plus the adapter name, free headroom and the current governor
+// tier (why background work is throttled). ok=false when no adapter has been sampled.
+func (u *UI) liveVramState() (liveVramSt, bool) {
+	if u.svc.GPUMem == nil {
+		return liveVramSt{}, false
+	}
+	a, ok := u.svc.GPUMem()
+	if !ok || a.BudgetMB == 0 {
+		return liveVramSt{}, false
+	}
+	m := meterSt{
+		Label: i18n.T("live.vram.label"),
+		Val:   fmt.Sprintf("%.1f/%.1f GB", float64(a.UsedMB)/1024, float64(a.BudgetMB)/1024),
+		Width: meterPct(float64(a.UsedMB) / float64(a.BudgetMB)),
+		Tick:  meterPct(0.9), // saturation warn line - interop starts failing near budget
+	}
+	line := i18n.T("live.vram.line", i18n.A{
+		"adapter": a.Name,
+		"free":    fmt.Sprintf("%.1f", float64(a.FreeMB)/1024),
+		"tier":    governorTier(),
+	})
+	return liveVramSt{Meter: m, Line: line}, true
+}
+
+// governorTier names the activity governor's current throttle state (why heavy/UI work is paused).
+func governorTier() string {
+	s := governor.Snapshot()
+	switch {
+	case s.Streaming:
+		return i18n.T("live.vram.tierStreaming")
+	case s.Minimized || !s.Focused:
+		return i18n.T("live.vram.tierBackground")
+	default:
+		return i18n.T("live.vram.tierNormal")
+	}
+}
+
+func (u *UI) vramHTML() string {
+	st, _ := u.liveVramState()
+	return liveFrag("vram", st, wireLiveVram, liveVramFragHTML)
+}
+
+// liveVramFragHTML is the pure VRAM-well renderer (a meter + a muted adapter/governor line).
+func liveVramFragHTML(st liveVramSt) string {
+	return `<div class="rp-card">` + meterHTML(st.Meter) + `<div class=vram-line>` + html.EscapeString(st.Line) + `</div></div>`
+}
 
 // ── graphs (small multiples: one labelled spark per series, single brand hue, P4/P7) ──
 

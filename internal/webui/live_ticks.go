@@ -146,6 +146,9 @@ func (u *UI) liveTickLegacy(js *strings.Builder, st liveTickSt) {
 	if st.Live.HasPerf {
 		u.tickPatch(js, "live-perf2", liveFrag("perf", st.Live.Perf, wireLivePerf, livePerfFragHTML))
 	}
+	if st.Live.HasVram {
+		u.tickPatch(js, "live-vram", liveFrag("vram", st.Live.Vram, wireLiveVram, liveVramFragHTML))
+	}
 	u.tickPatch(js, "live-strip", liveFrag("strip", st.Live.Strip, wireLiveStrip, liveStripFragHTML))
 }
 

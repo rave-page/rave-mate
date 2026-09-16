@@ -197,6 +197,11 @@ var schema = []msg{
 		fs:  []field{li(1, "Rows", "rows", "LiveSRow")},
 	},
 	{
+		name: "LiveVram", goT: "liveVramSt", zigT: "live.Vram", id: 128,
+		doc: "#live-vram fragment (GPU-memory meter + governor tier)",
+		fs:  []field{st(1, "Meter", "meter", "LiveMeter"), s(2, "Line", "line")},
+	},
+	{
 		name: "LiveMeter", goT: "meterSt", zigT: "c.Meter",
 		fs: []field{s(1, "Label", "label"), s(2, "Val", "val"), s(3, "Width", "width"), s(4, "Tick", "tick")},
 	},
@@ -236,7 +241,7 @@ var schema = []msg{
 	{
 		name: "LiveState", goT: "liveState", zigT: "live.State", id: 10,
 		doc: "Live tab - full cockpit",
-		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), st(3, "Transport", "transport", "LiveTransport"), st(4, "NP", "np", "LiveNP"), s(5, "StatusTitle", "statusTitle"), st(6, "Status", "status", "LiveStatus"), s(7, "DecksTitle", "decksTitle"), st(8, "Decks", "decks", "LiveDecks"), b(9, "HasSignals", "hasSignals"), s(10, "SignalsTitle", "signalsTitle"), s(11, "SignalsTip", "signalsTip"), st(12, "Signals", "signals", "LiveSignals"), b(13, "HasCockpit", "hasCockpit"), s(14, "CockpitTitle", "cockpitTitle"), st(15, "Cockpit", "cockpit", "LiveCockpit"), b(16, "HasLink", "hasLink"), s(17, "LinkTitle", "linkTitle"), st(18, "Link", "link", "LiveLink"), b(19, "HasNet", "hasNet"), s(20, "NetTitle", "netTitle"), s(21, "NetTip", "netTip"), st(22, "Net", "net", "LiveGraph"), s(23, "TimTitle", "timTitle"), s(24, "TimTip", "timTip"), st(25, "Tim", "tim", "LiveGraph"), b(26, "HasPerf", "hasPerf"), s(27, "PerfTitle", "perfTitle"), s(28, "PerfTip", "perfTip"), st(29, "Perf", "perf", "LivePerf"), st(30, "Strip", "strip", "LiveStrip"), op(31, "SignalsTipS", "signalsTipSt", "Tip"), op(32, "NetTipS", "netTipSt", "Tip"), op(33, "TimTipS", "timTipSt", "Tip"), op(34, "PerfTipS", "perfTipSt", "Tip"), s(35, "GroupStream", "groupStream"), s(36, "GroupDecks", "groupDecks"), s(37, "GroupSignals", "groupSignals"), s(38, "GroupSystem", "groupSystem"), b(39, "HasRoute", "hasRoute"), s(40, "RouteTitle", "routeTitle"), st(41, "Route", "route", "LiveRoute"), b(42, "HasRecCard", "hasRecCard"), s(43, "RecCardTitle", "recCardTitle"), st(44, "RecCard", "recCard", "LiveRecCard")},
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), st(3, "Transport", "transport", "LiveTransport"), st(4, "NP", "np", "LiveNP"), s(5, "StatusTitle", "statusTitle"), st(6, "Status", "status", "LiveStatus"), s(7, "DecksTitle", "decksTitle"), st(8, "Decks", "decks", "LiveDecks"), b(9, "HasSignals", "hasSignals"), s(10, "SignalsTitle", "signalsTitle"), s(11, "SignalsTip", "signalsTip"), st(12, "Signals", "signals", "LiveSignals"), b(13, "HasCockpit", "hasCockpit"), s(14, "CockpitTitle", "cockpitTitle"), st(15, "Cockpit", "cockpit", "LiveCockpit"), b(16, "HasLink", "hasLink"), s(17, "LinkTitle", "linkTitle"), st(18, "Link", "link", "LiveLink"), b(19, "HasNet", "hasNet"), s(20, "NetTitle", "netTitle"), s(21, "NetTip", "netTip"), st(22, "Net", "net", "LiveGraph"), s(23, "TimTitle", "timTitle"), s(24, "TimTip", "timTip"), st(25, "Tim", "tim", "LiveGraph"), b(26, "HasPerf", "hasPerf"), s(27, "PerfTitle", "perfTitle"), s(28, "PerfTip", "perfTip"), st(29, "Perf", "perf", "LivePerf"), st(30, "Strip", "strip", "LiveStrip"), op(31, "SignalsTipS", "signalsTipSt", "Tip"), op(32, "NetTipS", "netTipSt", "Tip"), op(33, "TimTipS", "timTipSt", "Tip"), op(34, "PerfTipS", "perfTipSt", "Tip"), s(35, "GroupStream", "groupStream"), s(36, "GroupDecks", "groupDecks"), s(37, "GroupSignals", "groupSignals"), s(38, "GroupSystem", "groupSystem"), b(39, "HasRoute", "hasRoute"), s(40, "RouteTitle", "routeTitle"), st(41, "Route", "route", "LiveRoute"), b(42, "HasRecCard", "hasRecCard"), s(43, "RecCardTitle", "recCardTitle"), st(44, "RecCard", "recCard", "LiveRecCard"), b(45, "HasVram", "hasVram"), s(46, "VramTitle", "vramTitle"), st(47, "Vram", "vram", "LiveVram")},
 	},
 	// motion: one root - the full view and the #mo-body fragment share moState. Cam/Studio are Go pointers (exactly one section is built per render), so they are optp: presence IS the section switch.
 	{

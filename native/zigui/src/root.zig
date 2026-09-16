@@ -93,6 +93,7 @@ export fn rz_ui_render_live_frag(kind: ?[*]const u8, kind_len: usize, state_json
     if (std.mem.eql(u8, k, "link")) return renderJSON(live.Link, live.renderLink, state_json, len, out_len);
     if (std.mem.eql(u8, k, "graph")) return renderJSON(live.Graph, live.renderGraph, state_json, len, out_len);
     if (std.mem.eql(u8, k, "perf")) return renderJSON(live.Perf, live.renderPerf, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "vram")) return renderJSON(live.Vram, live.renderVram, state_json, len, out_len);
     if (std.mem.eql(u8, k, "strip")) return renderJSON(live.Strip, live.renderStrip, state_json, len, out_len);
     return null;
 }
@@ -836,6 +837,7 @@ export fn rz_ui_render_live_frag_v2(kind: ?[*]const u8, kind_len: usize, state: 
     if (std.mem.eql(u8, k, "link")) return renderWire(live.Link, wire_gen.decodeLiveLink, live.renderLink, wire_gen.msg_live_link, state, len, out_len);
     if (std.mem.eql(u8, k, "graph")) return renderWire(live.Graph, wire_gen.decodeLiveGraph, live.renderGraph, wire_gen.msg_live_graph, state, len, out_len);
     if (std.mem.eql(u8, k, "perf")) return renderWire(live.Perf, wire_gen.decodeLivePerf, live.renderPerf, wire_gen.msg_live_perf, state, len, out_len);
+    if (std.mem.eql(u8, k, "vram")) return renderWire(live.Vram, wire_gen.decodeLiveVram, live.renderVram, wire_gen.msg_live_vram, state, len, out_len);
     if (std.mem.eql(u8, k, "strip")) return renderWire(live.Strip, wire_gen.decodeLiveStrip, live.renderStrip, wire_gen.msg_live_strip, state, len, out_len);
     return null;
 }

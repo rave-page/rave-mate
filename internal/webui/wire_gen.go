@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash         uint32 = 0xbcf56449
+	wireSchemaHash         uint32 = 0xbf2e3734
 	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -121,6 +121,7 @@ const (
 	wireMsgVrcEmotes       uint16 = 117 // #vrc-emotes animated-emoji flipbook creator (visual: player+trim, crop, filmstrip, preview)
 	wireMsgLiveRoute       uint16 = 125 // #live-route fragment (route-health / frozen-picture landmark)
 	wireMsgLiveRecCard     uint16 = 127 // #live-rec-card fragment (armed tracklist recorder)
+	wireMsgLiveVram        uint16 = 128 // #live-vram fragment (GPU-memory meter + governor tier)
 )
 
 func (v agApp) encodeWire(w *zigui.WireWriter) {
@@ -266,6 +267,11 @@ func (v liveRecCardSt) encodeWire(w *zigui.WireWriter) {
 	w.List(1, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
 }
 
+func (v liveVramSt) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.Meter.encodeWire(w) })
+	w.Str(2, v.Line)
+}
+
 func (v meterSt) encodeWire(w *zigui.WireWriter) {
 	w.Str(1, v.Label)
 	w.Str(2, v.Val)
@@ -382,6 +388,9 @@ func (v liveState) encodeWire(w *zigui.WireWriter) {
 	w.Bool(42, v.HasRecCard)
 	w.Str(43, v.RecCardTitle)
 	w.Struct(44, func() { v.RecCard.encodeWire(w) })
+	w.Bool(45, v.HasVram)
+	w.Str(46, v.VramTitle)
+	w.Struct(47, func() { v.Vram.encodeWire(w) })
 }
 
 func (v moCamRow) encodeWire(w *zigui.WireWriter) {
@@ -4789,6 +4798,13 @@ func wireLiveRecCard(v liveRecCardSt) []byte {
 	return w.Finish()
 }
 
+// wireLiveVram encodes liveVramSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireLiveVram(v liveVramSt) []byte {
+	w := zigui.NewWireWriter(wireMsgLiveVram, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
 // ── retained-doc delta channel (B7 increment ii; internal/zigui/wiregen/retain.go) ──
 //
 // hashWire/wireEq/deltaWire exist only for the messages reachable from a retain-flagged
@@ -5475,6 +5491,33 @@ func (v liveRecCardSt) deltaWire(w *zigui.WireWriter, prev *liveRecCardSt) {
 	}
 }
 
+func (v liveVramSt) hashWire(h *zigui.WireHasher) {
+	h.Sub(1)
+	v.Meter.hashWire(h)
+	h.Str(2, v.Line)
+}
+
+func (v liveVramSt) wireEq(o *liveVramSt) bool {
+	if !v.Meter.wireEq(&o.Meter) {
+		return false
+	}
+	if v.Line != o.Line {
+		return false
+	}
+	return true
+}
+
+func (v liveVramSt) deltaWire(w *zigui.WireWriter, prev *liveVramSt) {
+	w.Struct(1, func() { v.Meter.deltaWire(w, &prev.Meter) })
+	if v.Line != prev.Line {
+		if v.Line == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Line)
+		}
+	}
+}
+
 func (v meterSt) hashWire(h *zigui.WireHasher) {
 	h.Str(1, v.Label)
 	h.Str(2, v.Val)
@@ -6076,6 +6119,10 @@ func (v liveState) hashWire(h *zigui.WireHasher) {
 	h.Str(43, v.RecCardTitle)
 	h.Sub(44)
 	v.RecCard.hashWire(h)
+	h.Bool(45, v.HasVram)
+	h.Str(46, v.VramTitle)
+	h.Sub(47)
+	v.Vram.hashWire(h)
 }
 
 func (v liveState) wireEq(o *liveState) bool {
@@ -6221,6 +6268,15 @@ func (v liveState) wireEq(o *liveState) bool {
 		return false
 	}
 	if !v.RecCard.wireEq(&o.RecCard) {
+		return false
+	}
+	if v.HasVram != o.HasVram {
+		return false
+	}
+	if v.VramTitle != o.VramTitle {
+		return false
+	}
+	if !v.Vram.wireEq(&o.Vram) {
 		return false
 	}
 	return true
@@ -6469,6 +6525,21 @@ func (v liveState) deltaWire(w *zigui.WireWriter, prev *liveState) {
 		}
 	}
 	w.Struct(44, func() { v.RecCard.deltaWire(w, &prev.RecCard) })
+	if v.HasVram != prev.HasVram {
+		if !v.HasVram {
+			w.Clear(45)
+		} else {
+			w.Bool(45, v.HasVram)
+		}
+	}
+	if v.VramTitle != prev.VramTitle {
+		if v.VramTitle == "" {
+			w.Clear(46)
+		} else {
+			w.Str(46, v.VramTitle)
+		}
+	}
+	w.Struct(47, func() { v.Vram.deltaWire(w, &prev.Vram) })
 }
 
 func (v uiBtn) hashWire(h *zigui.WireHasher) {

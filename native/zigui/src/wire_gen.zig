@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0xbcf56449;
+pub const schema_hash: u32 = 0xbf2e3734;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -154,6 +154,7 @@ pub const msg_edv_frame: u16 = 116; // reframe modal frame block (#edv-frame inn
 pub const msg_vrc_emotes: u16 = 117; // #vrc-emotes animated-emoji flipbook creator (visual: player+trim, crop, filmstrip, preview)
 pub const msg_live_route: u16 = 125; // #live-route fragment (route-health / frozen-picture landmark)
 pub const msg_live_rec_card: u16 = 127; // #live-rec-card fragment (armed tracklist recorder)
+pub const msg_live_vram: u16 = 128; // #live-vram fragment (GPU-memory meter + governor tier)
 
 pub fn decodeAgApp(r: *wire.Reader, out: *appgroups.App) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
@@ -352,6 +353,14 @@ pub fn decodeLiveRecCard(r: *wire.Reader, out: *live.RecCard) wire.Error!void {
     };
 }
 
+pub fn decodeLiveVram(r: *wire.Reader, out: *live.Vram) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.meter = try r.sub(c.Meter, decodeLiveMeter, t),
+        2 => out.line = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
 pub fn decodeLiveMeter(r: *wire.Reader, out: *c.Meter) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.label = try r.str(t),
@@ -485,6 +494,9 @@ pub fn decodeLiveState(r: *wire.Reader, out: *live.State) wire.Error!void {
         42 => out.hasRecCard = try r.boolean(t),
         43 => out.recCardTitle = try r.str(t),
         44 => out.recCard = try r.sub(live.RecCard, decodeLiveRecCard, t),
+        45 => out.hasVram = try r.boolean(t),
+        46 => out.vramTitle = try r.str(t),
+        47 => out.vram = try r.sub(live.Vram, decodeLiveVram, t),
         else => try r.skip(t),
     };
 }
@@ -5374,6 +5386,32 @@ pub fn hashLiveRecCard(h: *wire.Hasher, v: live.RecCard) void {
     for (v.rows) |e| hashLiveSRow(h, e);
 }
 
+pub fn mergeLiveVram(r: *wire.Reader, out: *live.Vram) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.meter = .{},
+            2 => out.line = "",
+            else => {},
+        },
+        1 => try wire.mergeSub(r, c.Meter, mergeLiveMeter, t, &out.meter),
+        2 => out.line = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLiveVram(a: std.mem.Allocator, v: live.Vram) wire.Error!live.Vram {
+    var out = v;
+    out.meter = try cloneLiveMeter(a, v.meter);
+    out.line = try a.dupe(u8, v.line);
+    return out;
+}
+
+pub fn hashLiveVram(h: *wire.Hasher, v: live.Vram) void {
+    h.sub(1);
+    hashLiveMeter(h, v.meter);
+    h.str(2, v.line);
+}
+
 pub fn mergeLiveMeter(r: *wire.Reader, out: *c.Meter) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         wire.clear_field => switch (try r.uint(t)) {
@@ -5716,6 +5754,9 @@ pub fn mergeLiveState(r: *wire.Reader, out: *live.State) wire.Error!void {
             42 => out.hasRecCard = false,
             43 => out.recCardTitle = "",
             44 => out.recCard = .{},
+            45 => out.hasVram = false,
+            46 => out.vramTitle = "",
+            47 => out.vram = .{},
             else => {},
         },
         1 => out.title = try wire.strDup(r, t),
@@ -5774,6 +5815,9 @@ pub fn mergeLiveState(r: *wire.Reader, out: *live.State) wire.Error!void {
         42 => out.hasRecCard = try r.boolean(t),
         43 => out.recCardTitle = try wire.strDup(r, t),
         44 => try wire.mergeSub(r, live.RecCard, mergeLiveRecCard, t, &out.recCard),
+        45 => out.hasVram = try r.boolean(t),
+        46 => out.vramTitle = try wire.strDup(r, t),
+        47 => try wire.mergeSub(r, live.Vram, mergeLiveVram, t, &out.vram),
         else => try r.skip(t),
     };
 }
@@ -5817,6 +5861,8 @@ pub fn cloneLiveState(a: std.mem.Allocator, v: live.State) wire.Error!live.State
     out.route = try cloneLiveRoute(a, v.route);
     out.recCardTitle = try a.dupe(u8, v.recCardTitle);
     out.recCard = try cloneLiveRecCard(a, v.recCard);
+    out.vramTitle = try a.dupe(u8, v.vramTitle);
+    out.vram = try cloneLiveVram(a, v.vram);
     return out;
 }
 
@@ -5882,6 +5928,10 @@ pub fn hashLiveState(h: *wire.Hasher, v: live.State) void {
     h.str(43, v.recCardTitle);
     h.sub(44);
     hashLiveRecCard(h, v.recCard);
+    h.boolean(45, v.hasVram);
+    h.str(46, v.vramTitle);
+    h.sub(47);
+    hashLiveVram(h, v.vram);
 }
 
 pub fn mergeUiBtn(r: *wire.Reader, out: *c.Btn) wire.Error!void {
@@ -6601,6 +6651,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_vrc_emotes);
     try std.testing.expect(msg_ag_state != msg_live_route);
     try std.testing.expect(msg_ag_state != msg_live_rec_card);
+    try std.testing.expect(msg_ag_state != msg_live_vram);
     try std.testing.expect(msg_logs_state != msg_logs_lines);
     try std.testing.expect(msg_logs_state != msg_live_state);
     try std.testing.expect(msg_logs_state != msg_live_transport);
@@ -6712,6 +6763,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_state != msg_vrc_emotes);
     try std.testing.expect(msg_logs_state != msg_live_route);
     try std.testing.expect(msg_logs_state != msg_live_rec_card);
+    try std.testing.expect(msg_logs_state != msg_live_vram);
     try std.testing.expect(msg_logs_lines != msg_live_state);
     try std.testing.expect(msg_logs_lines != msg_live_transport);
     try std.testing.expect(msg_logs_lines != msg_live_n_p);
@@ -6822,6 +6874,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_lines != msg_vrc_emotes);
     try std.testing.expect(msg_logs_lines != msg_live_route);
     try std.testing.expect(msg_logs_lines != msg_live_rec_card);
+    try std.testing.expect(msg_logs_lines != msg_live_vram);
     try std.testing.expect(msg_live_state != msg_live_transport);
     try std.testing.expect(msg_live_state != msg_live_n_p);
     try std.testing.expect(msg_live_state != msg_live_status);
@@ -6931,6 +6984,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_state != msg_vrc_emotes);
     try std.testing.expect(msg_live_state != msg_live_route);
     try std.testing.expect(msg_live_state != msg_live_rec_card);
+    try std.testing.expect(msg_live_state != msg_live_vram);
     try std.testing.expect(msg_live_transport != msg_live_n_p);
     try std.testing.expect(msg_live_transport != msg_live_status);
     try std.testing.expect(msg_live_transport != msg_live_decks);
@@ -7039,6 +7093,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_transport != msg_vrc_emotes);
     try std.testing.expect(msg_live_transport != msg_live_route);
     try std.testing.expect(msg_live_transport != msg_live_rec_card);
+    try std.testing.expect(msg_live_transport != msg_live_vram);
     try std.testing.expect(msg_live_n_p != msg_live_status);
     try std.testing.expect(msg_live_n_p != msg_live_decks);
     try std.testing.expect(msg_live_n_p != msg_live_signals);
@@ -7146,6 +7201,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_n_p != msg_vrc_emotes);
     try std.testing.expect(msg_live_n_p != msg_live_route);
     try std.testing.expect(msg_live_n_p != msg_live_rec_card);
+    try std.testing.expect(msg_live_n_p != msg_live_vram);
     try std.testing.expect(msg_live_status != msg_live_decks);
     try std.testing.expect(msg_live_status != msg_live_signals);
     try std.testing.expect(msg_live_status != msg_live_cockpit);
@@ -7252,6 +7308,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_status != msg_vrc_emotes);
     try std.testing.expect(msg_live_status != msg_live_route);
     try std.testing.expect(msg_live_status != msg_live_rec_card);
+    try std.testing.expect(msg_live_status != msg_live_vram);
     try std.testing.expect(msg_live_decks != msg_live_signals);
     try std.testing.expect(msg_live_decks != msg_live_cockpit);
     try std.testing.expect(msg_live_decks != msg_live_link);
@@ -7357,6 +7414,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_decks != msg_vrc_emotes);
     try std.testing.expect(msg_live_decks != msg_live_route);
     try std.testing.expect(msg_live_decks != msg_live_rec_card);
+    try std.testing.expect(msg_live_decks != msg_live_vram);
     try std.testing.expect(msg_live_signals != msg_live_cockpit);
     try std.testing.expect(msg_live_signals != msg_live_link);
     try std.testing.expect(msg_live_signals != msg_live_graph);
@@ -7461,6 +7519,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_signals != msg_vrc_emotes);
     try std.testing.expect(msg_live_signals != msg_live_route);
     try std.testing.expect(msg_live_signals != msg_live_rec_card);
+    try std.testing.expect(msg_live_signals != msg_live_vram);
     try std.testing.expect(msg_live_cockpit != msg_live_link);
     try std.testing.expect(msg_live_cockpit != msg_live_graph);
     try std.testing.expect(msg_live_cockpit != msg_live_perf);
@@ -7564,6 +7623,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_cockpit != msg_vrc_emotes);
     try std.testing.expect(msg_live_cockpit != msg_live_route);
     try std.testing.expect(msg_live_cockpit != msg_live_rec_card);
+    try std.testing.expect(msg_live_cockpit != msg_live_vram);
     try std.testing.expect(msg_live_link != msg_live_graph);
     try std.testing.expect(msg_live_link != msg_live_perf);
     try std.testing.expect(msg_live_link != msg_live_strip);
@@ -7666,6 +7726,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_link != msg_vrc_emotes);
     try std.testing.expect(msg_live_link != msg_live_route);
     try std.testing.expect(msg_live_link != msg_live_rec_card);
+    try std.testing.expect(msg_live_link != msg_live_vram);
     try std.testing.expect(msg_live_graph != msg_live_perf);
     try std.testing.expect(msg_live_graph != msg_live_strip);
     try std.testing.expect(msg_live_graph != msg_mo_state);
@@ -7767,6 +7828,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_graph != msg_vrc_emotes);
     try std.testing.expect(msg_live_graph != msg_live_route);
     try std.testing.expect(msg_live_graph != msg_live_rec_card);
+    try std.testing.expect(msg_live_graph != msg_live_vram);
     try std.testing.expect(msg_live_perf != msg_live_strip);
     try std.testing.expect(msg_live_perf != msg_mo_state);
     try std.testing.expect(msg_live_perf != msg_pub);
@@ -7867,6 +7929,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_perf != msg_vrc_emotes);
     try std.testing.expect(msg_live_perf != msg_live_route);
     try std.testing.expect(msg_live_perf != msg_live_rec_card);
+    try std.testing.expect(msg_live_perf != msg_live_vram);
     try std.testing.expect(msg_live_strip != msg_mo_state);
     try std.testing.expect(msg_live_strip != msg_pub);
     try std.testing.expect(msg_live_strip != msg_pub_hero);
@@ -7966,6 +8029,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_strip != msg_vrc_emotes);
     try std.testing.expect(msg_live_strip != msg_live_route);
     try std.testing.expect(msg_live_strip != msg_live_rec_card);
+    try std.testing.expect(msg_live_strip != msg_live_vram);
     try std.testing.expect(msg_mo_state != msg_pub);
     try std.testing.expect(msg_mo_state != msg_pub_hero);
     try std.testing.expect(msg_mo_state != msg_set_state);
@@ -8064,6 +8128,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mo_state != msg_vrc_emotes);
     try std.testing.expect(msg_mo_state != msg_live_route);
     try std.testing.expect(msg_mo_state != msg_live_rec_card);
+    try std.testing.expect(msg_mo_state != msg_live_vram);
     try std.testing.expect(msg_pub != msg_pub_hero);
     try std.testing.expect(msg_pub != msg_set_state);
     try std.testing.expect(msg_pub != msg_set_content);
@@ -8161,6 +8226,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_pub != msg_vrc_emotes);
     try std.testing.expect(msg_pub != msg_live_route);
     try std.testing.expect(msg_pub != msg_live_rec_card);
+    try std.testing.expect(msg_pub != msg_live_vram);
     try std.testing.expect(msg_pub_hero != msg_set_state);
     try std.testing.expect(msg_pub_hero != msg_set_content);
     try std.testing.expect(msg_pub_hero != msg_set_status);
@@ -8257,6 +8323,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_pub_hero != msg_vrc_emotes);
     try std.testing.expect(msg_pub_hero != msg_live_route);
     try std.testing.expect(msg_pub_hero != msg_live_rec_card);
+    try std.testing.expect(msg_pub_hero != msg_live_vram);
     try std.testing.expect(msg_set_state != msg_set_content);
     try std.testing.expect(msg_set_state != msg_set_status);
     try std.testing.expect(msg_set_state != msg_lib_state);
@@ -8352,6 +8419,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_state != msg_vrc_emotes);
     try std.testing.expect(msg_set_state != msg_live_route);
     try std.testing.expect(msg_set_state != msg_live_rec_card);
+    try std.testing.expect(msg_set_state != msg_live_vram);
     try std.testing.expect(msg_set_content != msg_set_status);
     try std.testing.expect(msg_set_content != msg_lib_state);
     try std.testing.expect(msg_set_content != msg_lib_body);
@@ -8446,6 +8514,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_content != msg_vrc_emotes);
     try std.testing.expect(msg_set_content != msg_live_route);
     try std.testing.expect(msg_set_content != msg_live_rec_card);
+    try std.testing.expect(msg_set_content != msg_live_vram);
     try std.testing.expect(msg_set_status != msg_lib_state);
     try std.testing.expect(msg_set_status != msg_lib_body);
     try std.testing.expect(msg_set_status != msg_lib_detail);
@@ -8539,6 +8608,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_status != msg_vrc_emotes);
     try std.testing.expect(msg_set_status != msg_live_route);
     try std.testing.expect(msg_set_status != msg_live_rec_card);
+    try std.testing.expect(msg_set_status != msg_live_vram);
     try std.testing.expect(msg_lib_state != msg_lib_body);
     try std.testing.expect(msg_lib_state != msg_lib_detail);
     try std.testing.expect(msg_lib_state != msg_lib_queue);
@@ -8631,6 +8701,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_state != msg_vrc_emotes);
     try std.testing.expect(msg_lib_state != msg_live_route);
     try std.testing.expect(msg_lib_state != msg_live_rec_card);
+    try std.testing.expect(msg_lib_state != msg_live_vram);
     try std.testing.expect(msg_lib_body != msg_lib_detail);
     try std.testing.expect(msg_lib_body != msg_lib_queue);
     try std.testing.expect(msg_lib_body != msg_lib_cue_cell);
@@ -8722,6 +8793,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_body != msg_vrc_emotes);
     try std.testing.expect(msg_lib_body != msg_live_route);
     try std.testing.expect(msg_lib_body != msg_live_rec_card);
+    try std.testing.expect(msg_lib_body != msg_live_vram);
     try std.testing.expect(msg_lib_detail != msg_lib_queue);
     try std.testing.expect(msg_lib_detail != msg_lib_cue_cell);
     try std.testing.expect(msg_lib_detail != msg_mp_full);
@@ -8812,6 +8884,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_detail != msg_vrc_emotes);
     try std.testing.expect(msg_lib_detail != msg_live_route);
     try std.testing.expect(msg_lib_detail != msg_live_rec_card);
+    try std.testing.expect(msg_lib_detail != msg_live_vram);
     try std.testing.expect(msg_lib_queue != msg_lib_cue_cell);
     try std.testing.expect(msg_lib_queue != msg_mp_full);
     try std.testing.expect(msg_lib_queue != msg_mp_inner);
@@ -8901,6 +8974,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_queue != msg_vrc_emotes);
     try std.testing.expect(msg_lib_queue != msg_live_route);
     try std.testing.expect(msg_lib_queue != msg_live_rec_card);
+    try std.testing.expect(msg_lib_queue != msg_live_vram);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_full);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_inner);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_vid);
@@ -8989,6 +9063,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_cue_cell != msg_vrc_emotes);
     try std.testing.expect(msg_lib_cue_cell != msg_live_route);
     try std.testing.expect(msg_lib_cue_cell != msg_live_rec_card);
+    try std.testing.expect(msg_lib_cue_cell != msg_live_vram);
     try std.testing.expect(msg_mp_full != msg_mp_inner);
     try std.testing.expect(msg_mp_full != msg_mp_vid);
     try std.testing.expect(msg_mp_full != msg_mp_wave);
@@ -9076,6 +9151,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_full != msg_vrc_emotes);
     try std.testing.expect(msg_mp_full != msg_live_route);
     try std.testing.expect(msg_mp_full != msg_live_rec_card);
+    try std.testing.expect(msg_mp_full != msg_live_vram);
     try std.testing.expect(msg_mp_inner != msg_mp_vid);
     try std.testing.expect(msg_mp_inner != msg_mp_wave);
     try std.testing.expect(msg_mp_inner != msg_mp_tp);
@@ -9162,6 +9238,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_inner != msg_vrc_emotes);
     try std.testing.expect(msg_mp_inner != msg_live_route);
     try std.testing.expect(msg_mp_inner != msg_live_rec_card);
+    try std.testing.expect(msg_mp_inner != msg_live_vram);
     try std.testing.expect(msg_mp_vid != msg_mp_wave);
     try std.testing.expect(msg_mp_vid != msg_mp_tp);
     try std.testing.expect(msg_mp_vid != msg_mp_edit);
@@ -9247,6 +9324,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_vid != msg_vrc_emotes);
     try std.testing.expect(msg_mp_vid != msg_live_route);
     try std.testing.expect(msg_mp_vid != msg_live_rec_card);
+    try std.testing.expect(msg_mp_vid != msg_live_vram);
     try std.testing.expect(msg_mp_wave != msg_mp_tp);
     try std.testing.expect(msg_mp_wave != msg_mp_edit);
     try std.testing.expect(msg_mp_wave != msg_mp_export);
@@ -9331,6 +9409,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_wave != msg_vrc_emotes);
     try std.testing.expect(msg_mp_wave != msg_live_route);
     try std.testing.expect(msg_mp_wave != msg_live_rec_card);
+    try std.testing.expect(msg_mp_wave != msg_live_vram);
     try std.testing.expect(msg_mp_tp != msg_mp_edit);
     try std.testing.expect(msg_mp_tp != msg_mp_export);
     try std.testing.expect(msg_mp_tp != msg_mp_r_o);
@@ -9414,6 +9493,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_tp != msg_vrc_emotes);
     try std.testing.expect(msg_mp_tp != msg_live_route);
     try std.testing.expect(msg_mp_tp != msg_live_rec_card);
+    try std.testing.expect(msg_mp_tp != msg_live_vram);
     try std.testing.expect(msg_mp_edit != msg_mp_export);
     try std.testing.expect(msg_mp_edit != msg_mp_r_o);
     try std.testing.expect(msg_mp_edit != msg_mp_hov);
@@ -9496,6 +9576,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_edit != msg_vrc_emotes);
     try std.testing.expect(msg_mp_edit != msg_live_route);
     try std.testing.expect(msg_mp_edit != msg_live_rec_card);
+    try std.testing.expect(msg_mp_edit != msg_live_vram);
     try std.testing.expect(msg_mp_export != msg_mp_r_o);
     try std.testing.expect(msg_mp_export != msg_mp_hov);
     try std.testing.expect(msg_mp_export != msg_auto_state);
@@ -9577,6 +9658,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_export != msg_vrc_emotes);
     try std.testing.expect(msg_mp_export != msg_live_route);
     try std.testing.expect(msg_mp_export != msg_live_rec_card);
+    try std.testing.expect(msg_mp_export != msg_live_vram);
     try std.testing.expect(msg_mp_r_o != msg_mp_hov);
     try std.testing.expect(msg_mp_r_o != msg_auto_state);
     try std.testing.expect(msg_mp_r_o != msg_auto_body_state);
@@ -9657,6 +9739,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_r_o != msg_vrc_emotes);
     try std.testing.expect(msg_mp_r_o != msg_live_route);
     try std.testing.expect(msg_mp_r_o != msg_live_rec_card);
+    try std.testing.expect(msg_mp_r_o != msg_live_vram);
     try std.testing.expect(msg_mp_hov != msg_auto_state);
     try std.testing.expect(msg_mp_hov != msg_auto_body_state);
     try std.testing.expect(msg_mp_hov != msg_peers);
@@ -9736,6 +9819,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_hov != msg_vrc_emotes);
     try std.testing.expect(msg_mp_hov != msg_live_route);
     try std.testing.expect(msg_mp_hov != msg_live_rec_card);
+    try std.testing.expect(msg_mp_hov != msg_live_vram);
     try std.testing.expect(msg_auto_state != msg_auto_body_state);
     try std.testing.expect(msg_auto_state != msg_peers);
     try std.testing.expect(msg_auto_state != msg_peers_body);
@@ -9814,6 +9898,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_auto_state != msg_vrc_emotes);
     try std.testing.expect(msg_auto_state != msg_live_route);
     try std.testing.expect(msg_auto_state != msg_live_rec_card);
+    try std.testing.expect(msg_auto_state != msg_live_vram);
     try std.testing.expect(msg_auto_body_state != msg_peers);
     try std.testing.expect(msg_auto_body_state != msg_peers_body);
     try std.testing.expect(msg_auto_body_state != msg_ovl_state);
@@ -9891,6 +9976,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_auto_body_state != msg_vrc_emotes);
     try std.testing.expect(msg_auto_body_state != msg_live_route);
     try std.testing.expect(msg_auto_body_state != msg_live_rec_card);
+    try std.testing.expect(msg_auto_body_state != msg_live_vram);
     try std.testing.expect(msg_peers != msg_peers_body);
     try std.testing.expect(msg_peers != msg_ovl_state);
     try std.testing.expect(msg_peers != msg_ovl_appr);
@@ -9967,6 +10053,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_peers != msg_vrc_emotes);
     try std.testing.expect(msg_peers != msg_live_route);
     try std.testing.expect(msg_peers != msg_live_rec_card);
+    try std.testing.expect(msg_peers != msg_live_vram);
     try std.testing.expect(msg_peers_body != msg_ovl_state);
     try std.testing.expect(msg_peers_body != msg_ovl_appr);
     try std.testing.expect(msg_peers_body != msg_ovl_spout);
@@ -10042,6 +10129,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_peers_body != msg_vrc_emotes);
     try std.testing.expect(msg_peers_body != msg_live_route);
     try std.testing.expect(msg_peers_body != msg_live_rec_card);
+    try std.testing.expect(msg_peers_body != msg_live_vram);
     try std.testing.expect(msg_ovl_state != msg_ovl_appr);
     try std.testing.expect(msg_ovl_state != msg_ovl_spout);
     try std.testing.expect(msg_ovl_state != msg_ui_status);
@@ -10116,6 +10204,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_state != msg_vrc_emotes);
     try std.testing.expect(msg_ovl_state != msg_live_route);
     try std.testing.expect(msg_ovl_state != msg_live_rec_card);
+    try std.testing.expect(msg_ovl_state != msg_live_vram);
     try std.testing.expect(msg_ovl_appr != msg_ovl_spout);
     try std.testing.expect(msg_ovl_appr != msg_ui_status);
     try std.testing.expect(msg_ovl_appr != msg_ovl_strip);
@@ -10189,6 +10278,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_appr != msg_vrc_emotes);
     try std.testing.expect(msg_ovl_appr != msg_live_route);
     try std.testing.expect(msg_ovl_appr != msg_live_rec_card);
+    try std.testing.expect(msg_ovl_appr != msg_live_vram);
     try std.testing.expect(msg_ovl_spout != msg_ui_status);
     try std.testing.expect(msg_ovl_spout != msg_ovl_strip);
     try std.testing.expect(msg_ovl_spout != msg_tw_state);
@@ -10261,6 +10351,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_spout != msg_vrc_emotes);
     try std.testing.expect(msg_ovl_spout != msg_live_route);
     try std.testing.expect(msg_ovl_spout != msg_live_rec_card);
+    try std.testing.expect(msg_ovl_spout != msg_live_vram);
     try std.testing.expect(msg_ui_status != msg_ovl_strip);
     try std.testing.expect(msg_ui_status != msg_tw_state);
     try std.testing.expect(msg_ui_status != msg_tw_obs);
@@ -10332,6 +10423,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ui_status != msg_vrc_emotes);
     try std.testing.expect(msg_ui_status != msg_live_route);
     try std.testing.expect(msg_ui_status != msg_live_rec_card);
+    try std.testing.expect(msg_ui_status != msg_live_vram);
     try std.testing.expect(msg_ovl_strip != msg_tw_state);
     try std.testing.expect(msg_ovl_strip != msg_tw_obs);
     try std.testing.expect(msg_ovl_strip != msg_tw_presets);
@@ -10402,6 +10494,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_strip != msg_vrc_emotes);
     try std.testing.expect(msg_ovl_strip != msg_live_route);
     try std.testing.expect(msg_ovl_strip != msg_live_rec_card);
+    try std.testing.expect(msg_ovl_strip != msg_live_vram);
     try std.testing.expect(msg_tw_state != msg_tw_obs);
     try std.testing.expect(msg_tw_state != msg_tw_presets);
     try std.testing.expect(msg_tw_state != msg_tw_feed);
@@ -10471,6 +10564,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_state != msg_vrc_emotes);
     try std.testing.expect(msg_tw_state != msg_live_route);
     try std.testing.expect(msg_tw_state != msg_live_rec_card);
+    try std.testing.expect(msg_tw_state != msg_live_vram);
     try std.testing.expect(msg_tw_obs != msg_tw_presets);
     try std.testing.expect(msg_tw_obs != msg_tw_feed);
     try std.testing.expect(msg_tw_obs != msg_midi_active);
@@ -10539,6 +10633,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_obs != msg_vrc_emotes);
     try std.testing.expect(msg_tw_obs != msg_live_route);
     try std.testing.expect(msg_tw_obs != msg_live_rec_card);
+    try std.testing.expect(msg_tw_obs != msg_live_vram);
     try std.testing.expect(msg_tw_presets != msg_tw_feed);
     try std.testing.expect(msg_tw_presets != msg_midi_active);
     try std.testing.expect(msg_tw_presets != msg_midi_mon_lines);
@@ -10606,6 +10701,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_presets != msg_vrc_emotes);
     try std.testing.expect(msg_tw_presets != msg_live_route);
     try std.testing.expect(msg_tw_presets != msg_live_rec_card);
+    try std.testing.expect(msg_tw_presets != msg_live_vram);
     try std.testing.expect(msg_tw_feed != msg_midi_active);
     try std.testing.expect(msg_tw_feed != msg_midi_mon_lines);
     try std.testing.expect(msg_tw_feed != msg_midi_port_stat);
@@ -10672,6 +10768,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_feed != msg_vrc_emotes);
     try std.testing.expect(msg_tw_feed != msg_live_route);
     try std.testing.expect(msg_tw_feed != msg_live_rec_card);
+    try std.testing.expect(msg_tw_feed != msg_live_vram);
     try std.testing.expect(msg_midi_active != msg_midi_mon_lines);
     try std.testing.expect(msg_midi_active != msg_midi_port_stat);
     try std.testing.expect(msg_midi_active != msg_midi_ctl);
@@ -10737,6 +10834,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_active != msg_vrc_emotes);
     try std.testing.expect(msg_midi_active != msg_live_route);
     try std.testing.expect(msg_midi_active != msg_live_rec_card);
+    try std.testing.expect(msg_midi_active != msg_live_vram);
     try std.testing.expect(msg_midi_mon_lines != msg_midi_port_stat);
     try std.testing.expect(msg_midi_mon_lines != msg_midi_ctl);
     try std.testing.expect(msg_midi_mon_lines != msg_p_c_view);
@@ -10801,6 +10899,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_mon_lines != msg_vrc_emotes);
     try std.testing.expect(msg_midi_mon_lines != msg_live_route);
     try std.testing.expect(msg_midi_mon_lines != msg_live_rec_card);
+    try std.testing.expect(msg_midi_mon_lines != msg_live_vram);
     try std.testing.expect(msg_midi_port_stat != msg_midi_ctl);
     try std.testing.expect(msg_midi_port_stat != msg_p_c_view);
     try std.testing.expect(msg_midi_port_stat != msg_p_c_gpu);
@@ -10864,6 +10963,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_port_stat != msg_vrc_emotes);
     try std.testing.expect(msg_midi_port_stat != msg_live_route);
     try std.testing.expect(msg_midi_port_stat != msg_live_rec_card);
+    try std.testing.expect(msg_midi_port_stat != msg_live_vram);
     try std.testing.expect(msg_midi_ctl != msg_p_c_view);
     try std.testing.expect(msg_midi_ctl != msg_p_c_gpu);
     try std.testing.expect(msg_midi_ctl != msg_vrc_status);
@@ -10926,6 +11026,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_ctl != msg_vrc_emotes);
     try std.testing.expect(msg_midi_ctl != msg_live_route);
     try std.testing.expect(msg_midi_ctl != msg_live_rec_card);
+    try std.testing.expect(msg_midi_ctl != msg_live_vram);
     try std.testing.expect(msg_p_c_view != msg_p_c_gpu);
     try std.testing.expect(msg_p_c_view != msg_vrc_status);
     try std.testing.expect(msg_p_c_view != msg_vrc_editor);
@@ -10987,6 +11088,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_p_c_view != msg_vrc_emotes);
     try std.testing.expect(msg_p_c_view != msg_live_route);
     try std.testing.expect(msg_p_c_view != msg_live_rec_card);
+    try std.testing.expect(msg_p_c_view != msg_live_vram);
     try std.testing.expect(msg_p_c_gpu != msg_vrc_status);
     try std.testing.expect(msg_p_c_gpu != msg_vrc_editor);
     try std.testing.expect(msg_p_c_gpu != msg_vrc_campaths);
@@ -11047,6 +11149,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_p_c_gpu != msg_vrc_emotes);
     try std.testing.expect(msg_p_c_gpu != msg_live_route);
     try std.testing.expect(msg_p_c_gpu != msg_live_rec_card);
+    try std.testing.expect(msg_p_c_gpu != msg_live_vram);
     try std.testing.expect(msg_vrc_status != msg_vrc_editor);
     try std.testing.expect(msg_vrc_status != msg_vrc_campaths);
     try std.testing.expect(msg_vrc_status != msg_vrc_photos);
@@ -11106,6 +11209,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_status != msg_vrc_emotes);
     try std.testing.expect(msg_vrc_status != msg_live_route);
     try std.testing.expect(msg_vrc_status != msg_live_rec_card);
+    try std.testing.expect(msg_vrc_status != msg_live_vram);
     try std.testing.expect(msg_vrc_editor != msg_vrc_campaths);
     try std.testing.expect(msg_vrc_editor != msg_vrc_photos);
     try std.testing.expect(msg_vrc_editor != msg_vrc_tab);
@@ -11164,6 +11268,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_editor != msg_vrc_emotes);
     try std.testing.expect(msg_vrc_editor != msg_live_route);
     try std.testing.expect(msg_vrc_editor != msg_live_rec_card);
+    try std.testing.expect(msg_vrc_editor != msg_live_vram);
     try std.testing.expect(msg_vrc_campaths != msg_vrc_photos);
     try std.testing.expect(msg_vrc_campaths != msg_vrc_tab);
     try std.testing.expect(msg_vrc_campaths != msg_vrcg);
@@ -11221,6 +11326,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_campaths != msg_vrc_emotes);
     try std.testing.expect(msg_vrc_campaths != msg_live_route);
     try std.testing.expect(msg_vrc_campaths != msg_live_rec_card);
+    try std.testing.expect(msg_vrc_campaths != msg_live_vram);
     try std.testing.expect(msg_vrc_photos != msg_vrc_tab);
     try std.testing.expect(msg_vrc_photos != msg_vrcg);
     try std.testing.expect(msg_vrc_photos != msg_vg_role_body);
@@ -11277,6 +11383,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_photos != msg_vrc_emotes);
     try std.testing.expect(msg_vrc_photos != msg_live_route);
     try std.testing.expect(msg_vrc_photos != msg_live_rec_card);
+    try std.testing.expect(msg_vrc_photos != msg_live_vram);
     try std.testing.expect(msg_vrc_tab != msg_vrcg);
     try std.testing.expect(msg_vrc_tab != msg_vg_role_body);
     try std.testing.expect(msg_vrc_tab != msg_vg_invite_list);
@@ -11332,6 +11439,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_tab != msg_vrc_emotes);
     try std.testing.expect(msg_vrc_tab != msg_live_route);
     try std.testing.expect(msg_vrc_tab != msg_live_rec_card);
+    try std.testing.expect(msg_vrc_tab != msg_live_vram);
     try std.testing.expect(msg_vrcg != msg_vg_role_body);
     try std.testing.expect(msg_vrcg != msg_vg_invite_list);
     try std.testing.expect(msg_vrcg != msg_vg_roles_modal);
@@ -11386,6 +11494,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrcg != msg_vrc_emotes);
     try std.testing.expect(msg_vrcg != msg_live_route);
     try std.testing.expect(msg_vrcg != msg_live_rec_card);
+    try std.testing.expect(msg_vrcg != msg_live_vram);
     try std.testing.expect(msg_vg_role_body != msg_vg_invite_list);
     try std.testing.expect(msg_vg_role_body != msg_vg_roles_modal);
     try std.testing.expect(msg_vg_role_body != msg_vg_invite_modal);
@@ -11439,6 +11548,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_role_body != msg_vrc_emotes);
     try std.testing.expect(msg_vg_role_body != msg_live_route);
     try std.testing.expect(msg_vg_role_body != msg_live_rec_card);
+    try std.testing.expect(msg_vg_role_body != msg_live_vram);
     try std.testing.expect(msg_vg_invite_list != msg_vg_roles_modal);
     try std.testing.expect(msg_vg_invite_list != msg_vg_invite_modal);
     try std.testing.expect(msg_vg_invite_list != msg_vg_member_confirm);
@@ -11491,6 +11601,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_invite_list != msg_vrc_emotes);
     try std.testing.expect(msg_vg_invite_list != msg_live_route);
     try std.testing.expect(msg_vg_invite_list != msg_live_rec_card);
+    try std.testing.expect(msg_vg_invite_list != msg_live_vram);
     try std.testing.expect(msg_vg_roles_modal != msg_vg_invite_modal);
     try std.testing.expect(msg_vg_roles_modal != msg_vg_member_confirm);
     try std.testing.expect(msg_vg_roles_modal != msg_vg_post_confirm);
@@ -11542,6 +11653,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_roles_modal != msg_vrc_emotes);
     try std.testing.expect(msg_vg_roles_modal != msg_live_route);
     try std.testing.expect(msg_vg_roles_modal != msg_live_rec_card);
+    try std.testing.expect(msg_vg_roles_modal != msg_live_vram);
     try std.testing.expect(msg_vg_invite_modal != msg_vg_member_confirm);
     try std.testing.expect(msg_vg_invite_modal != msg_vg_post_confirm);
     try std.testing.expect(msg_vg_invite_modal != msg_ws_hint);
@@ -11592,6 +11704,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_invite_modal != msg_vrc_emotes);
     try std.testing.expect(msg_vg_invite_modal != msg_live_route);
     try std.testing.expect(msg_vg_invite_modal != msg_live_rec_card);
+    try std.testing.expect(msg_vg_invite_modal != msg_live_vram);
     try std.testing.expect(msg_vg_member_confirm != msg_vg_post_confirm);
     try std.testing.expect(msg_vg_member_confirm != msg_ws_hint);
     try std.testing.expect(msg_vg_member_confirm != msg_ws_git_hub);
@@ -11641,6 +11754,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_member_confirm != msg_vrc_emotes);
     try std.testing.expect(msg_vg_member_confirm != msg_live_route);
     try std.testing.expect(msg_vg_member_confirm != msg_live_rec_card);
+    try std.testing.expect(msg_vg_member_confirm != msg_live_vram);
     try std.testing.expect(msg_vg_post_confirm != msg_ws_hint);
     try std.testing.expect(msg_vg_post_confirm != msg_ws_git_hub);
     try std.testing.expect(msg_vg_post_confirm != msg_ws_status);
@@ -11689,6 +11803,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_post_confirm != msg_vrc_emotes);
     try std.testing.expect(msg_vg_post_confirm != msg_live_route);
     try std.testing.expect(msg_vg_post_confirm != msg_live_rec_card);
+    try std.testing.expect(msg_vg_post_confirm != msg_live_vram);
     try std.testing.expect(msg_ws_hint != msg_ws_git_hub);
     try std.testing.expect(msg_ws_hint != msg_ws_status);
     try std.testing.expect(msg_ws_hint != msg_ws_unity);
@@ -11736,6 +11851,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_hint != msg_vrc_emotes);
     try std.testing.expect(msg_ws_hint != msg_live_route);
     try std.testing.expect(msg_ws_hint != msg_live_rec_card);
+    try std.testing.expect(msg_ws_hint != msg_live_vram);
     try std.testing.expect(msg_ws_git_hub != msg_ws_status);
     try std.testing.expect(msg_ws_git_hub != msg_ws_unity);
     try std.testing.expect(msg_ws_git_hub != msg_worlds);
@@ -11782,6 +11898,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_git_hub != msg_vrc_emotes);
     try std.testing.expect(msg_ws_git_hub != msg_live_route);
     try std.testing.expect(msg_ws_git_hub != msg_live_rec_card);
+    try std.testing.expect(msg_ws_git_hub != msg_live_vram);
     try std.testing.expect(msg_ws_status != msg_ws_unity);
     try std.testing.expect(msg_ws_status != msg_worlds);
     try std.testing.expect(msg_ws_status != msg_ws_list_editor);
@@ -11827,6 +11944,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_status != msg_vrc_emotes);
     try std.testing.expect(msg_ws_status != msg_live_route);
     try std.testing.expect(msg_ws_status != msg_live_rec_card);
+    try std.testing.expect(msg_ws_status != msg_live_vram);
     try std.testing.expect(msg_ws_unity != msg_worlds);
     try std.testing.expect(msg_ws_unity != msg_ws_list_editor);
     try std.testing.expect(msg_ws_unity != msg_ws_poster_editor);
@@ -11871,6 +11989,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_unity != msg_vrc_emotes);
     try std.testing.expect(msg_ws_unity != msg_live_route);
     try std.testing.expect(msg_ws_unity != msg_live_rec_card);
+    try std.testing.expect(msg_ws_unity != msg_live_vram);
     try std.testing.expect(msg_worlds != msg_ws_list_editor);
     try std.testing.expect(msg_worlds != msg_ws_poster_editor);
     try std.testing.expect(msg_worlds != msg_ws_friend_list);
@@ -11914,6 +12033,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_worlds != msg_vrc_emotes);
     try std.testing.expect(msg_worlds != msg_live_route);
     try std.testing.expect(msg_worlds != msg_live_rec_card);
+    try std.testing.expect(msg_worlds != msg_live_vram);
     try std.testing.expect(msg_ws_list_editor != msg_ws_poster_editor);
     try std.testing.expect(msg_ws_list_editor != msg_ws_friend_list);
     try std.testing.expect(msg_ws_list_editor != msg_ws_friend_picker);
@@ -11956,6 +12076,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_list_editor != msg_vrc_emotes);
     try std.testing.expect(msg_ws_list_editor != msg_live_route);
     try std.testing.expect(msg_ws_list_editor != msg_live_rec_card);
+    try std.testing.expect(msg_ws_list_editor != msg_live_vram);
     try std.testing.expect(msg_ws_poster_editor != msg_ws_friend_list);
     try std.testing.expect(msg_ws_poster_editor != msg_ws_friend_picker);
     try std.testing.expect(msg_ws_poster_editor != msg_ws_group_list);
@@ -11997,6 +12118,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_poster_editor != msg_vrc_emotes);
     try std.testing.expect(msg_ws_poster_editor != msg_live_route);
     try std.testing.expect(msg_ws_poster_editor != msg_live_rec_card);
+    try std.testing.expect(msg_ws_poster_editor != msg_live_vram);
     try std.testing.expect(msg_ws_friend_list != msg_ws_friend_picker);
     try std.testing.expect(msg_ws_friend_list != msg_ws_group_list);
     try std.testing.expect(msg_ws_friend_list != msg_ws_group_picker);
@@ -12037,6 +12159,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_friend_list != msg_vrc_emotes);
     try std.testing.expect(msg_ws_friend_list != msg_live_route);
     try std.testing.expect(msg_ws_friend_list != msg_live_rec_card);
+    try std.testing.expect(msg_ws_friend_list != msg_live_vram);
     try std.testing.expect(msg_ws_friend_picker != msg_ws_group_list);
     try std.testing.expect(msg_ws_friend_picker != msg_ws_group_picker);
     try std.testing.expect(msg_ws_friend_picker != msg_ws_role_list);
@@ -12076,6 +12199,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_friend_picker != msg_vrc_emotes);
     try std.testing.expect(msg_ws_friend_picker != msg_live_route);
     try std.testing.expect(msg_ws_friend_picker != msg_live_rec_card);
+    try std.testing.expect(msg_ws_friend_picker != msg_live_vram);
     try std.testing.expect(msg_ws_group_list != msg_ws_group_picker);
     try std.testing.expect(msg_ws_group_list != msg_ws_role_list);
     try std.testing.expect(msg_ws_group_list != msg_ws_role_picker);
@@ -12114,6 +12238,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_group_list != msg_vrc_emotes);
     try std.testing.expect(msg_ws_group_list != msg_live_route);
     try std.testing.expect(msg_ws_group_list != msg_live_rec_card);
+    try std.testing.expect(msg_ws_group_list != msg_live_vram);
     try std.testing.expect(msg_ws_group_picker != msg_ws_role_list);
     try std.testing.expect(msg_ws_group_picker != msg_ws_role_picker);
     try std.testing.expect(msg_ws_group_picker != msg_ws_device);
@@ -12151,6 +12276,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_group_picker != msg_vrc_emotes);
     try std.testing.expect(msg_ws_group_picker != msg_live_route);
     try std.testing.expect(msg_ws_group_picker != msg_live_rec_card);
+    try std.testing.expect(msg_ws_group_picker != msg_live_vram);
     try std.testing.expect(msg_ws_role_list != msg_ws_role_picker);
     try std.testing.expect(msg_ws_role_list != msg_ws_device);
     try std.testing.expect(msg_ws_role_list != msg_lib_mirror);
@@ -12187,6 +12313,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_role_list != msg_vrc_emotes);
     try std.testing.expect(msg_ws_role_list != msg_live_route);
     try std.testing.expect(msg_ws_role_list != msg_live_rec_card);
+    try std.testing.expect(msg_ws_role_list != msg_live_vram);
     try std.testing.expect(msg_ws_role_picker != msg_ws_device);
     try std.testing.expect(msg_ws_role_picker != msg_lib_mirror);
     try std.testing.expect(msg_ws_role_picker != msg_lib_mirror_ban);
@@ -12222,6 +12349,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_role_picker != msg_vrc_emotes);
     try std.testing.expect(msg_ws_role_picker != msg_live_route);
     try std.testing.expect(msg_ws_role_picker != msg_live_rec_card);
+    try std.testing.expect(msg_ws_role_picker != msg_live_vram);
     try std.testing.expect(msg_ws_device != msg_lib_mirror);
     try std.testing.expect(msg_ws_device != msg_lib_mirror_ban);
     try std.testing.expect(msg_ws_device != msg_rce_info);
@@ -12256,6 +12384,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_device != msg_vrc_emotes);
     try std.testing.expect(msg_ws_device != msg_live_route);
     try std.testing.expect(msg_ws_device != msg_live_rec_card);
+    try std.testing.expect(msg_ws_device != msg_live_vram);
     try std.testing.expect(msg_lib_mirror != msg_lib_mirror_ban);
     try std.testing.expect(msg_lib_mirror != msg_rce_info);
     try std.testing.expect(msg_lib_mirror != msg_rce_body);
@@ -12289,6 +12418,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_mirror != msg_vrc_emotes);
     try std.testing.expect(msg_lib_mirror != msg_live_route);
     try std.testing.expect(msg_lib_mirror != msg_live_rec_card);
+    try std.testing.expect(msg_lib_mirror != msg_live_vram);
     try std.testing.expect(msg_lib_mirror_ban != msg_rce_info);
     try std.testing.expect(msg_lib_mirror_ban != msg_rce_body);
     try std.testing.expect(msg_lib_mirror_ban != msg_rce_save);
@@ -12321,6 +12451,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_mirror_ban != msg_vrc_emotes);
     try std.testing.expect(msg_lib_mirror_ban != msg_live_route);
     try std.testing.expect(msg_lib_mirror_ban != msg_live_rec_card);
+    try std.testing.expect(msg_lib_mirror_ban != msg_live_vram);
     try std.testing.expect(msg_rce_info != msg_rce_body);
     try std.testing.expect(msg_rce_info != msg_rce_save);
     try std.testing.expect(msg_rce_info != msg_ed_preview);
@@ -12352,6 +12483,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_rce_info != msg_vrc_emotes);
     try std.testing.expect(msg_rce_info != msg_live_route);
     try std.testing.expect(msg_rce_info != msg_live_rec_card);
+    try std.testing.expect(msg_rce_info != msg_live_vram);
     try std.testing.expect(msg_rce_body != msg_rce_save);
     try std.testing.expect(msg_rce_body != msg_ed_preview);
     try std.testing.expect(msg_rce_body != msg_ed_view);
@@ -12382,6 +12514,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_rce_body != msg_vrc_emotes);
     try std.testing.expect(msg_rce_body != msg_live_route);
     try std.testing.expect(msg_rce_body != msg_live_rec_card);
+    try std.testing.expect(msg_rce_body != msg_live_vram);
     try std.testing.expect(msg_rce_save != msg_ed_preview);
     try std.testing.expect(msg_rce_save != msg_ed_view);
     try std.testing.expect(msg_rce_save != msg_ce_topbar);
@@ -12411,6 +12544,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_rce_save != msg_vrc_emotes);
     try std.testing.expect(msg_rce_save != msg_live_route);
     try std.testing.expect(msg_rce_save != msg_live_rec_card);
+    try std.testing.expect(msg_rce_save != msg_live_vram);
     try std.testing.expect(msg_ed_preview != msg_ed_view);
     try std.testing.expect(msg_ed_preview != msg_ce_topbar);
     try std.testing.expect(msg_ed_preview != msg_ce_wave);
@@ -12439,6 +12573,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ed_preview != msg_vrc_emotes);
     try std.testing.expect(msg_ed_preview != msg_live_route);
     try std.testing.expect(msg_ed_preview != msg_live_rec_card);
+    try std.testing.expect(msg_ed_preview != msg_live_vram);
     try std.testing.expect(msg_ed_view != msg_ce_topbar);
     try std.testing.expect(msg_ed_view != msg_ce_wave);
     try std.testing.expect(msg_ed_view != msg_ce_rail);
@@ -12466,6 +12601,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ed_view != msg_vrc_emotes);
     try std.testing.expect(msg_ed_view != msg_live_route);
     try std.testing.expect(msg_ed_view != msg_live_rec_card);
+    try std.testing.expect(msg_ed_view != msg_live_vram);
     try std.testing.expect(msg_ce_topbar != msg_ce_wave);
     try std.testing.expect(msg_ce_topbar != msg_ce_rail);
     try std.testing.expect(msg_ce_topbar != msg_lib_g_f_live);
@@ -12492,6 +12628,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ce_topbar != msg_vrc_emotes);
     try std.testing.expect(msg_ce_topbar != msg_live_route);
     try std.testing.expect(msg_ce_topbar != msg_live_rec_card);
+    try std.testing.expect(msg_ce_topbar != msg_live_vram);
     try std.testing.expect(msg_ce_wave != msg_ce_rail);
     try std.testing.expect(msg_ce_wave != msg_lib_g_f_live);
     try std.testing.expect(msg_ce_wave != msg_lib_smart_modal);
@@ -12517,6 +12654,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ce_wave != msg_vrc_emotes);
     try std.testing.expect(msg_ce_wave != msg_live_route);
     try std.testing.expect(msg_ce_wave != msg_live_rec_card);
+    try std.testing.expect(msg_ce_wave != msg_live_vram);
     try std.testing.expect(msg_ce_rail != msg_lib_g_f_live);
     try std.testing.expect(msg_ce_rail != msg_lib_smart_modal);
     try std.testing.expect(msg_ce_rail != msg_lib_reloc_modal);
@@ -12541,6 +12679,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ce_rail != msg_vrc_emotes);
     try std.testing.expect(msg_ce_rail != msg_live_route);
     try std.testing.expect(msg_ce_rail != msg_live_rec_card);
+    try std.testing.expect(msg_ce_rail != msg_live_vram);
     try std.testing.expect(msg_lib_g_f_live != msg_lib_smart_modal);
     try std.testing.expect(msg_lib_g_f_live != msg_lib_reloc_modal);
     try std.testing.expect(msg_lib_g_f_live != msg_lib_remote);
@@ -12564,6 +12703,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_g_f_live != msg_vrc_emotes);
     try std.testing.expect(msg_lib_g_f_live != msg_live_route);
     try std.testing.expect(msg_lib_g_f_live != msg_live_rec_card);
+    try std.testing.expect(msg_lib_g_f_live != msg_live_vram);
     try std.testing.expect(msg_lib_smart_modal != msg_lib_reloc_modal);
     try std.testing.expect(msg_lib_smart_modal != msg_lib_remote);
     try std.testing.expect(msg_lib_smart_modal != msg_tk_live);
@@ -12586,6 +12726,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_smart_modal != msg_vrc_emotes);
     try std.testing.expect(msg_lib_smart_modal != msg_live_route);
     try std.testing.expect(msg_lib_smart_modal != msg_live_rec_card);
+    try std.testing.expect(msg_lib_smart_modal != msg_live_vram);
     try std.testing.expect(msg_lib_reloc_modal != msg_lib_remote);
     try std.testing.expect(msg_lib_reloc_modal != msg_tk_live);
     try std.testing.expect(msg_lib_reloc_modal != msg_tk_logs);
@@ -12607,6 +12748,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_reloc_modal != msg_vrc_emotes);
     try std.testing.expect(msg_lib_reloc_modal != msg_live_route);
     try std.testing.expect(msg_lib_reloc_modal != msg_live_rec_card);
+    try std.testing.expect(msg_lib_reloc_modal != msg_live_vram);
     try std.testing.expect(msg_lib_remote != msg_tk_live);
     try std.testing.expect(msg_lib_remote != msg_tk_logs);
     try std.testing.expect(msg_lib_remote != msg_dlg_choice);
@@ -12627,6 +12769,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_remote != msg_vrc_emotes);
     try std.testing.expect(msg_lib_remote != msg_live_route);
     try std.testing.expect(msg_lib_remote != msg_live_rec_card);
+    try std.testing.expect(msg_lib_remote != msg_live_vram);
     try std.testing.expect(msg_tk_live != msg_tk_logs);
     try std.testing.expect(msg_tk_live != msg_dlg_choice);
     try std.testing.expect(msg_tk_live != msg_dlg_txt_export);
@@ -12646,6 +12789,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tk_live != msg_vrc_emotes);
     try std.testing.expect(msg_tk_live != msg_live_route);
     try std.testing.expect(msg_tk_live != msg_live_rec_card);
+    try std.testing.expect(msg_tk_live != msg_live_vram);
     try std.testing.expect(msg_tk_logs != msg_dlg_choice);
     try std.testing.expect(msg_tk_logs != msg_dlg_txt_export);
     try std.testing.expect(msg_tk_logs != msg_dlg_export_prev);
@@ -12664,6 +12808,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tk_logs != msg_vrc_emotes);
     try std.testing.expect(msg_tk_logs != msg_live_route);
     try std.testing.expect(msg_tk_logs != msg_live_rec_card);
+    try std.testing.expect(msg_tk_logs != msg_live_vram);
     try std.testing.expect(msg_dlg_choice != msg_dlg_txt_export);
     try std.testing.expect(msg_dlg_choice != msg_dlg_export_prev);
     try std.testing.expect(msg_dlg_choice != msg_dlg_rename);
@@ -12681,6 +12826,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_dlg_choice != msg_vrc_emotes);
     try std.testing.expect(msg_dlg_choice != msg_live_route);
     try std.testing.expect(msg_dlg_choice != msg_live_rec_card);
+    try std.testing.expect(msg_dlg_choice != msg_live_vram);
     try std.testing.expect(msg_dlg_txt_export != msg_dlg_export_prev);
     try std.testing.expect(msg_dlg_txt_export != msg_dlg_rename);
     try std.testing.expect(msg_dlg_txt_export != msg_dlg_fix);
@@ -12697,6 +12843,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_dlg_txt_export != msg_vrc_emotes);
     try std.testing.expect(msg_dlg_txt_export != msg_live_route);
     try std.testing.expect(msg_dlg_txt_export != msg_live_rec_card);
+    try std.testing.expect(msg_dlg_txt_export != msg_live_vram);
     try std.testing.expect(msg_dlg_export_prev != msg_dlg_rename);
     try std.testing.expect(msg_dlg_export_prev != msg_dlg_fix);
     try std.testing.expect(msg_dlg_export_prev != msg_dlg_preset);
@@ -12712,6 +12859,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_dlg_export_prev != msg_vrc_emotes);
     try std.testing.expect(msg_dlg_export_prev != msg_live_route);
     try std.testing.expect(msg_dlg_export_prev != msg_live_rec_card);
+    try std.testing.expect(msg_dlg_export_prev != msg_live_vram);
     try std.testing.expect(msg_dlg_rename != msg_dlg_fix);
     try std.testing.expect(msg_dlg_rename != msg_dlg_preset);
     try std.testing.expect(msg_dlg_rename != msg_dlg_pat_mgr);
@@ -12726,6 +12874,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_dlg_rename != msg_vrc_emotes);
     try std.testing.expect(msg_dlg_rename != msg_live_route);
     try std.testing.expect(msg_dlg_rename != msg_live_rec_card);
+    try std.testing.expect(msg_dlg_rename != msg_live_vram);
     try std.testing.expect(msg_dlg_fix != msg_dlg_preset);
     try std.testing.expect(msg_dlg_fix != msg_dlg_pat_mgr);
     try std.testing.expect(msg_dlg_fix != msg_auto_editor);
@@ -12739,6 +12888,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_dlg_fix != msg_vrc_emotes);
     try std.testing.expect(msg_dlg_fix != msg_live_route);
     try std.testing.expect(msg_dlg_fix != msg_live_rec_card);
+    try std.testing.expect(msg_dlg_fix != msg_live_vram);
     try std.testing.expect(msg_dlg_preset != msg_dlg_pat_mgr);
     try std.testing.expect(msg_dlg_preset != msg_auto_editor);
     try std.testing.expect(msg_dlg_preset != msg_auto_run_now);
@@ -12751,6 +12901,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_dlg_preset != msg_vrc_emotes);
     try std.testing.expect(msg_dlg_preset != msg_live_route);
     try std.testing.expect(msg_dlg_preset != msg_live_rec_card);
+    try std.testing.expect(msg_dlg_preset != msg_live_vram);
     try std.testing.expect(msg_dlg_pat_mgr != msg_auto_editor);
     try std.testing.expect(msg_dlg_pat_mgr != msg_auto_run_now);
     try std.testing.expect(msg_dlg_pat_mgr != msg_auto_schedule);
@@ -12762,6 +12913,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_dlg_pat_mgr != msg_vrc_emotes);
     try std.testing.expect(msg_dlg_pat_mgr != msg_live_route);
     try std.testing.expect(msg_dlg_pat_mgr != msg_live_rec_card);
+    try std.testing.expect(msg_dlg_pat_mgr != msg_live_vram);
     try std.testing.expect(msg_auto_editor != msg_auto_run_now);
     try std.testing.expect(msg_auto_editor != msg_auto_schedule);
     try std.testing.expect(msg_auto_editor != msg_publish_remote);
@@ -12772,6 +12924,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_auto_editor != msg_vrc_emotes);
     try std.testing.expect(msg_auto_editor != msg_live_route);
     try std.testing.expect(msg_auto_editor != msg_live_rec_card);
+    try std.testing.expect(msg_auto_editor != msg_live_vram);
     try std.testing.expect(msg_auto_run_now != msg_auto_schedule);
     try std.testing.expect(msg_auto_run_now != msg_publish_remote);
     try std.testing.expect(msg_auto_run_now != msg_upd_flow);
@@ -12781,6 +12934,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_auto_run_now != msg_vrc_emotes);
     try std.testing.expect(msg_auto_run_now != msg_live_route);
     try std.testing.expect(msg_auto_run_now != msg_live_rec_card);
+    try std.testing.expect(msg_auto_run_now != msg_live_vram);
     try std.testing.expect(msg_auto_schedule != msg_publish_remote);
     try std.testing.expect(msg_auto_schedule != msg_upd_flow);
     try std.testing.expect(msg_auto_schedule != msg_edv_view);
@@ -12789,6 +12943,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_auto_schedule != msg_vrc_emotes);
     try std.testing.expect(msg_auto_schedule != msg_live_route);
     try std.testing.expect(msg_auto_schedule != msg_live_rec_card);
+    try std.testing.expect(msg_auto_schedule != msg_live_vram);
     try std.testing.expect(msg_publish_remote != msg_upd_flow);
     try std.testing.expect(msg_publish_remote != msg_edv_view);
     try std.testing.expect(msg_publish_remote != msg_edv_reframe);
@@ -12796,25 +12951,33 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_publish_remote != msg_vrc_emotes);
     try std.testing.expect(msg_publish_remote != msg_live_route);
     try std.testing.expect(msg_publish_remote != msg_live_rec_card);
+    try std.testing.expect(msg_publish_remote != msg_live_vram);
     try std.testing.expect(msg_upd_flow != msg_edv_view);
     try std.testing.expect(msg_upd_flow != msg_edv_reframe);
     try std.testing.expect(msg_upd_flow != msg_edv_frame);
     try std.testing.expect(msg_upd_flow != msg_vrc_emotes);
     try std.testing.expect(msg_upd_flow != msg_live_route);
     try std.testing.expect(msg_upd_flow != msg_live_rec_card);
+    try std.testing.expect(msg_upd_flow != msg_live_vram);
     try std.testing.expect(msg_edv_view != msg_edv_reframe);
     try std.testing.expect(msg_edv_view != msg_edv_frame);
     try std.testing.expect(msg_edv_view != msg_vrc_emotes);
     try std.testing.expect(msg_edv_view != msg_live_route);
     try std.testing.expect(msg_edv_view != msg_live_rec_card);
+    try std.testing.expect(msg_edv_view != msg_live_vram);
     try std.testing.expect(msg_edv_reframe != msg_edv_frame);
     try std.testing.expect(msg_edv_reframe != msg_vrc_emotes);
     try std.testing.expect(msg_edv_reframe != msg_live_route);
     try std.testing.expect(msg_edv_reframe != msg_live_rec_card);
+    try std.testing.expect(msg_edv_reframe != msg_live_vram);
     try std.testing.expect(msg_edv_frame != msg_vrc_emotes);
     try std.testing.expect(msg_edv_frame != msg_live_route);
     try std.testing.expect(msg_edv_frame != msg_live_rec_card);
+    try std.testing.expect(msg_edv_frame != msg_live_vram);
     try std.testing.expect(msg_vrc_emotes != msg_live_route);
     try std.testing.expect(msg_vrc_emotes != msg_live_rec_card);
+    try std.testing.expect(msg_vrc_emotes != msg_live_vram);
     try std.testing.expect(msg_live_route != msg_live_rec_card);
+    try std.testing.expect(msg_live_route != msg_live_vram);
+    try std.testing.expect(msg_live_rec_card != msg_live_vram);
 }

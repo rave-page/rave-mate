@@ -48,7 +48,7 @@ type logsTickSt struct {
 // prev slot for them regardless costs one entry and keeps this list a plain constant.
 var liveTickIDs = []string{
 	"live-tc", "live-rec-state", "live-status", "live-decks", "live-signals",
-	"live-cockpit", "live-route", "live-rec-card", "live-ablelink", "live-net", "live-tim", "live-perf2", "live-strip",
+	"live-cockpit", "live-route", "live-rec-card", "live-ablelink", "live-net", "live-tim", "live-perf2", "live-vram", "live-strip",
 }
 
 // logsTickIDs is the #log-view surface's single fragment.
@@ -91,6 +91,9 @@ func (u *UI) liveTickState() liveTickSt {
 	}
 	if u.svc.Perf != nil {
 		st.Live.HasPerf, st.Live.Perf = true, u.livePerfState()
+	}
+	if v, ok := u.liveVramState(); ok {
+		st.Live.HasVram, st.Live.Vram = true, v
 	}
 	return st
 }

@@ -85,6 +85,11 @@ pub const RecCard = struct {
     rows: []const SRow = &.{},
 };
 
+pub const Vram = struct {
+    meter: c.Meter = .{},
+    line: []const u8 = "",
+};
+
 pub const CockpitRow = struct {
     variant: []const u8 = "",
     name: []const u8 = "",
@@ -174,6 +179,9 @@ pub const State = struct {
     perfTip: []const u8 = "", // legacy raw (bridge)
     perfTipSt: ?c.Tip = null, // structured tooltip — wins over perfTip
     perf: Perf = .{},
+    hasVram: bool = false,
+    vramTitle: []const u8 = "",
+    vram: Vram = .{},
     strip: Strip = .{},
     // P1 chunk titles (four named groups + the ambient strip).
     groupStream: []const u8 = "",
@@ -276,6 +284,12 @@ pub fn render(h: *Html, s: State) !void {
         try subLabelTip(h, s.perfTitle, s.perfTipSt, s.perfTip);
         try h.raw("<div id=live-perf2>");
         try renderPerf(h, s.perf);
+        try h.raw("</div>");
+    }
+    if (s.hasVram) {
+        try subLabel(h, s.vramTitle, "");
+        try h.raw("<div id=live-vram>");
+        try renderVram(h, s.vram);
         try h.raw("</div>");
     }
     try h.raw("</details>");
@@ -503,6 +517,15 @@ pub fn renderPerf(h: *Html, s: Perf) !void {
     try h.raw("<div class=glegend><span class=spark-head>");
     try h.esc(s.head);
     try h.raw("</span></div></div>");
+}
+
+/// renderVram mirrors Go liveVramFragHTML (#live-vram; a meter + a muted adapter/governor line).
+pub fn renderVram(h: *Html, s: Vram) !void {
+    try h.raw("<div class=\"rp-card\">");
+    try c.meterOf(h, s.meter);
+    try h.raw("<div class=vram-line>");
+    try h.esc(s.line);
+    try h.raw("</div></div>");
 }
 
 /// renderStrip mirrors Go liveStripFragHTML (#live-strip).

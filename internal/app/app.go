@@ -1909,8 +1909,15 @@ func run(parent context.Context, serviceMode bool) error {
 	tmap := traktormap.New(log)
 	tmap.SetVersion(cfg.Features.Traktor.MappingVersion) // "" = auto (newest)
 	var ctl *appControl                                  // forward-declared so Services callbacks can reach the control
+	var gpuMon *gpumem.Monitor                           // forward-declared; the VRAM watchdog is built later (needs u.Notify)
 	svc := ui.Services{
 		Log: log, Cfg: &cfg, API: apiC, Auth: authMgr,
+		GPUMem: func() (gpumem.AdapterUsage, bool) {
+			if gpuMon == nil {
+				return gpumem.AdapterUsage{}, false
+			}
+			return gpuMon.PrimarySample()
+		},
 		ReconcileLibSync: func() {
 			if ctl != nil {
 				ctl.ReconcileLibSync()
@@ -2086,6 +2093,7 @@ func run(parent context.Context, serviceMode bool) error {
 			ProcessInterval: time.Duration(gm.ProcessIntervalSeconds) * time.Second,
 			WarnFreeMB:      warnFree,
 		})
+		gpuMon = mon // wire the cached sample into Services (Live VRAM meter)
 		perfmon.RegisterProbe("gpu memory", mon.Probe)
 		debuglog.Go(log, "gpumem", func() { mon.Run(ctx) })
 		log.Info("gpumem", "VRAM watchdog armed (per-adapter + per-process growth curve, low-VRAM toast)", nil)

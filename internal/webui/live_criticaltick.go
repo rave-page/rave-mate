@@ -45,6 +45,11 @@ func (u *UI) liveCriticalTick() {
 	if rc := u.liveRecCardState(); len(rc.Rows) > 0 {
 		u.tickPatch(&js, "live-rec-card", liveFrag("reccard", rc, wireLiveRecCard, liveRecCardFragHTML))
 	}
+	// VRAM pressure: saturation happens DURING a stream (the 2026-09-11 incident: Resolume ate the
+	// budget mid-set), which is exactly when the general tick is withheld - keep this meter honest.
+	if v, ok := u.liveVramState(); ok {
+		u.tickPatch(&js, "live-vram", liveFrag("vram", v, wireLiveVram, liveVramFragHTML))
+	}
 	u.flushTick(&js)
 	u.freezeAbleLink() // P5: stop the client rAF phrase-bar loop the gated-shut general push left running
 }

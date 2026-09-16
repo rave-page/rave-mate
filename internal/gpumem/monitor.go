@@ -162,6 +162,19 @@ func notifyBody(a AdapterUsage) string {
 		a.Name, float64(a.UsedMB)/1024, float64(a.BudgetMB)/1024)
 }
 
+// PrimarySample returns the primary adapter's last VRAM reading (ok=false if nothing sampled yet).
+// Cheap concurrent read of the cached sample - never syscalls. For the Live VRAM meter.
+func (m *Monitor) PrimarySample() (AdapterUsage, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range m.last {
+		if a.Primary {
+			return a, true
+		}
+	}
+	return AdapterUsage{}, false
+}
+
 // Probe returns the gpu-memory perf-report section from the last stored sample: per-adapter
 // totals then per-adapter process attribution. Pure formatting; safe to call concurrently.
 func (m *Monitor) Probe() string {

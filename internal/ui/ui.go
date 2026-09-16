@@ -29,6 +29,7 @@ import (
 	"rave.page/mate/internal/featurehost"
 	"rave.page/mate/internal/filexfer"
 	ghlink "rave.page/mate/internal/github"
+	"rave.page/mate/internal/gpumem"
 	"rave.page/mate/internal/identity"
 	"rave.page/mate/internal/idmark"
 	"rave.page/mate/internal/jobs"
@@ -110,57 +111,58 @@ type Services struct {
 	Player       *featurehost.PlayerProxy  // subprocess-hosted audio playback engine (shared by all panels)
 	Modules      *module.Manager
 	Workers      *worker.Supervisor
-	Hub          *jobs.Hub                     // shared transcode job fan-out (also used by the studio WS channel)
-	Store        *store.Store                  // local persistence (analysis cache, automations, jobs); may be nil
-	Lib          *libdb.DB                     // relational DJ-library store (tracks/sessions); may be nil
-	OverlayArt   *overlayart.Resolver          // cover-art resolver (extract → DB store + disk cache); may be nil
-	OverlayWeb   *overlayserver.Sink           // browser overlay server sink (busy check for settings auto-apply); may be nil
-	Syncer       *playsync.Syncer              // play-layer + playlist backend sync; may be nil
-	Automations  automation.Manager            // media-automation engine facade; may be nil
-	Session      *aggregator.Aggregator        // DJ-data aggregation hub (sources → merger → sinks); may be nil
-	Recorder     *recorder.Recorder            // session tracklist recorder; may be nil
-	SetCapture   *featurehost.IcecastProxy     // subprocess-hosted set-capture receiver (status + captures); may be nil
-	OBS          *featurehost.ObsProxy         // subprocess-hosted OBS bridge (status + finished recordings); may be nil
-	AbleLink     *featurehost.AbletonLinkProxy // subprocess-hosted Ableton Link session (state mirror + resync); may be nil
-	AudioRec     *audiorec.Recorder            // native audio-device recorder (FLAC, OBS-synced + manual); may be nil
-	TraktorMap   *traktormap.Manager           // activate/deactivate Traktor controller mappings; may be nil
-	Identity     *identity.Identity            // stable node identity for the LAN peer link; may be nil
-	Peers        *peerlink.Manager             // LAN peer-link connections; may be nil
-	Bridge       *bridge.Manager               // rave.page account bridge (off-LAN reach); may be nil
-	AuthGate     *authz.Gate                   // access gate for the bridge (TOTP + trusted sessions); may be nil
-	Discovery    *discovery.Discovery          // LAN mDNS discovery; may be nil
-	PeerBridge   *peerbridge.Bridge            // live DJ-data bridge over the peerlink; may be nil
-	NetStats     *netstats.Sampler             // 1 Hz network rate/RTT sampler (dashboard graphs); may be nil
-	Perf         *perfmon.Monitor              // always-on 1 Hz perf collector (system-perf card); may be nil
-	EventBus     *eventbus.Bus                 // cross-instance pub/sub bus (twitch/vr/obs.mic + capability routing); may be nil
-	RemoteCtl    *remotectl.Endpoint           // peer-control RPC (drive a paired instance's automations/library); may be nil
-	Vrchat       *vrchat.Manager               // VRChat account state machine (login/2FA/sealed session); may be nil
-	GitHub       *ghlink.Auth                  // GitHub link (device flow / PAT, gist scope); may be nil
-	WorldSync    *vrcperm.Service              // VRChat world gist feeds (perms/posters/events/now-playing); may be nil
-	VrchatPipe   *featurehost.VrchatProxy      // subprocess-hosted VRChat pipeline WS (status mirror); may be nil
-	Twitch       *featurehost.TwitchProxy      // subprocess-hosted Twitch (chat/alerts/title/moderation); may be nil
-	TwitchLog    *twitch.ChatLog               // persisted chat/alert history (seeds the Twitch feed); may be nil
-	VROverlay    vroverlay.Surface             // VR overlay control plane (in-proc or subprocess-proxied); may be nil
-	OBSControl   *obscontrol.Manager           // cross-instance OBS stream/record control + status; may be nil
-	VRStats      *vrstats.Collector            // VR perf/debug telemetry from any instance (monitor); may be nil
-	VRCTools     *vrctools.Service             // VRChat screenshot organizer + camera-path manager; may be nil
-	STT          *stt.Controller               // Whisper dictation controller (preview/copy/send); may be nil
-	AppGroups    *appgroups.Service            // application-group launcher (crash recovery); may be nil
-	DMX          *dmx.Router                   // DMX plane (Art-Net ingest + VRSL grid); may be nil
-	DMXMIDI      *vrcmidi.Bridge               // DMX→MIDI VRChat bridge (rate-limited CC out); may be nil
-	MIDIEmit     *midiemit.Emitter             // software MIDI test controller (pad/CC surface → loopback); may be nil
-	MIDISource   *featurehost.MidiProxy        // native MIDI-in: learned controllers + DJ bridge (learn/reconfigure/port enum); may be nil
-	RTSP         *rtspserve.Server             // local RTSP performer chain (ffmpeg → rtspt); may be nil
-	VRSLStream   *vrslstream.Streamer          // VRSL DMX-over-video stream (ffmpeg → RTMP/WHIP push); may be nil
-	Mocap        *mocap.Service                // mocap capture master (panel capture → VRSL stream region); may be nil
-	Crew         *crewlink.Service             // capture-crew relay (node uplink / master ingest over the event room); may be nil
-	Timecode     *timecode.Service             // house SMPTE timecode outputs (LTC/MTC/Art-Net); may be nil
-	Media        medialink.MediaControl        // LAN media plane: route stats + clock sync (Peers tab); in-proc or subprocess-proxied; may be nil
-	MediaRoutes  mediaroute.ReceiveControl     // P4 video routes: remote-source listing + receive control; in-proc or subprocess-proxied; may be nil
-	TCPlane      *medialink.TCPlane            // timecode master election/announce state (stays in-daemon); may be nil
-	Webcam       webcam.CamControl             // webcam/UVC source: capture → Spout + PTZ control (Peers tab); in-proc or subprocess-proxied; may be nil
-	FileXfer     FileXfer                      // file transfer to/from paired instances (Peers tab); may be nil
-	VrchatUplink func(on bool)                 // apply the uplink toggle now (store/delete server vault); may be nil
+	Hub          *jobs.Hub                          // shared transcode job fan-out (also used by the studio WS channel)
+	Store        *store.Store                       // local persistence (analysis cache, automations, jobs); may be nil
+	Lib          *libdb.DB                          // relational DJ-library store (tracks/sessions); may be nil
+	OverlayArt   *overlayart.Resolver               // cover-art resolver (extract → DB store + disk cache); may be nil
+	OverlayWeb   *overlayserver.Sink                // browser overlay server sink (busy check for settings auto-apply); may be nil
+	Syncer       *playsync.Syncer                   // play-layer + playlist backend sync; may be nil
+	Automations  automation.Manager                 // media-automation engine facade; may be nil
+	Session      *aggregator.Aggregator             // DJ-data aggregation hub (sources → merger → sinks); may be nil
+	Recorder     *recorder.Recorder                 // session tracklist recorder; may be nil
+	SetCapture   *featurehost.IcecastProxy          // subprocess-hosted set-capture receiver (status + captures); may be nil
+	OBS          *featurehost.ObsProxy              // subprocess-hosted OBS bridge (status + finished recordings); may be nil
+	AbleLink     *featurehost.AbletonLinkProxy      // subprocess-hosted Ableton Link session (state mirror + resync); may be nil
+	AudioRec     *audiorec.Recorder                 // native audio-device recorder (FLAC, OBS-synced + manual); may be nil
+	TraktorMap   *traktormap.Manager                // activate/deactivate Traktor controller mappings; may be nil
+	Identity     *identity.Identity                 // stable node identity for the LAN peer link; may be nil
+	Peers        *peerlink.Manager                  // LAN peer-link connections; may be nil
+	Bridge       *bridge.Manager                    // rave.page account bridge (off-LAN reach); may be nil
+	AuthGate     *authz.Gate                        // access gate for the bridge (TOTP + trusted sessions); may be nil
+	Discovery    *discovery.Discovery               // LAN mDNS discovery; may be nil
+	PeerBridge   *peerbridge.Bridge                 // live DJ-data bridge over the peerlink; may be nil
+	NetStats     *netstats.Sampler                  // 1 Hz network rate/RTT sampler (dashboard graphs); may be nil
+	Perf         *perfmon.Monitor                   // always-on 1 Hz perf collector (system-perf card); may be nil
+	EventBus     *eventbus.Bus                      // cross-instance pub/sub bus (twitch/vr/obs.mic + capability routing); may be nil
+	RemoteCtl    *remotectl.Endpoint                // peer-control RPC (drive a paired instance's automations/library); may be nil
+	Vrchat       *vrchat.Manager                    // VRChat account state machine (login/2FA/sealed session); may be nil
+	GitHub       *ghlink.Auth                       // GitHub link (device flow / PAT, gist scope); may be nil
+	WorldSync    *vrcperm.Service                   // VRChat world gist feeds (perms/posters/events/now-playing); may be nil
+	VrchatPipe   *featurehost.VrchatProxy           // subprocess-hosted VRChat pipeline WS (status mirror); may be nil
+	Twitch       *featurehost.TwitchProxy           // subprocess-hosted Twitch (chat/alerts/title/moderation); may be nil
+	TwitchLog    *twitch.ChatLog                    // persisted chat/alert history (seeds the Twitch feed); may be nil
+	VROverlay    vroverlay.Surface                  // VR overlay control plane (in-proc or subprocess-proxied); may be nil
+	OBSControl   *obscontrol.Manager                // cross-instance OBS stream/record control + status; may be nil
+	VRStats      *vrstats.Collector                 // VR perf/debug telemetry from any instance (monitor); may be nil
+	VRCTools     *vrctools.Service                  // VRChat screenshot organizer + camera-path manager; may be nil
+	STT          *stt.Controller                    // Whisper dictation controller (preview/copy/send); may be nil
+	AppGroups    *appgroups.Service                 // application-group launcher (crash recovery); may be nil
+	DMX          *dmx.Router                        // DMX plane (Art-Net ingest + VRSL grid); may be nil
+	DMXMIDI      *vrcmidi.Bridge                    // DMX→MIDI VRChat bridge (rate-limited CC out); may be nil
+	MIDIEmit     *midiemit.Emitter                  // software MIDI test controller (pad/CC surface → loopback); may be nil
+	MIDISource   *featurehost.MidiProxy             // native MIDI-in: learned controllers + DJ bridge (learn/reconfigure/port enum); may be nil
+	RTSP         *rtspserve.Server                  // local RTSP performer chain (ffmpeg → rtspt); may be nil
+	VRSLStream   *vrslstream.Streamer               // VRSL DMX-over-video stream (ffmpeg → RTMP/WHIP push); may be nil
+	Mocap        *mocap.Service                     // mocap capture master (panel capture → VRSL stream region); may be nil
+	Crew         *crewlink.Service                  // capture-crew relay (node uplink / master ingest over the event room); may be nil
+	Timecode     *timecode.Service                  // house SMPTE timecode outputs (LTC/MTC/Art-Net); may be nil
+	Media        medialink.MediaControl             // LAN media plane: route stats + clock sync (Peers tab); in-proc or subprocess-proxied; may be nil
+	MediaRoutes  mediaroute.ReceiveControl          // P4 video routes: remote-source listing + receive control; in-proc or subprocess-proxied; may be nil
+	TCPlane      *medialink.TCPlane                 // timecode master election/announce state (stays in-daemon); may be nil
+	Webcam       webcam.CamControl                  // webcam/UVC source: capture → Spout + PTZ control (Peers tab); in-proc or subprocess-proxied; may be nil
+	FileXfer     FileXfer                           // file transfer to/from paired instances (Peers tab); may be nil
+	VrchatUplink func(on bool)                      // apply the uplink toggle now (store/delete server vault); may be nil
+	GPUMem       func() (gpumem.AdapterUsage, bool) // primary-adapter VRAM sample for the Live VRAM meter; nil / (_,false) = unavailable
 
 	ReconcileLibSync func() // re-arm the auto-sync scheduler after a sync-job change; may be nil
 

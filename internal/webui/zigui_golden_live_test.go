@@ -44,6 +44,7 @@ func liveFixtures() map[string]liveState {
 			Cockpit:     liveCockpitSt{Rows: []liveCockpitRow{}},
 			Route:       liveRouteSt{Rows: []liveSRow{}},
 			RecCard:     liveRecCardSt{Rows: []liveSRow{}},
+			Vram:        liveVramSt{Meter: meterSt{Width: "0%"}},
 			Link:        liveLinkSt{Sources: []liveSRow{}},
 			Strip:       liveStripSt{},
 			GroupStream: "Stream & picture", GroupDecks: "Decks",
@@ -111,6 +112,11 @@ func liveFixtures() map[string]liveState {
 		liveSR("success", "set-2026-07-25", "12:34 · 18 tracks"),
 		liveSR("muted", "next", "artist - upcoming"),
 	}}
+	populated.HasVram, populated.VramTitle = true, "GPU memory"
+	populated.Vram = liveVramSt{
+		Meter: meterSt{Label: "VRAM", Val: "7.9/12.0 GB", Width: "65.8%", Tick: "90.0%"},
+		Line:  "NVIDIA GeForce RTX 3060 · 4.1 GB free · streaming",
+	}
 	populated.Link = liveLinkSt{Available: true, Fill: pbarPct(37.5), Cap: "Beat 7 / 16",
 		Session: liveSR("success", "Session", "128.0 BPM · 2 peers · enabled"), ResyncLbl: "Resync",
 		Sources: []liveSRow{
@@ -168,6 +174,8 @@ func liveFixtures() map[string]liveState {
 	escaping.Route = liveRouteSt{Rows: []liveSRow{liveSR("error", `▸ vj&-box "1"`, `38 fps · fro&zen <5>s`)}}
 	escaping.HasRecCard, escaping.RecCardTitle = true, `Rec&ording <"x">`
 	escaping.RecCard = liveRecCardSt{Rows: []liveSRow{liveSR("success", `se&t "1" <x>`, `12:34 & <18> tracks`)}}
+	escaping.HasVram, escaping.VramTitle = true, `GP&U <"mem">`
+	escaping.Vram = liveVramSt{Meter: meterSt{Label: `VR&AM<>`, Val: `7.9 & "12"`, Width: "65.8%", Tick: "90.0%"}, Line: `RT&X <"3060"> · streaming`}
 	escaping.Link = liveLinkSt{Available: true, Fill: pbarPct(100.126), Cap: `Be&at 7 / <16>`,
 		Session: liveSR(`success`, `Se&ssion "x"`, `128.0 & <"enabled">`), ResyncLbl: `Re&sync<>`,
 		Sources: []liveSRow{liveSR("error", `so&urce "1"`, `error: <not found> & "x" · err -3ms · 0 corr/min`)}}
@@ -255,6 +263,7 @@ func TestZigLiveGolden(t *testing.T) {
 			assertFrag(t, "graph", st.Net, liveGraphFragHTML)
 			assertFrag(t, "graph", st.Tim, liveGraphFragHTML)
 			assertFrag(t, "perf", st.Perf, livePerfFragHTML)
+			assertFrag(t, "vram", st.Vram, liveVramFragHTML)
 			assertFrag(t, "strip", st.Strip, liveStripFragHTML)
 		})
 	}
