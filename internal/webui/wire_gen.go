@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash         uint32 = 0x023a496b
+	wireSchemaHash         uint32 = 0x785f9ce2
 	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -261,6 +261,13 @@ func (v liveRouteSt) encodeWire(w *zigui.WireWriter) {
 	w.List(1, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
 }
 
+func (v meterSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Str(2, v.Val)
+	w.Str(3, v.Width)
+	w.Str(4, v.Tick)
+}
+
 func (v liveCockpitRow) encodeWire(w *zigui.WireWriter) {
 	w.Str(1, v.Variant)
 	w.Str(2, v.Name)
@@ -269,6 +276,7 @@ func (v liveCockpitRow) encodeWire(w *zigui.WireWriter) {
 	w.Str(5, v.StreamAct)
 	w.Str(6, v.RecLbl)
 	w.Str(7, v.RecAct)
+	w.List(8, len(v.Meters), func(i int) { v.Meters[i].encodeWire(w) })
 }
 
 func (v liveCockpitSt) encodeWire(w *zigui.WireWriter) {
@@ -5419,6 +5427,60 @@ func (v liveRouteSt) deltaWire(w *zigui.WireWriter, prev *liveRouteSt) {
 	}
 }
 
+func (v meterSt) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Label)
+	h.Str(2, v.Val)
+	h.Str(3, v.Width)
+	h.Str(4, v.Tick)
+}
+
+func (v meterSt) wireEq(o *meterSt) bool {
+	if v.Label != o.Label {
+		return false
+	}
+	if v.Val != o.Val {
+		return false
+	}
+	if v.Width != o.Width {
+		return false
+	}
+	if v.Tick != o.Tick {
+		return false
+	}
+	return true
+}
+
+func (v meterSt) deltaWire(w *zigui.WireWriter, prev *meterSt) {
+	if v.Label != prev.Label {
+		if v.Label == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Label)
+		}
+	}
+	if v.Val != prev.Val {
+		if v.Val == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Val)
+		}
+	}
+	if v.Width != prev.Width {
+		if v.Width == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.Width)
+		}
+	}
+	if v.Tick != prev.Tick {
+		if v.Tick == "" {
+			w.Clear(4)
+		} else {
+			w.Str(4, v.Tick)
+		}
+	}
+}
+
 func (v liveCockpitRow) hashWire(h *zigui.WireHasher) {
 	h.Str(1, v.Variant)
 	h.Str(2, v.Name)
@@ -5427,6 +5489,10 @@ func (v liveCockpitRow) hashWire(h *zigui.WireHasher) {
 	h.Str(5, v.StreamAct)
 	h.Str(6, v.RecLbl)
 	h.Str(7, v.RecAct)
+	h.List(8, len(v.Meters))
+	for i := range v.Meters {
+		v.Meters[i].hashWire(h)
+	}
 }
 
 func (v liveCockpitRow) wireEq(o *liveCockpitRow) bool {
@@ -5450,6 +5516,14 @@ func (v liveCockpitRow) wireEq(o *liveCockpitRow) bool {
 	}
 	if v.RecAct != o.RecAct {
 		return false
+	}
+	if len(v.Meters) != len(o.Meters) {
+		return false
+	}
+	for i7 := range v.Meters {
+		if !v.Meters[i7].wireEq(&o.Meters[i7]) {
+			return false
+		}
 	}
 	return true
 }
@@ -5502,6 +5576,17 @@ func (v liveCockpitRow) deltaWire(w *zigui.WireWriter, prev *liveCockpitRow) {
 			w.Clear(7)
 		} else {
 			w.Str(7, v.RecAct)
+		}
+	}
+	chg7 := len(v.Meters) != len(prev.Meters)
+	for i7 := 0; !chg7 && i7 < len(v.Meters); i7++ {
+		chg7 = !v.Meters[i7].wireEq(&prev.Meters[i7])
+	}
+	if chg7 {
+		if len(v.Meters) == 0 {
+			w.Clear(8)
+		} else {
+			w.List(8, len(v.Meters), func(i int) { v.Meters[i].encodeWire(w) })
 		}
 	}
 }

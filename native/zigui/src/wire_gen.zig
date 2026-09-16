@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0x023a496b;
+pub const schema_hash: u32 = 0x785f9ce2;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -344,6 +344,16 @@ pub fn decodeLiveRoute(r: *wire.Reader, out: *live.Route) wire.Error!void {
     };
 }
 
+pub fn decodeLiveMeter(r: *wire.Reader, out: *c.Meter) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.val = try r.str(t),
+        3 => out.width = try r.str(t),
+        4 => out.tick = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
 pub fn decodeLiveCockpitRow(r: *wire.Reader, out: *live.CockpitRow) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.variant = try r.str(t),
@@ -353,6 +363,7 @@ pub fn decodeLiveCockpitRow(r: *wire.Reader, out: *live.CockpitRow) wire.Error!v
         5 => out.streamAct = try r.str(t),
         6 => out.recLbl = try r.str(t),
         7 => out.recAct = try r.str(t),
+        8 => out.meters = try r.list(c.Meter, decodeLiveMeter, t),
         else => try r.skip(t),
     };
 }
@@ -5330,6 +5341,39 @@ pub fn hashLiveRoute(h: *wire.Hasher, v: live.Route) void {
     for (v.rows) |e| hashLiveSRow(h, e);
 }
 
+pub fn mergeLiveMeter(r: *wire.Reader, out: *c.Meter) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.label = "",
+            2 => out.val = "",
+            3 => out.width = "",
+            4 => out.tick = "",
+            else => {},
+        },
+        1 => out.label = try wire.strDup(r, t),
+        2 => out.val = try wire.strDup(r, t),
+        3 => out.width = try wire.strDup(r, t),
+        4 => out.tick = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLiveMeter(a: std.mem.Allocator, v: c.Meter) wire.Error!c.Meter {
+    var out = v;
+    out.label = try a.dupe(u8, v.label);
+    out.val = try a.dupe(u8, v.val);
+    out.width = try a.dupe(u8, v.width);
+    out.tick = try a.dupe(u8, v.tick);
+    return out;
+}
+
+pub fn hashLiveMeter(h: *wire.Hasher, v: c.Meter) void {
+    h.str(1, v.label);
+    h.str(2, v.val);
+    h.str(3, v.width);
+    h.str(4, v.tick);
+}
+
 pub fn mergeLiveCockpitRow(r: *wire.Reader, out: *live.CockpitRow) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         wire.clear_field => switch (try r.uint(t)) {
@@ -5340,6 +5384,7 @@ pub fn mergeLiveCockpitRow(r: *wire.Reader, out: *live.CockpitRow) wire.Error!vo
             5 => out.streamAct = "",
             6 => out.recLbl = "",
             7 => out.recAct = "",
+            8 => out.meters = &.{},
             else => {},
         },
         1 => out.variant = try wire.strDup(r, t),
@@ -5349,6 +5394,7 @@ pub fn mergeLiveCockpitRow(r: *wire.Reader, out: *live.CockpitRow) wire.Error!vo
         5 => out.streamAct = try wire.strDup(r, t),
         6 => out.recLbl = try wire.strDup(r, t),
         7 => out.recAct = try wire.strDup(r, t),
+        8 => out.meters = try r.list(c.Meter, mergeLiveMeter, t),
         else => try r.skip(t),
     };
 }
@@ -5362,6 +5408,7 @@ pub fn cloneLiveCockpitRow(a: std.mem.Allocator, v: live.CockpitRow) wire.Error!
     out.streamAct = try a.dupe(u8, v.streamAct);
     out.recLbl = try a.dupe(u8, v.recLbl);
     out.recAct = try a.dupe(u8, v.recAct);
+    out.meters = try wire.cloneList(c.Meter, cloneLiveMeter, a, v.meters);
     return out;
 }
 
@@ -5373,6 +5420,8 @@ pub fn hashLiveCockpitRow(h: *wire.Hasher, v: live.CockpitRow) void {
     h.str(5, v.streamAct);
     h.str(6, v.recLbl);
     h.str(7, v.recAct);
+    h.list(8, v.meters.len);
+    for (v.meters) |e| hashLiveMeter(h, e);
 }
 
 pub fn mergeLiveCockpit(r: *wire.Reader, out: *live.Cockpit) wire.Error!void {

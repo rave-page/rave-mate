@@ -185,6 +185,8 @@ body {
 .spark-row .spark { flex: 1; height: 26px; margin: 0; min-width: 0; }
 @media (max-width: 640px) { .spark-lbl { flex-basis: 110px; } }
 .spark-head { color: var(--rp-mint, #08F79B); }
+/* OBS cockpit streaming-health meters (drop ratio / congestion) under a row */
+.cockpit-meters { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 12px; }
 
 /* bottom status strip */
 .livestrip { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;

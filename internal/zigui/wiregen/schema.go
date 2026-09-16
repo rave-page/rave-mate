@@ -192,8 +192,12 @@ var schema = []msg{
 		fs:  []field{li(1, "Rows", "rows", "LiveSRow")},
 	},
 	{
+		name: "LiveMeter", goT: "meterSt", zigT: "c.Meter",
+		fs: []field{s(1, "Label", "label"), s(2, "Val", "val"), s(3, "Width", "width"), s(4, "Tick", "tick")},
+	},
+	{
 		name: "LiveCockpitRow", goT: "liveCockpitRow", zigT: "live.CockpitRow",
-		fs: []field{s(1, "Variant", "variant"), s(2, "Name", "name"), s(3, "State", "state"), s(4, "StreamLbl", "streamLbl"), s(5, "StreamAct", "streamAct"), s(6, "RecLbl", "recLbl"), s(7, "RecAct", "recAct")},
+		fs: []field{s(1, "Variant", "variant"), s(2, "Name", "name"), s(3, "State", "state"), s(4, "StreamLbl", "streamLbl"), s(5, "StreamAct", "streamAct"), s(6, "RecLbl", "recLbl"), s(7, "RecAct", "recAct"), li(8, "Meters", "meters", "LiveMeter")},
 	},
 	{
 		name: "LiveCockpit", goT: "liveCockpitSt", zigT: "live.Cockpit", id: 16,

@@ -271,10 +271,10 @@ func statusRow(variant, label, line string) string {
 // meterSt is a resolved .rp-meter: a horizontal magnitude bar in the single brand hue. Width/Tick are
 // pre-formatted percentages Go-side (the Zig twin never formats a float); Tick "" = no threshold mark.
 type meterSt struct {
-	Label string
-	Val   string // tabular readout (the number that IS the answer, P7)
-	Width string // fill width, e.g. "12.5%"
-	Tick  string // threshold position, e.g. "80%"; "" = none
+	Label string `json:"label"`
+	Val   string `json:"val"`   // tabular readout (the number that IS the answer, P7)
+	Width string `json:"width"` // fill width, e.g. "12.5%"
+	Tick  string `json:"tick"`  // threshold position, e.g. "80%"; "" = none
 }
 
 // meterHTML renders the .rp-meter recipe: label · single-hue bar (length = magnitude) · optional

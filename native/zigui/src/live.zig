@@ -89,6 +89,7 @@ pub const CockpitRow = struct {
     streamAct: []const u8 = "",
     recLbl: []const u8 = "",
     recAct: []const u8 = "",
+    meters: []const c.Meter = &.{}, // drop-ratio / congestion meters (streaming rows)
 };
 
 pub const Cockpit = struct {
@@ -421,6 +422,11 @@ pub fn renderCockpit(h: *Html, s: Cockpit) !void {
         try c.btn(h, r.recLbl, "outline", r.recAct, "");
         try c.btnRowClose(h);
         try h.raw("</div>");
+        if (r.meters.len != 0) {
+            try h.raw("<div class=cockpit-meters>");
+            for (r.meters) |m| try c.meterOf(h, m);
+            try h.raw("</div>");
+        }
     }
     try h.raw("</div>");
 }

@@ -80,6 +80,19 @@ pub fn btnRowClose(h: *Html) !void {
     try h.raw("</div>");
 }
 
+/// Meter is a resolved .rp-meter row (Go meterSt): width/tick pre-formatted percentages Go-side.
+pub const Meter = struct {
+    label: []const u8 = "",
+    val: []const u8 = "",
+    width: []const u8 = "0%",
+    tick: []const u8 = "",
+};
+
+/// meterOf renders a resolved Meter (the wired twin of Go meterHTML).
+pub fn meterOf(h: *Html, m: Meter) !void {
+    try meter(h, m.label, m.val, m.width, m.tick);
+}
+
 /// meter mirrors Go meterHTML (.rp-meter): a single-hue magnitude bar. width/tick are pre-formatted
 /// percentages Go-side (Zig never formats a float); tick "" = no threshold mark.
 pub fn meter(h: *Html, label: []const u8, val: []const u8, width: []const u8, tick: []const u8) !void {

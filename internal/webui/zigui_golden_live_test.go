@@ -91,8 +91,12 @@ func liveFixtures() map[string]liveState {
 	}}
 	populated.Cockpit = liveCockpitSt{Empty: "No OBS instances", Caption: "Start/stop OBS here; recordings link to the tracklist.",
 		Rows: []liveCockpitRow{
-			{Variant: "error", Name: "studio-pc (this PC)", State: "Streaming 6000 kbps",
-				StreamLbl: "Stop stream", StreamAct: "obs-stream:local", RecLbl: "Start recording", RecAct: "obs-record:local"},
+			{Variant: "error", Name: "studio-pc (this PC)", State: "Streaming 6000 kbps · up 12m3s",
+				StreamLbl: "Stop stream", StreamAct: "obs-stream:local", RecLbl: "Start recording", RecAct: "obs-record:local",
+				Meters: []meterSt{
+					{Label: "Dropped", Val: "0.5%", Width: "0.5%", Tick: "5.0%"},
+					{Label: "Congestion", Val: "10%", Width: "10.0%", Tick: "50.0%"},
+				}},
 			{Variant: "success", Name: "vj-box", State: "Ready",
 				StreamLbl: "Start stream", StreamAct: "obs-stream:n2", RecLbl: "Stop recording", RecAct: "obs-record:n2"},
 		}}
@@ -151,7 +155,8 @@ func liveFixtures() map[string]liveState {
 	escaping.Signals = liveSignalsSt{Rows: []liveKV{liveRow(`Ch&annel <1>`, `EQ lo tra&ktor · Filter "midi"`)}}
 	escaping.Cockpit = liveCockpitSt{Empty: `n&one<>`, Caption: `ca&ption <"x">`, Rows: []liveCockpitRow{
 		{Variant: "error", Name: `stu&dio "pc" <1>`, State: `Str&eaming <6000>`,
-			StreamLbl: `Sto&p "stream"`, StreamAct: `obs-stream:n&"1'<>`, RecLbl: `St&art rec"`, RecAct: `obs-record:n&"1'<>`},
+			StreamLbl: `Sto&p "stream"`, StreamAct: `obs-stream:n&"1'<>`, RecLbl: `St&art rec"`, RecAct: `obs-record:n&"1'<>`,
+			Meters: []meterSt{{Label: `Dr&op<>`, Val: `0.5% & "x"`, Width: "0.5%", Tick: "5.0%"}}},
 	}}
 	escaping.HasRoute, escaping.RouteTitle = true, `Pi&cture <"x">`
 	escaping.Route = liveRouteSt{Rows: []liveSRow{liveSR("error", `▸ vj&-box "1"`, `38 fps · fro&zen <5>s`)}}

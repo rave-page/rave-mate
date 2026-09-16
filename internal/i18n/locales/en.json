@@ -1940,8 +1940,11 @@
     "bpm": "{bpm} BPM",
     "cockpit": {
       "caption": "The OBS stream on this PC drives the auto go-live above (now-playing only). OBS recordings save to your OBS output folder; the set tracklist is captured automatically.",
+      "congestLabel": "Congestion",
+      "dropLabel": "Dropped",
       "empty": "No OBS instances configured",
       "offline": "offline",
+      "uptime": "up {dur}",
       "ready": "ready",
       "reconnecting": "reconnecting",
       "recording": "recording",

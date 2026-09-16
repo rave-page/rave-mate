@@ -12,6 +12,7 @@ import (
 	"rave.page/mate/internal/audiorec"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/medialink"
+	"rave.page/mate/internal/obscontrol"
 	"rave.page/mate/internal/peerbridge"
 	"rave.page/mate/internal/session"
 	"rave.page/mate/internal/zigui"
@@ -108,13 +109,14 @@ type liveRouteSt struct {
 
 // liveCockpitRow is one OBS instance row.
 type liveCockpitRow struct {
-	Variant   string `json:"variant"`
-	Name      string `json:"name"`
-	State     string `json:"state"`
-	StreamLbl string `json:"streamLbl"`
-	StreamAct string `json:"streamAct"`
-	RecLbl    string `json:"recLbl"`
-	RecAct    string `json:"recAct"`
+	Variant   string    `json:"variant"`
+	Name      string    `json:"name"`
+	State     string    `json:"state"`
+	StreamLbl string    `json:"streamLbl"`
+	StreamAct string    `json:"streamAct"`
+	RecLbl    string    `json:"recLbl"`
+	RecAct    string    `json:"recAct"`
+	Meters    []meterSt `json:"meters,omitempty"` // drop-ratio / congestion meters (streaming rows only); omitempty so a nil slice isn't a JSON null the Zig decoder rejects
 }
 
 type liveCockpitSt struct {
@@ -955,8 +957,10 @@ func (u *UI) liveCockpitState() liveCockpitSt {
 		switch {
 		case in.Streaming:
 			state, sv = i18n.T("live.cockpit.streaming", i18n.A{"kbps": fmt.Sprint(in.BitrateKbps)}), "error"
+			state += " · " + i18n.T("live.cockpit.uptime", i18n.A{"dur": fmtDurShort(in.StreamSec)})
 		case in.Recording:
 			state, sv = i18n.T("live.cockpit.recording"), "error"
+			state += " · " + i18n.T("live.cockpit.uptime", i18n.A{"dur": fmtDurShort(in.RecSec)})
 		case in.Reconnecting:
 			state, sv = i18n.T("live.cockpit.reconnecting"), "warning"
 		case in.Connected:
@@ -971,9 +975,33 @@ func (u *UI) liveCockpitState() liveCockpitSt {
 		}
 		st.Rows = append(st.Rows, liveCockpitRow{Variant: sv, Name: name, State: state,
 			StreamLbl: streamLabel, StreamAct: "obs-stream:" + in.ID,
-			RecLbl: recLabel, RecAct: "obs-record:" + in.ID})
+			RecLbl: recLabel, RecAct: "obs-record:" + in.ID,
+			Meters: cockpitMeters(in)})
 	}
 	return st
+}
+
+// cockpitMeters draws the streaming-health shapes (P7): drop-ratio + congestion as single-hue bars
+// with a threshold tick. Only while streaming - the frame counters are meaningless otherwise.
+func cockpitMeters(in obscontrol.Instance) []meterSt {
+	if !in.Streaming {
+		return nil
+	}
+	drop := in.DropPct() // skipped/total %
+	return []meterSt{
+		{Label: i18n.T("live.cockpit.dropLabel"), Val: fmt.Sprintf("%.1f%%", drop),
+			Width: meterPct(drop / 100), Tick: meterPct(0.05)},
+		{Label: i18n.T("live.cockpit.congestLabel"), Val: fmt.Sprintf("%.0f%%", in.Congestion*100),
+			Width: meterPct(in.Congestion), Tick: meterPct(0.5)},
+	}
+}
+
+// fmtDurShort formats a float-seconds duration compactly ("12m3s").
+func fmtDurShort(secs float64) string {
+	if secs < 0 {
+		secs = 0
+	}
+	return (time.Duration(secs) * time.Second).String()
 }
 
 func (u *UI) cockpitHTML() string {
@@ -992,6 +1020,13 @@ func liveCockpitFragHTML(st liveCockpitSt) string {
 		b.WriteString(`<div class=row><span class=row-label>` + dot(r.Variant) + ` ` + html.EscapeString(r.Name) +
 			` <span class=np-artist>` + html.EscapeString(r.State) + `</span></span>` +
 			btnRow(btn(r.StreamLbl, "outline", r.StreamAct, ""), btn(r.RecLbl, "outline", r.RecAct, "")) + `</div>`)
+		if len(r.Meters) > 0 {
+			b.WriteString(`<div class=cockpit-meters>`)
+			for _, m := range r.Meters {
+				b.WriteString(meterHTML(m))
+			}
+			b.WriteString(`</div>`)
+		}
 	}
 	b.WriteString(`</div>`)
 	return b.String()
