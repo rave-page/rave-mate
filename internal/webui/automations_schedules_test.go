@@ -178,21 +178,33 @@ func TestAutoChainDeletes(t *testing.T) {
 func TestArRunnableGating(t *testing.T) {
 	del := []automation.Action{{Type: automation.ActionDelete}}
 	safe := []automation.Action{{Type: automation.ActionTranscode, PresetID: "remux"}}
+	// A rules-first (default) sweep gates on the preview having at least one match; the secondary
+	// single-file mode gates on a picked file. Both gate on the erase ack.
+	withMatches := func(s *arSt) { s.preview.Total = 3 }
 	cases := []struct {
 		name string
 		mut  func(*arSt)
 		want bool
 	}{
-		{"no file", func(s *arSt) { s.acts = safe }, false},
-		{"blank file", func(s *arSt) { s.acts, s.file = safe, "   " }, false},
-		{"file, safe chain", func(s *arSt) { s.acts, s.file = safe, `C:\a.wav` }, true},
-		{"erasing chain, unacknowledged", func(s *arSt) { s.acts, s.file = del, `C:\a.wav` }, false},
-		{"erasing chain, acknowledged", func(s *arSt) { s.acts, s.file, s.ack = del, `C:\a.wav`, true }, true},
+		// rules-first default
+		{"rules, no matches", func(s *arSt) { s.acts = safe }, false},
+		{"rules, matches", func(s *arSt) { s.acts = safe; withMatches(s) }, true},
+		{"rules, erasing unacknowledged", func(s *arSt) { s.acts = del; withMatches(s) }, false},
+		{"rules, erasing acknowledged", func(s *arSt) { s.acts, s.ack = del, true; withMatches(s) }, true},
+		// secondary single-file
+		{"file mode, no file", func(s *arSt) { s.acts, s.specificFile = safe, true }, false},
+		{"file mode, blank file", func(s *arSt) { s.acts, s.specificFile, s.file = safe, true, "   " }, false},
+		{"file mode, safe chain", func(s *arSt) { s.acts, s.specificFile, s.file = safe, true, `C:\a.wav` }, true},
+		{"file mode, erasing unacknowledged", func(s *arSt) { s.acts, s.specificFile, s.file = del, true, `C:\a.wav` }, false},
+		{"file mode, erasing acknowledged", func(s *arSt) { s.acts, s.specificFile, s.file, s.ack = del, true, `C:\a.wav`, true }, true},
+		// self-overlap: this automation's own run in flight gates either mode
 		{"own run in flight", func(s *arSt) {
-			s.acts, s.file, s.autoID, s.runningID = safe, `C:\a.wav`, "a1", "a1"
+			s.acts, s.autoID, s.runningID = safe, "a1", "a1"
+			withMatches(s)
 		}, false},
 		{"another automation's run in flight", func(s *arSt) {
-			s.acts, s.file, s.autoID, s.runningID = safe, `C:\a.wav`, "a1", "a2"
+			s.acts, s.autoID, s.runningID = safe, "a1", "a2"
+			withMatches(s)
 		}, true},
 	}
 	for _, c := range cases {

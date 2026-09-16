@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0x4229635f;
+pub const schema_hash: u32 = 0x0899aaed;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -4868,6 +4868,23 @@ pub fn decodeArFoot(r: *wire.Reader, out: *dialogs_b.ArFoot) wire.Error!void {
     };
 }
 
+pub fn decodeArBadge(r: *wire.Reader, out: *dialogs_b.ArBadge) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.variant = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeArPrevRow(r: *wire.Reader, out: *dialogs_b.ArPrevRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.name = try r.str(t),
+        2 => out.size = try r.str(t),
+        3 => out.meta = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
 pub fn decodeAutoRunNow(r: *wire.Reader, out: *dialogs_b.ArModal) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.title = try r.str(t),
@@ -4886,6 +4903,19 @@ pub fn decodeAutoRunNow(r: *wire.Reader, out: *dialogs_b.ArModal) wire.Error!voi
         14 => out.deleteTipSt = try r.sub(c.Tip, decodeTip, t),
         15 => out.ack = try r.sub(c.Toggle, decodeUiToggle, t),
         16 => out.foot = try r.sub(dialogs_b.ArFoot, decodeArFoot, t),
+        17 => out.specificFile = try r.boolean(t),
+        18 => out.modeToggle = try r.sub(c.Toggle, decodeUiToggle, t),
+        19 => out.condsLabel = try r.str(t),
+        20 => out.condsAny = try r.str(t),
+        21 => out.conds = try r.list(dialogs_b.ArBadge, decodeArBadge, t),
+        22 => out.files = try r.list(dialogs_b.ArPrevRow, decodeArPrevRow, t),
+        23 => out.more = try r.str(t),
+        24 => out.totalLine = try r.str(t),
+        25 => out.empty = try r.boolean(t),
+        26 => out.emptyTitle = try r.str(t),
+        27 => out.emptyHints = try r.strList(t),
+        28 => out.conflict = try r.boolean(t),
+        29 => out.conflictText = try r.str(t),
         else => try r.skip(t),
     };
 }

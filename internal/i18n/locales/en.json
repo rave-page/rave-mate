@@ -189,7 +189,52 @@
       "ack": "I understand this permanently erases the file",
       "started": "Running {label}…",
       "finished": "{label} - {status}",
-      "failed": "Run failed: {error}"
+      "failed": "Run failed: {error}",
+      "sweepStarted": "Running {label} over {n}…",
+      "sweepFinished": "{label} - swept {n}",
+      "matchedCount": {
+        "one": "{count} file",
+        "other": "{count} files"
+      },
+      "ageToday": "today",
+      "ageDays": {
+        "one": "{count} day old",
+        "other": "{count} days old"
+      },
+      "condsLabel": "Matches",
+      "condsAny": "any file in the watch folder",
+      "condExt": "{ext}",
+      "condPattern": "name ~ {pattern}",
+      "condSize": "≥ {size}",
+      "condAge": "≥ {n}d old",
+      "matched": {
+        "one": "{count} file · {size}",
+        "other": "{count} files · {size}"
+      },
+      "more": {
+        "one": "and {count} more",
+        "other": "and {count} more"
+      },
+      "sweepGo": {
+        "one": "Run on {count} file",
+        "other": "Run on {count} files"
+      },
+      "sweepGoErase": {
+        "one": "Run and erase {count} file",
+        "other": "Run and erase {count} files"
+      },
+      "queue": "Queue run",
+      "sweepEmpty": "Nothing matches right now",
+      "whyAge": "The minimum-age gate skips files newer than {n} days.",
+      "whyPattern": "The filename pattern only matches names like {pattern}.",
+      "whyExt": "Only files ending in {ext} match.",
+      "whySize": "The minimum size skips files under {size}.",
+      "whyNone": "The watch folder has no files, or none pass the conditions.",
+      "modeSpecific": "Run on a specific file instead",
+      "conflictWait": "Will wait — {label} is {activity}.",
+      "actTranscode": "transcoding {file}",
+      "actRunning": "already running",
+      "coalesced": "{label} is already running - folded into the current run."
     }
   },
   "brand": {

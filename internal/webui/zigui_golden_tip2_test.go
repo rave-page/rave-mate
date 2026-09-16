@@ -335,9 +335,10 @@ func TestZigTip2RestGolden(t *testing.T) {
 	if !zigui.Available() {
 		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
 	}
-	// run-now: the file field's own tip (dlgFieldSt) AND the delete-scope pb-hint tip
+	// run-now: the file field's own tip (dlgFieldSt) AND the delete-scope pb-hint tip - both render
+	// only in the secondary single-file mode with an erasing chain (specificEraseAck).
 	tip2Sweep(t, "arModal", func(tp *tipSt, raw string) arModalSt {
-		st := arModalFixtures()["acked"]
+		st := arModalFixtures()["specificEraseAck"]
 		st.File.TipS, st.File.Tip = tp, raw
 		st.DeleteTipS, st.DeleteTip = tp, raw
 		return st

@@ -1666,9 +1666,21 @@ var schema = []msg{
 		fs: []field{b(1, "Gated", "gated"), s(2, "Label", "label"), s(3, "Why", "why"), s(4, "Variant", "variant"), s(5, "Cancel", "cancel")},
 	},
 	{
+		name: "ArBadge", goT: "arBadge", zigT: "dialogs_b.ArBadge",
+		fs: []field{s(1, "Label", "label"), s(2, "Variant", "variant")},
+	},
+	{
+		name: "ArPrevRow", goT: "arPrevRow", zigT: "dialogs_b.ArPrevRow",
+		fs: []field{s(1, "Name", "name"), s(2, "Size", "size"), s(3, "Meta", "meta")},
+	},
+	{
+		// Fields 1-16 are the original single-file dialog. 17+ are the rules-first default (B/run-now
+		// v2): the condition badges, the live match preview, the empty/why state, the mode switch and
+		// the conflict line. Append only.
 		name: "AutoRunNow", goT: "arModalSt", zigT: "dialogs_b.ArModal", id: 110,
 		doc: "automation run-now dialog",
-		fs:  []field{s(1, "Title", "title"), b(2, "HasErr", "hasErr"), s(3, "Err", "err"), st(4, "Auto", "auto", "UiKV"), st(5, "Watch", "watch", "UiKV"), st(6, "Chain", "chain", "UiKV"), s(7, "IgnoresMatch", "ignoresMatch"), st(8, "File", "file", "DlgField"), st(9, "Browse", "browse", "UiBtn"), b(10, "Erases", "erases"), s(11, "DeleteWarn", "deleteWarn"), s(12, "DeleteScope", "deleteScope"), s(13, "DeleteTip", "deleteTip"), op(14, "DeleteTipS", "deleteTipSt", "Tip"), st(15, "Ack", "ack", "UiToggle"), st(16, "Foot", "foot", "ArFoot")},
+		fs: []field{s(1, "Title", "title"), b(2, "HasErr", "hasErr"), s(3, "Err", "err"), st(4, "Auto", "auto", "UiKV"), st(5, "Watch", "watch", "UiKV"), st(6, "Chain", "chain", "UiKV"), s(7, "IgnoresMatch", "ignoresMatch"), st(8, "File", "file", "DlgField"), st(9, "Browse", "browse", "UiBtn"), b(10, "Erases", "erases"), s(11, "DeleteWarn", "deleteWarn"), s(12, "DeleteScope", "deleteScope"), s(13, "DeleteTip", "deleteTip"), op(14, "DeleteTipS", "deleteTipSt", "Tip"), st(15, "Ack", "ack", "UiToggle"), st(16, "Foot", "foot", "ArFoot"),
+			b(17, "SpecificFile", "specificFile"), st(18, "ModeToggle", "modeToggle", "UiToggle"), s(19, "CondsLabel", "condsLabel"), s(20, "CondsAny", "condsAny"), li(21, "Conds", "conds", "ArBadge"), li(22, "Files", "files", "ArPrevRow"), s(23, "More", "more"), s(24, "TotalLine", "totalLine"), b(25, "Empty", "empty"), s(26, "EmptyTitle", "emptyTitle"), sl(27, "EmptyHints", "emptyHints"), b(28, "Conflict", "conflict"), s(29, "ConflictText", "conflictText")},
 	},
 	{
 		name: "AutoSchedule", goT: "asModalSt", zigT: "dialogs_b.AsModal", id: 111,

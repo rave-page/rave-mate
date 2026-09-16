@@ -166,6 +166,10 @@ type SweepResult struct {
 	Trigger      string `json:"trigger"`
 	Runs         []Run  `json:"runs"`
 	Coalesced    bool   `json:"coalesced,omitempty"`
+	// Queued marks a sweep the coordinator could not start now (a path/heavy/streaming conflict): it
+	// was enqueued and runs when the conflict clears; QueueReason says what it waits on. Runs is empty.
+	Queued      bool   `json:"queued,omitempty"`
+	QueueReason string `json:"queueReason,omitempty"`
 }
 
 // Worker runs media jobs on the worker subprocess pool (*worker.Supervisor satisfies it).

@@ -728,7 +728,22 @@ pub const ArFoot = struct {
     cancel: []const u8 = "",
 };
 
-/// ArModal is the run-now dialog.
+/// ArBadge is one match-condition badge (state, not a control) in rules-first mode.
+pub const ArBadge = struct {
+    label: []const u8 = "",
+    variant: []const u8 = "",
+};
+
+/// ArPrevRow is one preview file the sweep would act on (name + human size + age meta).
+pub const ArPrevRow = struct {
+    name: []const u8 = "",
+    size: []const u8 = "",
+    meta: []const u8 = "",
+};
+
+/// ArModal is the run-now dialog. Fields title..foot are the original single-file dialog; the
+/// rest drive the rules-first DEFAULT (condition badges + live preview + empty/why) and the mode
+/// switch to the secondary single-file flow, plus the coordinator conflict line.
 pub const ArModal = struct {
     title: []const u8 = "",
     hasErr: bool = false,
@@ -746,6 +761,20 @@ pub const ArModal = struct {
     deleteTipSt: ?c.Tip = null, // structured tooltip — wins over deleteTip
     ack: c.Toggle = .{},
     foot: ArFoot = .{},
+    // rules-first default + mode switch
+    specificFile: bool = false,
+    modeToggle: c.Toggle = .{},
+    condsLabel: []const u8 = "",
+    condsAny: []const u8 = "",
+    conds: []const ArBadge = &.{},
+    files: []const ArPrevRow = &.{},
+    more: []const u8 = "",
+    totalLine: []const u8 = "",
+    empty: bool = false,
+    emptyTitle: []const u8 = "",
+    emptyHints: []const []const u8 = &.{},
+    conflict: bool = false,
+    conflictText: []const u8 = "",
 };
 
 pub fn renderArModal(h: *Html, st: ArModal) !void {
@@ -758,11 +787,56 @@ pub fn renderArModal(h: *Html, st: ArModal) !void {
     try c.kvOf(h, st.auto);
     try c.kvOf(h, st.watch);
     try c.kvOf(h, st.chain);
-    try c.hint(h, "info", st.ignoresMatch);
-    try h.raw("<div class=lib-toolbar>");
-    try renderDlgField(h, st.file);
-    try c.btnOf(h, st.browse);
-    try h.raw("</div>");
+    // The coordinator's verdict BEFORE the primary: this run will queue behind another.
+    if (st.conflict) try c.hint(h, "warn", st.conflictText);
+    try c.toggleOf(h, st.modeToggle);
+    if (st.specificFile) {
+        // Secondary: the rule that does NOT apply here, stated before the file is chosen.
+        try c.hint(h, "info", st.ignoresMatch);
+        try h.raw("<div class=lib-toolbar>");
+        try renderDlgField(h, st.file);
+        try c.btnOf(h, st.browse);
+        try h.raw("</div>");
+    } else {
+        // Default: the automation's own conditions as badges, then what they match now.
+        try h.raw("<div class=np-meta><span class=np-artist>");
+        try h.esc(st.condsLabel);
+        try h.raw("</span>");
+        if (st.conds.len == 0) {
+            try h.raw(" ");
+            try h.esc(st.condsAny);
+        } else {
+            for (st.conds) |cnd| {
+                try h.raw(" ");
+                try c.badge(h, cnd.label, cnd.variant);
+            }
+        }
+        try h.raw("</div>");
+        if (st.empty) {
+            try c.emptyState(h, st.emptyTitle);
+            for (st.emptyHints) |hh| try c.hint(h, "info", hh);
+        } else {
+            try h.raw("<div class=\"rp-card\">");
+            for (st.files) |f| {
+                try h.raw("<div class=kv><span class=kv-k>");
+                try h.esc(f.name);
+                try h.raw(" <span class=np-artist>");
+                try h.esc(f.meta);
+                try h.raw("</span></span><span class=kv-v>");
+                try h.esc(f.size);
+                try h.raw("</span></div>");
+            }
+            if (st.more.len != 0) {
+                try h.raw("<div class=kv><span class=kv-k><span class=np-artist>");
+                try h.esc(st.more);
+                try h.raw("</span></span></div>");
+            }
+            try h.raw("</div>");
+            try h.raw("<div class=np-meta>");
+            try h.esc(st.totalLine);
+            try h.raw("</div>");
+        }
+    }
     if (st.erases) {
         try c.hint(h, "bad", st.deleteWarn);
         try h.raw("<div class=pb-hint>");
