@@ -43,7 +43,8 @@ func (u *UI) pkPatchEntries() {
 	}
 	h := u.pkEntriesLocked(s)
 	s.mu.Unlock()
-	u.eval("window.__patch('pk-entries'," + jsQuote(h) + ")")
+	// scroll the keyboard-highlighted row into view after the fragment swap
+	u.eval("window.__patch('pk-entries'," + jsQuote(h) + ");var _h=document.getElementById('pk-hl');if(_h)_h.scrollIntoView({block:'nearest'})")
 }
 
 func (u *UI) pkPatchFoot() {
@@ -227,12 +228,27 @@ func (u *UI) pkEntriesLocked(s *pkState) string {
 	return b.String()
 }
 
+// pkHL / pkHLAttr mark the keyboard-highlighted row (class + a stable #pk-hl id + aria-selected so
+// ctl and screen readers see it, and pkPatchEntries can scroll it into view).
+func pkHL(s *pkState, i int) string {
+	if i == s.hlIdx {
+		return " hl"
+	}
+	return ""
+}
+func pkHLAttr(s *pkState, i int) string {
+	if i == s.hlIdx {
+		return ` id=pk-hl aria-selected=true`
+	}
+	return ""
+}
+
 func (u *UI) pkListLocked(s *pkState, vis []localmedia.Entry) string {
 	var b strings.Builder
 	b.WriteString(`<div class=pk-cols><span>` + html.EscapeString(i18n.T("picker.col.name")) + `</span><span>` +
 		html.EscapeString(i18n.T("picker.col.modified")) + `</span><span>` + html.EscapeString(i18n.T("picker.col.size")) +
 		`</span><span>` + html.EscapeString(i18n.T("picker.col.type")) + `</span></div>`)
-	for _, e := range vis {
+	for i, e := range vis {
 		selCls, checkbox := "", ""
 		act := "pk-open:" + e.Path
 		if e.IsDirectory {
@@ -252,7 +268,7 @@ func (u *UI) pkListLocked(s *pkState, vis []localmedia.Entry) string {
 		if !e.IsDirectory {
 			size = humanSize(e.SizeBytes)
 		}
-		b.WriteString(`<div class="pk-row` + selCls + `" data-act="` + html.EscapeString(act) + `">` +
+		b.WriteString(`<div class="pk-row` + selCls + pkHL(s, i) + `" data-act="` + html.EscapeString(act) + `"` + pkHLAttr(s, i) + `>` +
 			`<span class=pk-row-n>` + checkbox + `<span>` + pkGlyph(e) + `</span><span class=t>` + html.EscapeString(e.Name) + `</span></span>` +
 			`<span class=pk-row-m>` + html.EscapeString(pkShortMod(e.ModifiedAt)) + `</span>` +
 			`<span class=pk-row-s>` + html.EscapeString(size) + `</span>` +
@@ -264,7 +280,7 @@ func (u *UI) pkListLocked(s *pkState, vis []localmedia.Entry) string {
 func (u *UI) pkGridLocked(s *pkState, vis []localmedia.Entry) string {
 	var b strings.Builder
 	b.WriteString(`<div class=lib-grid>`)
-	for _, e := range vis {
+	for i, e := range vis {
 		act := "pk-open:" + e.Path
 		if e.IsDirectory {
 			act = "pk-nav:" + e.Path
@@ -273,13 +289,14 @@ func (u *UI) pkGridLocked(s *pkState, vis []localmedia.Entry) string {
 		if (s.kind == "file" && s.selOne == e.Path) || (s.kind == "multi" && s.sel[e.Path]) {
 			tileCls += " pk-tile sel"
 		}
+		tileCls += pkHL(s, i)
 		ic := pkGlyph(e)
 		if e.Kind == "image" {
 			if url := u.imgURL(e.Path, 160); url != "" {
 				ic = `<img src="` + html.EscapeString(url) + `" loading=lazy alt="">`
 			}
 		}
-		b.WriteString(`<div class="` + tileCls + `" data-act="` + html.EscapeString(act) + `"><div class=gcard-ic>` + ic +
+		b.WriteString(`<div class="` + tileCls + `" data-act="` + html.EscapeString(act) + `"` + pkHLAttr(s, i) + `><div class=gcard-ic>` + ic +
 			`</div><div class=gcard-t>` + html.EscapeString(e.Name) + `</div></div>`)
 	}
 	b.WriteString(`</div>`)

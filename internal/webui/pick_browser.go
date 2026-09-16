@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/i18n"
@@ -86,6 +87,9 @@ type pkState struct {
 	hidden   bool
 	sel      map[string]bool // multi selection
 	selOne   string          // single file selection
+	hlIdx    int             // keyboard-highlighted row (index into the visible list); Go owns it
+	jumpBuf  string          // type-to-jump prefix
+	jumpAt   time.Time       // last type-to-jump keystroke (prefix resets after ~1s)
 
 	// listing cache: read off the act lane (a cold share must not wedge it)
 	entries []localmedia.Entry
@@ -127,6 +131,8 @@ func init() {
 	onExact("pk-pin", func(u *UI, _ actMsg) { u.pkPinCurrent() })
 	onPrefix("pk-unpin:", func(u *UI, m actMsg) { u.pkUnpin(m.arg("pk-unpin:")) })
 	onExact("pk-sys", func(u *UI, _ actMsg) { u.pkSysDialog() })
+	onExact("pk-key", func(u *UI, m actMsg) { u.pkKey(m.Val) })
+	onExact("pk-jump", func(u *UI, m actMsg) { u.pkJump(m.Val) })
 }
 
 // pickOpen opens the in-app browser for kind (dir|file|save|multi). container = the save extension
@@ -218,6 +224,7 @@ func (u *UI) pkNavigate(dir string, push bool) {
 		s.fwd = nil
 	}
 	s.dir, s.search, s.selOne, s.confirmOW = dir, "", "", false
+	s.hlIdx = 0
 	s.sel = map[string]bool{}
 	tok := s.pkTok
 	s.mu.Unlock()
@@ -251,6 +258,7 @@ func (u *UI) pkHistory(back bool) {
 		return
 	}
 	s.dir, s.search, s.selOne = dst, "", ""
+	s.hlIdx = 0
 	s.sel = map[string]bool{}
 	tok := s.pkTok
 	s.mu.Unlock()
@@ -315,7 +323,7 @@ func (u *UI) pkLoad(dir string, tok modalTok) {
 func (u *UI) pkSetSearch(q string) {
 	s := u.pk()
 	s.mu.Lock()
-	s.search = q
+	s.search, s.hlIdx = q, 0
 	s.mu.Unlock()
 	u.pkPatchEntries()
 }
@@ -328,6 +336,7 @@ func (u *UI) pkSort(key string) {
 	} else {
 		s.sortBy, s.sortDesc = key, false
 	}
+	s.hlIdx = 0
 	s.mu.Unlock()
 	u.pkRerender() // the sort chip's active/direction state lives in the toolbar, not #pk-entries
 }
@@ -343,7 +352,7 @@ func (u *UI) pkView(grid bool) {
 func (u *UI) pkFilterAll(all bool) {
 	s := u.pk()
 	s.mu.Lock()
-	s.filterAll = all
+	s.filterAll, s.hlIdx = all, 0
 	s.mu.Unlock()
 	u.pkRerender() // the filter chip's active state is in the toolbar
 }
@@ -362,7 +371,7 @@ func (u *UI) pkRerender() {
 func (u *UI) pkToggleHidden() {
 	s := u.pk()
 	s.mu.Lock()
-	s.hidden = !s.hidden
+	s.hidden, s.hlIdx = !s.hidden, 0
 	dir, tok := s.dir, s.pkTok
 	s.mu.Unlock()
 	u.pkLoad(dir, tok) // hidden changes the listing, not just the view
@@ -404,6 +413,118 @@ func (u *UI) pkSetName(name string) {
 	s.mu.Lock()
 	s.saveName, s.confirmOW = name, false
 	s.mu.Unlock()
+}
+
+// ── keyboard nav (shell.go picker keydown -> pk-key / pk-jump) ──
+
+// pkKey moves the highlighted row or acts on it. val = optional "s" (shift) + one of
+// down/up/home/end/pgdn/pgup/enter/updir. Go owns hlIdx; the re-render styles the highlighted row.
+func (u *UI) pkKey(val string) {
+	cmd := strings.TrimPrefix(val, "s")
+	s := u.pk()
+	s.mu.Lock()
+	if !s.open {
+		s.mu.Unlock()
+		return
+	}
+	vis, _ := pkVisible(s)
+	n := len(vis)
+	if n == 0 {
+		s.mu.Unlock()
+		return
+	}
+	if s.hlIdx < 0 {
+		s.hlIdx = 0
+	}
+	if s.hlIdx >= n {
+		s.hlIdx = n - 1
+	}
+	switch cmd {
+	case "down":
+		if s.hlIdx < n-1 {
+			s.hlIdx++
+		}
+	case "up":
+		if s.hlIdx > 0 {
+			s.hlIdx--
+		}
+	case "home":
+		s.hlIdx = 0
+	case "end":
+		s.hlIdx = n - 1
+	case "pgdn":
+		if s.hlIdx += 10; s.hlIdx > n-1 {
+			s.hlIdx = n - 1
+		}
+	case "pgup":
+		if s.hlIdx -= 10; s.hlIdx < 0 {
+			s.hlIdx = 0
+		}
+	case "updir":
+		s.mu.Unlock()
+		u.pkUp()
+		return
+	case "enter":
+		e, kind := vis[s.hlIdx], s.kind
+		s.mu.Unlock()
+		u.pkKeyEnter(e, kind)
+		return
+	default:
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Unlock()
+	u.pkPatchEntries()
+}
+
+// pkKeyEnter opens a highlighted folder or chooses a highlighted file (per the picker kind).
+func (u *UI) pkKeyEnter(e localmedia.Entry, kind string) {
+	if e.IsDirectory {
+		u.pkNavigate(e.Path, true)
+		return
+	}
+	switch kind {
+	case "multi":
+		u.pkToggleSel(e.Path)
+	case "save":
+		u.pkSetName(filepath.Base(e.Path)) // fill the filename; user presses Save to overwrite
+		u.pkPatchFoot()
+	default: // file
+		s := u.pk()
+		s.mu.Lock()
+		s.selOne = e.Path
+		s.mu.Unlock()
+		u.pkChoose()
+	}
+}
+
+// pkJump is type-to-jump: a printable key appends to a prefix (reset after ~1s) and highlights the
+// first visible entry whose name starts with it.
+func (u *UI) pkJump(ch string) {
+	if ch == "" {
+		return
+	}
+	s := u.pk()
+	s.mu.Lock()
+	if !s.open {
+		s.mu.Unlock()
+		return
+	}
+	now := time.Now()
+	if now.Sub(s.jumpAt) > time.Second {
+		s.jumpBuf = ""
+	}
+	s.jumpAt = now
+	s.jumpBuf += strings.ToLower(ch)
+	vis, _ := pkVisible(s)
+	for i, e := range vis {
+		if strings.HasPrefix(strings.ToLower(e.Name), s.jumpBuf) {
+			s.hlIdx = i
+			break
+		}
+	}
+	s.mu.Unlock()
+	u.pkPatchEntries()
 }
 
 // ── pins / recent ──

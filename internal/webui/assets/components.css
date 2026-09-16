@@ -156,3 +156,6 @@
 .pk-row-m, .pk-row-s, .pk-row-k { font: 11px var(--font-mono, monospace); color: var(--rp-muted); text-align: right; }
 .pk-row-k { text-align: left; }
 .pk-tile.sel { outline: 2px solid var(--color-brand-base, #F70864); outline-offset: -2px; }
+/* keyboard-highlighted row/tile (distinct from .sel selection) */
+.pk-row.hl { outline: 1px solid var(--color-brand-base, #F70864); outline-offset: -1px; background: rgba(247,8,100,.10); }
+.gcard.hl { outline: 2px dashed var(--color-brand-base, #F70864); outline-offset: -2px; }
