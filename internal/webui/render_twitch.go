@@ -58,6 +58,8 @@ type twRow struct {
 
 	Text    string `json:"text"`    // chat message / alert line
 	Variant string `json:"variant"` // alert accent (follow|sub|cheer)
+
+	Time string `json:"time"` // chat + alert: local HH:MM the line arrived ("" = unknown)
 }
 
 // twViewerState is the viewer-count chip.
@@ -308,7 +310,7 @@ func twitchName(e twitch.Event) string {
 // twChatRow: coloured name + subscriber/mod/host/vip/cheer badges + text + (when a manager
 // exists) a moderation button. ModVal = messageID|userID|name for the moderation modal.
 func twChatRow(e twitch.Event, canMod bool) twRow {
-	r := twRow{Kind: "chat", Name: twitchName(e), NameStyle: twNameStyle(e.Color), Tags: []twTag{}, Text: e.Text}
+	r := twRow{Kind: "chat", Time: twClock(e.TS), Name: twitchName(e), NameStyle: twNameStyle(e.Color), Tags: []twTag{}, Text: e.Text}
 	switch {
 	case e.Broadcaster:
 		r.Tags = append(r.Tags, twTag{Text: i18n.T("twitch.badgeHost"), Variant: "error"})
@@ -366,7 +368,17 @@ func twAlertRow(e twitch.Event) twRow {
 	default:
 		text, variant = string(e.Kind), "follow"
 	}
-	return twRow{Kind: "alert", Text: text, Variant: variant, Tags: []twTag{}}
+	return twRow{Kind: "alert", Time: twClock(e.TS), Text: text, Variant: variant, Tags: []twTag{}}
+}
+
+// twClock renders an event's arrival time as local HH:MM for the feed row ("" when the event carries
+// no timestamp). Minutes, not seconds: the feed is read at a glance mid-set, and the day separator
+// rows already carry the date.
+func twClock(ms int64) string {
+	if ms <= 0 {
+		return ""
+	}
+	return time.UnixMilli(ms).Local().Format("15:04")
 }
 
 // ── bridges ──
@@ -482,7 +494,7 @@ func twRowHTML(r twRow) string {
 	case "day":
 		return `<div class="log-line tw-sep">— ` + html.EscapeString(r.Date) + ` —</div>`
 	case "alert":
-		return `<div class="log-line tw-alert tw-alert--` + r.Variant + `">` + html.EscapeString(r.Text) + `</div>`
+		return `<div class="log-line tw-alert tw-alert--` + r.Variant + `">` + twTimeHTML(r.Time) + html.EscapeString(r.Text) + `</div>`
 	}
 	mod := ""
 	if r.Mod {
@@ -493,8 +505,18 @@ func twRowHTML(r twRow) string {
 		tags.WriteString(badge(t.Text, t.Variant))
 	}
 	return `<div class="log-line tw-row">` + mod +
+		twTimeHTML(r.Time) +
 		`<span class=tw-name style="` + r.NameStyle + `">` + html.EscapeString(r.Name) + `</span>` +
 		tags.String() + ` <span class=tw-msg>` + html.EscapeString(r.Text) + `</span></div>`
+}
+
+// twTimeHTML is the muted, tabular clock stamp at the head of a chat/alert row ("" renders nothing -
+// both renderers agree, see twitch.zig renderRow).
+func twTimeHTML(t string) string {
+	if t == "" {
+		return ""
+	}
+	return `<span class=tw-time>` + html.EscapeString(t) + `</span>`
 }
 
 // ── small helpers ──

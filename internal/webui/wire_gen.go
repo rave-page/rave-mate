@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash         uint32 = 0xbf2e3734
+	wireSchemaHash         uint32 = 0x4229635f
 	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -2095,6 +2095,7 @@ func (v twRow) encodeWire(w *zigui.WireWriter) {
 	w.Str(8, v.ModTitle)
 	w.Str(9, v.Text)
 	w.Str(10, v.Variant)
+	w.Str(11, v.Time)
 }
 
 func (v twViewerState) encodeWire(w *zigui.WireWriter) {
@@ -6872,6 +6873,7 @@ func (v twRow) hashWire(h *zigui.WireHasher) {
 	h.Str(8, v.ModTitle)
 	h.Str(9, v.Text)
 	h.Str(10, v.Variant)
+	h.Str(11, v.Time)
 }
 
 func (v twRow) wireEq(o *twRow) bool {
@@ -6908,6 +6910,9 @@ func (v twRow) wireEq(o *twRow) bool {
 		return false
 	}
 	if v.Variant != o.Variant {
+		return false
+	}
+	if v.Time != o.Time {
 		return false
 	}
 	return true
@@ -6986,6 +6991,13 @@ func (v twRow) deltaWire(w *zigui.WireWriter, prev *twRow) {
 			w.Clear(10)
 		} else {
 			w.Str(10, v.Variant)
+		}
+	}
+	if v.Time != prev.Time {
+		if v.Time == "" {
+			w.Clear(11)
+		} else {
+			w.Str(11, v.Time)
 		}
 	}
 }

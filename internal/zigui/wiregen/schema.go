@@ -937,7 +937,7 @@ var schema = []msg{
 	},
 	{
 		name: "TwRow", goT: "twRow", zigT: "twitch.Row",
-		fs: []field{s(1, "Kind", "kind"), s(2, "Date", "date"), s(3, "Name", "name"), s(4, "NameStyle", "nameStyle"), li(5, "Tags", "tags", "TwTag"), b(6, "Mod", "mod"), s(7, "ModVal", "modVal"), s(8, "ModTitle", "modTitle"), s(9, "Text", "text"), s(10, "Variant", "variant")},
+		fs: []field{s(1, "Kind", "kind"), s(2, "Date", "date"), s(3, "Name", "name"), s(4, "NameStyle", "nameStyle"), li(5, "Tags", "tags", "TwTag"), b(6, "Mod", "mod"), s(7, "ModVal", "modVal"), s(8, "ModTitle", "modTitle"), s(9, "Text", "text"), s(10, "Variant", "variant"), s(11, "Time", "time")},
 	},
 	{
 		name: "TwViewer", goT: "twViewerState", zigT: "twitch.Viewers",

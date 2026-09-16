@@ -16,6 +16,8 @@
 /* chat feed rows (extends .log-view/.log-line) */
 .tw-row { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; }
 .tw-name { font-weight: 700; }
+.tw-time { color: var(--rp-muted); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.tw-alert .tw-time { font-weight: 400; margin-right: 6px; }
 .tw-msg { color: #e6e6ec; }
 .tw-modbtn {
   order: 99; margin-left: auto; padding: 0 6px; min-width: 0; line-height: 1.3;

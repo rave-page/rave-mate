@@ -21,6 +21,18 @@ func twAlert(variant, text string) twRow {
 	return twRow{Kind: "alert", Variant: variant, Text: text, Tags: []twTag{}}
 }
 
+// twStamp gives the non-day rows a clock stamp in order (production rows carry local HH:MM).
+func twStamp(rows []twRow, times ...string) []twRow {
+	i := 0
+	for k := range rows {
+		if rows[k].Kind != "day" && i < len(times) {
+			rows[k].Time = times[i]
+			i++
+		}
+	}
+	return rows
+}
+
 func twChat(name, style, text string, tags []twTag, modVal, modTitle string) twRow {
 	if tags == nil {
 		tags = []twTag{}
@@ -67,7 +79,7 @@ func twFixtures() map[string]twState {
 		{Label: "Techno set", Variant: "outline", Act: "tw-apply:0"},
 		{Label: "Drum & bass", Variant: "outline", Act: "tw-apply:1"},
 	}
-	populated.Feed.Rows = []twRow{
+	populated.Feed.Rows = twStamp([]twRow{
 		twDay("2026-07-24"),
 		twChat("dymattic", "color:#08F79B", "opening set in 5",
 			[]twTag{{Text: "HOST", Variant: "error"}}, "m1|u1|dymattic", "Moderate"),
@@ -79,7 +91,7 @@ func twFixtures() map[string]twState {
 			[]twTag{{Text: "VIP", Variant: "info"}, {Text: "CHEER", Variant: "warning"}}, "m2|u2|cheerer", "Moderate"),
 		twAlert("sub", "someone subscribed Tier 2"),
 		twAlert("cheer", "anonymous cheered 100 bits"),
-	}
+	}, "20:58", "20:59", "21:04", "21:05", "21:06")
 
 	escaping := base()
 	escaping.Title = `Twi&tch <"live">`
@@ -93,12 +105,12 @@ func twFixtures() map[string]twState {
 	escaping.Presets.Add = `A&dd"<>'`
 	escaping.SendPH = `S&end "here"'<>`
 	escaping.SendLbl = `S&end"<>'`
-	escaping.Feed.Rows = []twRow{
+	escaping.Feed.Rows = twStamp([]twRow{
 		twDay(`2026&07"25`),
 		twChat(`d&j"<>'`, "color:#08F79B", `msg &<>"' end`,
 			[]twTag{{Text: `H&OST"<>'`, Variant: "error"}}, `m&1"|u<1>|d'j`, `M&od"<>'`),
 		twAlert("sub", `a&b "subscribed" <t2>'`),
-	}
+	}, `2<1:0"4`, `0&9:1'`)
 
 	long := base()
 	longS := strings.Repeat("very-long-", 120)
@@ -106,11 +118,11 @@ func twFixtures() map[string]twState {
 	long.Obs.Viewers = twViewerState{Cls: "tw-vc tw-vc--live", Text: longS}
 	long.Obs.Cockpit = "<div>" + strings.Repeat("c", 2000) + "</div>"
 	long.Presets.Chips = []uiBtn{{Label: longS, Variant: "outline", Act: "tw-apply:0"}}
-	long.Feed.Rows = []twRow{
+	long.Feed.Rows = twStamp([]twRow{
 		twChat(strings.Repeat("n", 400), "color:#08F79B", longS,
 			[]twTag{{Text: strings.Repeat("t", 120), Variant: "info"}}, strings.Repeat("m", 300), longS),
 		twAlert("cheer", longS),
-	}
+	}, strings.Repeat("9", 64), "23:59")
 	long.SendPH = longS
 
 	unicode := base()
@@ -124,12 +136,12 @@ func twFixtures() map[string]twState {
 	unicode.Presets.Add = "追加"
 	unicode.SendPH = "Напишите сообщение…"
 	unicode.SendLbl = "送信"
-	unicode.Feed.Rows = []twRow{
+	unicode.Feed.Rows = twStamp([]twRow{
 		twDay("2026-07-25"),
 		twChat("участник☂", "color:#08F79B", "中文 emoji 🎛️ ラヴ",
 			[]twTag{{Text: "ホスト", Variant: "error"}}, "", ""),
 		twAlert("sub", "хтось підписався 🎉"),
-	}
+	}, "٢١:٠٤", "２１：０５")
 
 	// federated: the sign-in status region is present with the via-peer variant.
 	viaPeer := populated

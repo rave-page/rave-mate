@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0xbf2e3734;
+pub const schema_hash: u32 = 0x4229635f;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -2627,6 +2627,7 @@ pub fn decodeTwRow(r: *wire.Reader, out: *twitch.Row) wire.Error!void {
         8 => out.modTitle = try r.str(t),
         9 => out.text = try r.str(t),
         10 => out.variant = try r.str(t),
+        11 => out.time = try r.str(t),
         else => try r.skip(t),
     };
 }
@@ -6130,6 +6131,7 @@ pub fn mergeTwRow(r: *wire.Reader, out: *twitch.Row) wire.Error!void {
             8 => out.modTitle = "",
             9 => out.text = "",
             10 => out.variant = "",
+            11 => out.time = "",
             else => {},
         },
         1 => out.kind = try wire.strDup(r, t),
@@ -6142,6 +6144,7 @@ pub fn mergeTwRow(r: *wire.Reader, out: *twitch.Row) wire.Error!void {
         8 => out.modTitle = try wire.strDup(r, t),
         9 => out.text = try wire.strDup(r, t),
         10 => out.variant = try wire.strDup(r, t),
+        11 => out.time = try wire.strDup(r, t),
         else => try r.skip(t),
     };
 }
@@ -6157,6 +6160,7 @@ pub fn cloneTwRow(a: std.mem.Allocator, v: twitch.Row) wire.Error!twitch.Row {
     out.modTitle = try a.dupe(u8, v.modTitle);
     out.text = try a.dupe(u8, v.text);
     out.variant = try a.dupe(u8, v.variant);
+    out.time = try a.dupe(u8, v.time);
     return out;
 }
 
@@ -6172,6 +6176,7 @@ pub fn hashTwRow(h: *wire.Hasher, v: twitch.Row) void {
     h.str(8, v.modTitle);
     h.str(9, v.text);
     h.str(10, v.variant);
+    h.str(11, v.time);
 }
 
 pub fn mergeTwFeed(r: *wire.Reader, out: *twitch.Feed) wire.Error!void {

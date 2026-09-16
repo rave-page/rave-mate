@@ -30,6 +30,8 @@ pub const Row = struct {
 
     text: []const u8 = "", // chat message / alert line
     variant: []const u8 = "", // alert accent (trusted literal)
+
+    time: []const u8 = "", // chat + alert: local HH:MM ("" = none)
 };
 
 pub const Viewers = struct {
@@ -157,6 +159,15 @@ pub fn renderFeed(h: *Html, s: Feed) !void {
     for (s.rows) |r| try renderRow(h, r);
 }
 
+/// renderTime mirrors Go twTimeHTML: the muted clock stamp at the head of a chat/alert row; "" renders
+/// nothing on both sides.
+fn renderTime(h: *Html, t: []const u8) !void {
+    if (t.len == 0) return;
+    try h.raw("<span class=tw-time>");
+    try h.esc(t);
+    try h.raw("</span>");
+}
+
 /// renderRow mirrors Go twRowHTML.
 fn renderRow(h: *Html, r: Row) !void {
     if (std.mem.eql(u8, r.kind, "day")) {
@@ -169,6 +180,7 @@ fn renderRow(h: *Html, r: Row) !void {
         try h.raw("<div class=\"log-line tw-alert tw-alert--");
         try h.raw(r.variant);
         try h.raw("\">");
+        try renderTime(h, r.time);
         try h.esc(r.text);
         try h.raw("</div>");
         return;
@@ -181,6 +193,7 @@ fn renderRow(h: *Html, r: Row) !void {
         try h.attrQ(r.modTitle);
         try h.raw(">⋮</button>");
     }
+    try renderTime(h, r.time);
     try h.raw("<span class=tw-name style=\"");
     try h.raw(r.nameStyle);
     try h.raw("\">");
@@ -231,9 +244,9 @@ test "chat row with mod button, badges and colour" {
 test "alert row" {
     var h = Html.init(std.testing.allocator);
     defer h.deinit();
-    const rows = [_]Row{.{ .kind = "alert", .variant = "sub", .text = "a&b subscribed" }};
+    const rows = [_]Row{.{ .kind = "alert", .variant = "sub", .text = "a&b subscribed", .time = "21:04" }};
     try renderFeed(&h, .{ .rows = &rows });
-    try std.testing.expectEqualStrings("<div class=\"log-line tw-alert tw-alert--sub\">a&amp;b subscribed</div>", h.b.items);
+    try std.testing.expectEqualStrings("<div class=\"log-line tw-alert tw-alert--sub\"><span class=tw-time>21:04</span>a&amp;b subscribed</div>", h.b.items);
 }
 
 test "obs passes the cockpit markup through raw" {
