@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash         uint32 = 0x785f9ce2
+	wireSchemaHash         uint32 = 0xbcf56449
 	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -120,6 +120,7 @@ const (
 	wireMsgEdvFrame        uint16 = 116 // reframe modal frame block (#edv-frame inner)
 	wireMsgVrcEmotes       uint16 = 117 // #vrc-emotes animated-emoji flipbook creator (visual: player+trim, crop, filmstrip, preview)
 	wireMsgLiveRoute       uint16 = 125 // #live-route fragment (route-health / frozen-picture landmark)
+	wireMsgLiveRecCard     uint16 = 127 // #live-rec-card fragment (armed tracklist recorder)
 )
 
 func (v agApp) encodeWire(w *zigui.WireWriter) {
@@ -261,6 +262,10 @@ func (v liveRouteSt) encodeWire(w *zigui.WireWriter) {
 	w.List(1, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
 }
 
+func (v liveRecCardSt) encodeWire(w *zigui.WireWriter) {
+	w.List(1, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
 func (v meterSt) encodeWire(w *zigui.WireWriter) {
 	w.Str(1, v.Label)
 	w.Str(2, v.Val)
@@ -374,6 +379,9 @@ func (v liveState) encodeWire(w *zigui.WireWriter) {
 	w.Bool(39, v.HasRoute)
 	w.Str(40, v.RouteTitle)
 	w.Struct(41, func() { v.Route.encodeWire(w) })
+	w.Bool(42, v.HasRecCard)
+	w.Str(43, v.RecCardTitle)
+	w.Struct(44, func() { v.RecCard.encodeWire(w) })
 }
 
 func (v moCamRow) encodeWire(w *zigui.WireWriter) {
@@ -4774,6 +4782,13 @@ func wireLiveRoute(v liveRouteSt) []byte {
 	return w.Finish()
 }
 
+// wireLiveRecCard encodes liveRecCardSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireLiveRecCard(v liveRecCardSt) []byte {
+	w := zigui.NewWireWriter(wireMsgLiveRecCard, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
 // ── retained-doc delta channel (B7 increment ii; internal/zigui/wiregen/retain.go) ──
 //
 // hashWire/wireEq/deltaWire exist only for the messages reachable from a retain-flagged
@@ -5427,6 +5442,39 @@ func (v liveRouteSt) deltaWire(w *zigui.WireWriter, prev *liveRouteSt) {
 	}
 }
 
+func (v liveRecCardSt) hashWire(h *zigui.WireHasher) {
+	h.List(1, len(v.Rows))
+	for i := range v.Rows {
+		v.Rows[i].hashWire(h)
+	}
+}
+
+func (v liveRecCardSt) wireEq(o *liveRecCardSt) bool {
+	if len(v.Rows) != len(o.Rows) {
+		return false
+	}
+	for i0 := range v.Rows {
+		if !v.Rows[i0].wireEq(&o.Rows[i0]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (v liveRecCardSt) deltaWire(w *zigui.WireWriter, prev *liveRecCardSt) {
+	chg0 := len(v.Rows) != len(prev.Rows)
+	for i0 := 0; !chg0 && i0 < len(v.Rows); i0++ {
+		chg0 = !v.Rows[i0].wireEq(&prev.Rows[i0])
+	}
+	if chg0 {
+		if len(v.Rows) == 0 {
+			w.Clear(1)
+		} else {
+			w.List(1, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+		}
+	}
+}
+
 func (v meterSt) hashWire(h *zigui.WireHasher) {
 	h.Str(1, v.Label)
 	h.Str(2, v.Val)
@@ -6024,6 +6072,10 @@ func (v liveState) hashWire(h *zigui.WireHasher) {
 	h.Str(40, v.RouteTitle)
 	h.Sub(41)
 	v.Route.hashWire(h)
+	h.Bool(42, v.HasRecCard)
+	h.Str(43, v.RecCardTitle)
+	h.Sub(44)
+	v.RecCard.hashWire(h)
 }
 
 func (v liveState) wireEq(o *liveState) bool {
@@ -6160,6 +6212,15 @@ func (v liveState) wireEq(o *liveState) bool {
 		return false
 	}
 	if !v.Route.wireEq(&o.Route) {
+		return false
+	}
+	if v.HasRecCard != o.HasRecCard {
+		return false
+	}
+	if v.RecCardTitle != o.RecCardTitle {
+		return false
+	}
+	if !v.RecCard.wireEq(&o.RecCard) {
 		return false
 	}
 	return true
@@ -6393,6 +6454,21 @@ func (v liveState) deltaWire(w *zigui.WireWriter, prev *liveState) {
 		}
 	}
 	w.Struct(41, func() { v.Route.deltaWire(w, &prev.Route) })
+	if v.HasRecCard != prev.HasRecCard {
+		if !v.HasRecCard {
+			w.Clear(42)
+		} else {
+			w.Bool(42, v.HasRecCard)
+		}
+	}
+	if v.RecCardTitle != prev.RecCardTitle {
+		if v.RecCardTitle == "" {
+			w.Clear(43)
+		} else {
+			w.Str(43, v.RecCardTitle)
+		}
+	}
+	w.Struct(44, func() { v.RecCard.deltaWire(w, &prev.RecCard) })
 }
 
 func (v uiBtn) hashWire(h *zigui.WireHasher) {

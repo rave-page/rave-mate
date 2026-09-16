@@ -159,6 +159,7 @@ pub fn runLive(a: std.mem.Allocator, s: LiveBatch) ![]u8 {
     if (s.live.hasSignals) try b.frag("live-signals", p, live.Signals, live.renderSignals, s.live.signals);
     if (s.live.hasCockpit) try b.frag("live-cockpit", p, live.Cockpit, live.renderCockpit, s.live.cockpit);
     if (s.live.hasRoute) try b.frag("live-route", p, live.Route, live.renderRoute, s.live.route);
+    if (s.live.hasRecCard) try b.frag("live-rec-card", p, live.RecCard, live.renderRecCard, s.live.recCard);
     if (s.live.hasLink) try b.frag("live-ablelink", p, live.Link, live.renderLink, s.live.link);
     if (s.live.hasNet) {
         try b.frag("live-net", p, live.Graph, live.renderGraph, s.live.net);
@@ -235,6 +236,7 @@ test "live batch: every optional section adds its fragment, in tick order" {
     st.hasSignals = true;
     st.hasCockpit = true;
     st.hasRoute = true;
+    st.hasRecCard = true;
     st.hasLink = true;
     st.hasNet = true;
     st.hasPerf = true;
@@ -243,9 +245,10 @@ test "live batch: every optional section adds its fragment, in tick order" {
     const es = try parseBatch(a, buf);
     defer a.free(es);
     const want = [_][]const u8{
-        "live-tc",      "live-rec-state", "live-status",   "live-decks",
-        "live-signals", "live-cockpit",   "live-route",    "live-ablelink",
-        "live-net",     "live-tim",       "live-perf2",    "live-strip",
+        "live-tc",      "live-rec-state", "live-status",  "live-decks",
+        "live-signals", "live-cockpit",   "live-route",   "live-rec-card",
+        "live-ablelink", "live-net",      "live-tim",     "live-perf2",
+        "live-strip",
     };
     try std.testing.expectEqual(want.len, es.len);
     for (want, es) |w, e| try std.testing.expectEqualStrings(w, e.id);

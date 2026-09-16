@@ -1991,6 +1991,12 @@
       "tooltip": "Throughput, last 2 min - PEER = LAN peer link, API = rave.page; SESSION = totals since launch",
       "upRate": "↑ {rate}"
     },
+    "reccard": {
+      "line": "{dur} · {n} tracks",
+      "next": "next",
+      "title": "Tracklist",
+      "untitled": "untitled set"
+    },
     "route": {
       "degraded": "degraded: {reason}",
       "dropping": "{n} dropped",

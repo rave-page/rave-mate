@@ -48,7 +48,7 @@ type logsTickSt struct {
 // prev slot for them regardless costs one entry and keeps this list a plain constant.
 var liveTickIDs = []string{
 	"live-tc", "live-rec-state", "live-status", "live-decks", "live-signals",
-	"live-cockpit", "live-route", "live-ablelink", "live-net", "live-tim", "live-perf2", "live-strip",
+	"live-cockpit", "live-route", "live-rec-card", "live-ablelink", "live-net", "live-tim", "live-perf2", "live-strip",
 }
 
 // logsTickIDs is the #log-view surface's single fragment.
@@ -69,6 +69,7 @@ func (u *UI) liveTickState() liveTickSt {
 	st.Live.Signals = liveSignalsSt{Rows: []liveKV{}}
 	st.Live.Cockpit = liveCockpitSt{Rows: []liveCockpitRow{}}
 	st.Live.Route = liveRouteSt{Rows: []liveSRow{}}
+	st.Live.RecCard = liveRecCardSt{Rows: []liveSRow{}}
 	st.Live.Link = liveLinkSt{Sources: []liveSRow{}}
 	if u.svc.Session != nil {
 		st.Live.HasSignals, st.Live.Signals = true, u.liveSignalsState()
@@ -78,6 +79,9 @@ func (u *UI) liveTickState() liveTickSt {
 	}
 	if rs := u.liveRouteState(); len(rs.Rows) > 0 {
 		st.Live.HasRoute, st.Live.Route = true, rs
+	}
+	if rc := u.liveRecCardState(); len(rc.Rows) > 0 {
+		st.Live.HasRecCard, st.Live.RecCard = true, rc
 	}
 	if u.svc.AbleLink != nil {
 		st.Live.HasLink, st.Live.Link = true, u.liveLinkState()

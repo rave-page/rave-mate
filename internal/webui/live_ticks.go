@@ -133,6 +133,9 @@ func (u *UI) liveTickLegacy(js *strings.Builder, st liveTickSt) {
 	if st.Live.HasRoute {
 		u.tickPatch(js, "live-route", liveFrag("route", st.Live.Route, wireLiveRoute, liveRouteFragHTML))
 	}
+	if st.Live.HasRecCard {
+		u.tickPatch(js, "live-rec-card", liveFrag("reccard", st.Live.RecCard, wireLiveRecCard, liveRecCardFragHTML))
+	}
 	if st.Live.HasLink {
 		u.tickPatch(js, "live-ablelink", liveFrag("link", st.Live.Link, wireLiveLink, liveLinkFragHTML))
 	}

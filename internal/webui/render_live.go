@@ -107,6 +107,11 @@ type liveRouteSt struct {
 	Rows []liveSRow `json:"rows"`
 }
 
+// liveRecCardSt is the armed tracklist-recorder card (armed set + live duration + track count + next).
+type liveRecCardSt struct {
+	Rows []liveSRow `json:"rows"`
+}
+
 // liveCockpitRow is one OBS instance row.
 type liveCockpitRow struct {
 	Variant   string    `json:"variant"`
@@ -183,6 +188,9 @@ type liveState struct {
 	HasRoute     bool            `json:"hasRoute"`
 	RouteTitle   string          `json:"routeTitle"`
 	Route        liveRouteSt     `json:"route"`
+	HasRecCard   bool            `json:"hasRecCard"`
+	RecCardTitle string          `json:"recCardTitle"`
+	RecCard      liveRecCardSt   `json:"recCard"`
 	HasLink      bool            `json:"hasLink"`
 	LinkTitle    string          `json:"linkTitle"`
 	Link         liveLinkSt      `json:"link"`
@@ -219,6 +227,7 @@ func (u *UI) liveState() liveState {
 		Signals:      liveSignalsSt{Rows: []liveKV{}},
 		Cockpit:      liveCockpitSt{Rows: []liveCockpitRow{}},
 		Route:        liveRouteSt{Rows: []liveSRow{}},
+		RecCard:      liveRecCardSt{Rows: []liveSRow{}},
 		Link:         liveLinkSt{Sources: []liveSRow{}},
 		Strip:        u.liveStripState(),
 		GroupStream:  i18n.T("live.group.stream"),
@@ -238,6 +247,10 @@ func (u *UI) liveState() liveState {
 	// landmark (P3) has nothing to say otherwise.
 	if rs := u.liveRouteState(); len(rs.Rows) > 0 {
 		st.HasRoute, st.RouteTitle, st.Route = true, i18n.T("live.route.title"), rs
+	}
+	// Armed tracklist recorder (P12): the set being captured, shown where the user meets it.
+	if rc := u.liveRecCardState(); len(rc.Rows) > 0 {
+		st.HasRecCard, st.RecCardTitle, st.RecCard = true, i18n.T("live.reccard.title"), rc
 	}
 	if u.svc.AbleLink != nil {
 		st.HasLink, st.LinkTitle = true, i18n.T("live.ablelink.title")
@@ -289,6 +302,10 @@ func liveHTML(st liveState) string {
 	if st.HasRoute {
 		b.WriteString(liveSubLabel(st.RouteTitle, ""))
 		b.WriteString(`<div id=live-route>` + liveRouteFragHTML(st.Route) + `</div>`)
+	}
+	if st.HasRecCard {
+		b.WriteString(liveSubLabel(st.RecCardTitle, ""))
+		b.WriteString(`<div id=live-rec-card>` + liveRecCardFragHTML(st.RecCard) + `</div>`)
 	}
 	b.WriteString(`</section>`)
 
@@ -1085,16 +1102,53 @@ func (u *UI) routeHealthHTML() string {
 	return liveFrag("route", u.liveRouteState(), wireLiveRoute, liveRouteFragHTML)
 }
 
-// liveRouteFragHTML is the pure route-health renderer (one statusRow per route).
-func liveRouteFragHTML(st liveRouteSt) string {
+// liveSRowsCard renders a card of status rows (shared by the route + recorder cards).
+func liveSRowsCard(rows []liveSRow) string {
 	var b strings.Builder
 	b.WriteString(`<div class="rp-card">`)
-	for _, r := range st.Rows {
+	for _, r := range rows {
 		b.WriteString(liveStatusRow(r))
 	}
 	b.WriteString(`</div>`)
 	return b.String()
 }
+
+// liveRouteFragHTML is the pure route-health renderer (one statusRow per route).
+func liveRouteFragHTML(st liveRouteSt) string { return liveSRowsCard(st.Rows) }
+
+// ── armed tracklist recorder (P12) ──
+
+// liveRecCardState resolves the armed-recorder card: the set being captured, its live duration and
+// confirmed-track count, and the next (pending) track. Empty (card absent) when nothing is recording.
+func (u *UI) liveRecCardState() liveRecCardSt {
+	st := liveRecCardSt{Rows: []liveSRow{}}
+	if u.svc.Recorder == nil {
+		return st
+	}
+	rec := u.svc.Recorder.Active()
+	if rec == nil {
+		return st
+	}
+	name := rec.Name
+	if name == "" {
+		name = i18n.T("live.reccard.untitled")
+	}
+	st.Rows = append(st.Rows, liveSR("success", name, i18n.T("live.reccard.line",
+		i18n.A{"dur": mmss(time.Since(rec.StartedAt).Seconds()), "n": fmt.Sprint(len(rec.Tracks))})))
+	if p, ok := u.svc.Recorder.Pending(); ok {
+		if t := strings.TrimSpace(p.Track.Artist + " - " + p.Track.Title); t != "-" && t != "" {
+			st.Rows = append(st.Rows, liveSR("muted", i18n.T("live.reccard.next"), t))
+		}
+	}
+	return st
+}
+
+func (u *UI) recCardHTML() string {
+	return liveFrag("reccard", u.liveRecCardState(), wireLiveRecCard, liveRecCardFragHTML)
+}
+
+// liveRecCardFragHTML is the pure armed-recorder renderer.
+func liveRecCardFragHTML(st liveRecCardSt) string { return liveSRowsCard(st.Rows) }
 
 // ── graphs (small multiples: one labelled spark per series, single brand hue, P4/P7) ──
 

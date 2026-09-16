@@ -81,6 +81,10 @@ pub const Route = struct {
     rows: []const SRow = &.{},
 };
 
+pub const RecCard = struct {
+    rows: []const SRow = &.{},
+};
+
 pub const CockpitRow = struct {
     variant: []const u8 = "",
     name: []const u8 = "",
@@ -150,6 +154,9 @@ pub const State = struct {
     hasRoute: bool = false,
     routeTitle: []const u8 = "",
     route: Route = .{},
+    hasRecCard: bool = false,
+    recCardTitle: []const u8 = "",
+    recCard: RecCard = .{},
     hasLink: bool = false,
     linkTitle: []const u8 = "",
     link: Link = .{},
@@ -210,6 +217,12 @@ pub fn render(h: *Html, s: State) !void {
         try subLabel(h, s.routeTitle, "");
         try h.raw("<div id=live-route>");
         try renderRoute(h, s.route);
+        try h.raw("</div>");
+    }
+    if (s.hasRecCard) {
+        try subLabel(h, s.recCardTitle, "");
+        try h.raw("<div id=live-rec-card>");
+        try renderRecCard(h, s.recCard);
         try h.raw("</div>");
     }
     try h.raw("</section>");
@@ -393,11 +406,21 @@ pub fn renderSignals(h: *Html, s: Signals) !void {
     try h.raw("</div>");
 }
 
+/// sRowsCard renders a card of status rows (Go liveSRowsCard; shared by route + recorder cards).
+fn sRowsCard(h: *Html, rows: []const SRow) !void {
+    try h.raw("<div class=\"rp-card\">");
+    for (rows) |r| try statusRow(h, r);
+    try h.raw("</div>");
+}
+
 /// renderRoute mirrors Go liveRouteFragHTML (#live-route; one statusRow per live media route).
 pub fn renderRoute(h: *Html, s: Route) !void {
-    try h.raw("<div class=\"rp-card\">");
-    for (s.rows) |r| try statusRow(h, r);
-    try h.raw("</div>");
+    try sRowsCard(h, s.rows);
+}
+
+/// renderRecCard mirrors Go liveRecCardFragHTML (#live-rec-card; armed tracklist recorder).
+pub fn renderRecCard(h: *Html, s: RecCard) !void {
+    try sRowsCard(h, s.rows);
 }
 
 /// renderCockpit mirrors Go liveCockpitFragHTML (#live-cockpit; also the Twitch tab's copy).

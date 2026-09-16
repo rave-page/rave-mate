@@ -40,6 +40,11 @@ func (u *UI) liveCriticalTick() {
 	if rs := u.liveRouteState(); len(rs.Rows) > 0 {
 		u.tickPatch(&js, "live-route", liveFrag("route", rs, wireLiveRoute, liveRouteFragHTML))
 	}
+	// Armed tracklist recorder: the live duration must keep counting while streaming (you're
+	// capturing the set DURING the stream), so this can't be version-gated shut - patch it here.
+	if rc := u.liveRecCardState(); len(rc.Rows) > 0 {
+		u.tickPatch(&js, "live-rec-card", liveFrag("reccard", rc, wireLiveRecCard, liveRecCardFragHTML))
+	}
 	u.flushTick(&js)
 	u.freezeAbleLink() // P5: stop the client rAF phrase-bar loop the gated-shut general push left running
 }
