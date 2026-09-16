@@ -1,13 +1,13 @@
 {
-  "version": "nightly-26d7b1a",
-  "build": 334,
-  "commit": "26d7b1a",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-334-20260916-26d7b1a.exe",
-  "sha256": "768edc79d4f71e2907e165b01a4f085c5501c49060b815001d7a12dc567ad85c",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-334-20260916-26d7b1a.exe",
-  "installer_sha256": "7402f4aefe402832d92a52374512154715bad48bfac165a74519b71b93594fed",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-334-20260916-26d7b1a",
-  "linux_sha256": "9ce3857049eb01d2344294d01c237dd9a40737cfa67be81a8ef5b75a52e2dee1",
+  "version": "nightly-03faecb",
+  "build": 335,
+  "commit": "03faecb",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-335-20260916-03faecb.exe",
+  "sha256": "494be6fbe116bbaec93b10f474d430508898be2d941e81e00144f7137b04e70a",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-335-20260916-03faecb.exe",
+  "installer_sha256": "94890d22fcd79a6ca6e3cdf1ed93d73766a40848b24d42b6619d9c0f197ae147",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-335-20260916-03faecb",
+  "linux_sha256": "07390555146da39d96995ca9c1abc3c648c445c5fb66681c937a9d964ce9645d",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-09-16T06:34:01Z",
-  "notes": "governor: annotate assumed-live (OBS open, no obs-websocket) so the Live tier label is honest (P12)"
+  "released": "2026-09-16T07:06:58Z",
+  "notes": "webui(live): Twitch chat rate on the ambient strip (P7/P8)"
 }
