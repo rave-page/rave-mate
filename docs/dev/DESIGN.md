@@ -138,6 +138,24 @@ notes.
 
 Dated changes to the rules themselves. An entry here overrides older prose above.
 
+- **2026-09-16 — one in-app file browser, native dialog demoted to an escape hatch.** The Browse
+  contract (`pick-dir:`/`pick-file:`/`pick-save:`) opened a NATIVE Windows dialog everywhere, in
+  direct conflict with the "No browser-native UI … the in-app file browser … never a native OS
+  dialog for in-view browsing" rule above (the code had drifted from the doc). It now opens an
+  in-app modal browser (`internal/webui/pick_browser.go` + `pick_browser_render.go`, the `.pk-*`
+  recipe), backed by `internal/localmedia` (listing) + the new `internal/shellplaces` (OS Quick
+  Access), reusing the existing `.rp-*`/`.libnav`/`.field-input` recipes — a pure-Go modal on the
+  established `libRenameModal` pattern (patched into `__modal`, no Zig twin, so no golden churn).
+  It replaces the native dialog at every ~26 Browse sites via the unchanged `pick-apply:` contract,
+  works headless + in remote/virtual sessions (it browses THIS daemon's filesystem, so no dialog
+  pops on the controlled machine — the old `library.mirror.noPicker` refusal is gone), and mirrors
+  the OS Quick Access pins in a **QUICK ACCESS** sidebar group (COM enumeration; Win11 26xxx does
+  not expose a per-item pinned flag, so the group is the Explorer Quick-Access folder set — a
+  faithful superset of the user's pins). The native dialog survives ONLY as the "System dialog…"
+  escape hatch (Windows). `CAPABILITIES.md` File/dir browser row updated. Follow-up: the Library
+  Browse tab is still a sibling in-app browser (shares the data layer, separate renderer) — full
+  render unification (one Zig-mirrored component, two hosts) is tracked, not done here.
+
 - **2026-09-16 — via-peer session federation UI.** When an external-platform feature (VRChat,
   Twitch, World-Sync) is served by a paired instance because there is no local session, the
   surface shows the borrowed identity as a state **badge** (`.rp-badge` / `statusRow`), a **hint**

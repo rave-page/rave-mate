@@ -849,6 +849,7 @@
     "browse": {
       "cannotRead": "Cannot read {path}",
       "desktop": "DESKTOP",
+      "documents": "DOCUMENTS",
       "downloads": "DOWNLOADS",
       "filterName": "Filter by name…",
       "folder": "Folder",
@@ -2534,7 +2535,58 @@
   },
   "picker": {
     "selectFolder": "Select a folder",
-    "stale": "Nothing was changed. The form that opened this dialog is no longer on screen, so the path you picked has nowhere to go — applying it to whatever replaced it would edit the wrong thing. Re-open the form and browse again."
+    "stale": "Nothing was changed. The form that opened this dialog is no longer on screen, so the path you picked has nowhere to go — applying it to whatever replaced it would edit the wrong thing. Re-open the form and browse again.",
+    "title": {
+      "dir": "Choose a folder",
+      "file": "Choose a file",
+      "save": "Save as",
+      "multi": "Choose files"
+    },
+    "group": {
+      "quickAccess": "QUICK ACCESS",
+      "places": "PLACES",
+      "recent": "RECENT"
+    },
+    "sort": {
+      "name": "Name",
+      "modified": "Modified",
+      "size": "Size",
+      "type": "Type"
+    },
+    "view": {
+      "list": "List",
+      "grid": "Grid"
+    },
+    "col": {
+      "name": "Name",
+      "modified": "Modified",
+      "size": "Size",
+      "type": "Type"
+    },
+    "type": {
+      "folder": "Folder",
+      "file": "File"
+    },
+    "back": "Back",
+    "forward": "Forward",
+    "pathHint": "Type or paste a path, Enter to go",
+    "searchHint": "Search this folder…",
+    "hidden": "Hidden",
+    "pin": "Pin",
+    "pinned": "Pinned",
+    "allFiles": "All files",
+    "unreadable": "This folder can't be read",
+    "empty": "Nothing here",
+    "showingNofM": "Showing {n} of {m}",
+    "chooseFolder": "Choose folder",
+    "choose": "Choose",
+    "save": "Save",
+    "overwrite": "Overwrite",
+    "overwriteWarn": "File exists",
+    "selectedN": "{n} selected",
+    "filename": "File name",
+    "systemDialog": "System dialog…",
+    "nothingSelected": "Select something to choose first."
   },
   "placeholder": {
     "comingSoon": "Coming soon - the {name} controls will render here.",
