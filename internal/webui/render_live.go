@@ -742,13 +742,14 @@ func (u *UI) liveDecksState() liveDecksSt {
 	byDeck := map[string]session.DeckSnapshot{}
 	viaByDeck := map[string]string{} // deck id → "src1, src2" provenance (Fyne-parity "via" line)
 	audible := ""
+	masterBPM := 0.0
 	if u.svc.Session != nil {
 		snap := u.svc.Session.Snapshot()
 		ov := snap.BuildOverlay(time.Now(), session.NowPlayingStaleAfter)
 		for _, d := range ov.Decks {
 			byDeck[d.Deck] = d
 		}
-		audible = ov.Master.Deck
+		audible, masterBPM = ov.Master.Deck, ov.Master.BPM
 		for id, fields := range snap.Decks {
 			set := map[string]bool{}
 			for _, fv := range fields {
@@ -791,6 +792,10 @@ func (u *UI) liveDecksState() liveDecksSt {
 			note = i18n.T("live.decks.fromPeer", i18n.A{"name": peerName("", best.NodeID)})
 		}
 	}
+	// Master tempo (the set's running BPM) as the local decks caption when nothing is peer-mirrored.
+	if note == "" && masterBPM > 0 {
+		note = i18n.T("live.decks.master", i18n.A{"bpm": fmt.Sprintf("%.1f", masterBPM)})
+	}
 	// A-D always render; extra peer deck ids append after.
 	ids := []string{"A", "B", "C", "D"}
 	seen := map[string]bool{"A": true, "B": true, "C": true, "D": true}
@@ -816,11 +821,17 @@ func (u *UI) liveDecksState() liveDecksSt {
 			if d.Key != "" {
 				meta += " · " + d.Key
 			}
+			if d.IsPlaying && d.TrackLength > d.ElapsedTime { // time remaining in the current track
+				meta += " · " + i18n.T("live.decks.remaining", i18n.A{"time": mmss(d.TrackLength - d.ElapsedTime)})
+			}
 			if d.IsPlaying {
 				cls += " deckbig--live"
 			}
 			if id == audible && d.IsPlaying {
 				cls += " deckbig--audible"
+			}
+			if d.OnAir { // playing AND fader up - the explicit on-air marker (P3), beyond the audible glow
+				meta = i18n.T("live.decks.onAir") + " · " + meta
 			}
 		}
 		via := ""

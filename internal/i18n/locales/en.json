@@ -1961,6 +1961,9 @@
     },
     "decks": {
       "fromPeer": "Decks from {name} (peer link)",
+      "master": "Master {bpm} BPM",
+      "onAir": "◉ ON AIR",
+      "remaining": "-{time} left",
       "title": "Decks (merged)",
       "via": "via {sources}"
     },
