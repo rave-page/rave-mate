@@ -65,8 +65,30 @@ video=Logitech BRIO: Immediate exit requested
 
 func TestParseDshowOptions(t *testing.T) {
 	got := parseDshowOptions(fixtureOptions)
-	// Deduped by size (max fps wins), sorted largest area first.
-	want := []Mode{{1920, 1080, 30}, {1280, 720, 60.0002}, {640, 480, 30}}
+	// Deduped by size (fastest wins, MJPEG over raw on a tie), sorted largest area first, each
+	// carrying the -input_format that actually reaches its fps. 1920x1080 = mjpeg@30 (NOT the
+	// raw yuyv422@5 on the same size); the raw-only nv12 720p keeps its raw token.
+	want := []Mode{{1920, 1080, 30, "mjpeg"}, {1280, 720, 60.0002, "nv12"}, {640, 480, 30, "mjpeg"}}
+	if len(got) != len(want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("mode %d: got %v want %v", i, got[i], want[i])
+		}
+	}
+}
+
+// Older ffmpeg omits the vcodec=/pixel_format= token: modes still parse, InputFormat stays empty
+// (ffmpeg negotiates the device default - the pre-fix behaviour).
+const fixtureOptionsNoCodec = `[dshow @ 0000023e]  Pin "Capture"
+[dshow @ 0000023e]   min s=1280x720 fps=5 max s=1280x720 fps=30
+[dshow @ 0000023e]   min s=640x480 fps=5 max s=640x480 fps=30
+`
+
+func TestParseDshowOptionsNoCodec(t *testing.T) {
+	got := parseDshowOptions(fixtureOptionsNoCodec)
+	want := []Mode{{1280, 720, 30, ""}, {640, 480, 30, ""}}
 	if len(got) != len(want) {
 		t.Fatalf("got %v want %v", got, want)
 	}

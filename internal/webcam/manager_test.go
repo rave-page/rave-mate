@@ -199,6 +199,55 @@ func TestCapabilityAdvertised(t *testing.T) {
 	}
 }
 
+// TestInputFormatThreadsThrough: the chosen mode's -input_format reaches the capture descriptor -
+// mjpeg for an mjpeg-capable device, empty for a raw-only (no-codec) one (ffmpeg negotiates).
+func TestInputFormatThreadsThrough(t *testing.T) {
+	log := logbus.New(64)
+
+	// mjpeg-capable device at 720p: InputFormat threads through to openRoute.
+	cfg := &config.WebcamFeature{Enabled: true, Device: "MJCam", Width: 1280, Height: 720, FPS: 30}
+	mgr, fs := newFakeManager(t, eventbus.New(log, "mj"), "mj", cfg)
+	mgr.enumerate = func(context.Context) ([]DeviceInfo, error) {
+		return []DeviceInfo{{Name: "MJCam", Modes: []Mode{{W: 1280, H: 720, FPS: 30, InputFormat: "mjpeg"}}}}, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Stop()
+	waitFor(t, "mjpeg device enumerated", func() bool { return len(mgr.Instances()[0].Devices) == 1 })
+	if err := mgr.StartCamera("", 0, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	fs.mu.Lock()
+	d := fs.started[len(fs.started)-1]
+	fs.mu.Unlock()
+	if d.InputFormat != "mjpeg" {
+		t.Fatalf("mjpeg device: want input-format mjpeg, got %+v", d)
+	}
+
+	// raw-only device (FakeCam advertises a mode with no codec token): empty input-format.
+	cfg2 := &config.WebcamFeature{Enabled: true, Device: "FakeCam", Width: 1280, Height: 720, FPS: 30}
+	mgr2, fs2 := newFakeManager(t, eventbus.New(log, "raw"), "raw", cfg2)
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	if err := mgr2.Start(ctx2); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr2.Stop()
+	waitFor(t, "raw device enumerated", func() bool { return len(mgr2.Instances()[0].Devices) == 1 })
+	if err := mgr2.StartCamera("", 0, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	fs2.mu.Lock()
+	d2 := fs2.started[len(fs2.started)-1]
+	fs2.mu.Unlock()
+	if d2.InputFormat != "" {
+		t.Fatalf("raw device: want empty input-format, got %+v", d2)
+	}
+}
+
 // TestPickMode covers the size/rate fallback chain.
 func TestPickMode(t *testing.T) {
 	devs := []DeviceInfo{{Name: "Cam", Modes: []Mode{{W: 1920, H: 1080, FPS: 30}}}}

@@ -183,6 +183,7 @@ func (m *Manager) StartCamera(device string, w, h, fps int) error {
 	reqW, reqH := w, h
 	m.mu.Lock()
 	w, h, fps, clamped := resolveCaptureMode(m.devices, device, w, h, fps)
+	inFmt := deviceInputFormat(m.devices, device, w, h) // mjpeg-preferred codec for the chosen size
 	ctx := m.ctx
 	m.mu.Unlock()
 	if clamped {
@@ -195,7 +196,7 @@ func (m *Manager) StartCamera(device string, w, h, fps int) error {
 	}
 	m.stopCamera()
 
-	desc := capDesc{Device: device, W: w, H: h, FPS: fps}
+	desc := capDesc{Device: device, W: w, H: h, FPS: fps, InputFormat: inFmt}
 	stop, stats, sender, err := m.openRoute(ctx, desc)
 	m.mu.Lock()
 	if err != nil {
@@ -504,6 +505,24 @@ func pickMode(devices []DeviceInfo, device string, fps int) (int, int, int) {
 		fps = defaultFPS
 	}
 	return defaultW, defaultH, fps
+}
+
+// deviceInputFormat returns the ffmpeg -input_format for device's advertised (w,h) mode
+// (parseDshowOptions already picked MJPEG over raw per size). "" when the size is unadvertised
+// (explicit/default sizes) or the driver named no codec (older ffmpeg) - ffmpeg negotiates then.
+func deviceInputFormat(devices []DeviceInfo, device string, w, h int) string {
+	for _, d := range devices {
+		if d.Name != device {
+			continue
+		}
+		for _, m := range d.Modes {
+			if m.W == w && m.H == h {
+				return m.InputFormat
+			}
+		}
+		break
+	}
+	return ""
 }
 
 // ── device/prop refresh ───────────────────────────────────────────────────────

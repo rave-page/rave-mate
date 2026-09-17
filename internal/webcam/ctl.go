@@ -21,9 +21,10 @@ const (
 
 // Mode is one capture format a device advertises (parsed from ffmpeg -list_options).
 type Mode struct {
-	W   int     `json:"w"`
-	H   int     `json:"h"`
-	FPS float64 `json:"fps"` // max fps at this size
+	W           int     `json:"w"`
+	H           int     `json:"h"`
+	FPS         float64 `json:"fps"`                   // max fps at this size
+	InputFormat string  `json:"inputFormat,omitempty"` // ffmpeg -input_format for this mode (mjpeg/yuyv422/…); "" = unknown
 }
 
 // DeviceInfo is one enumerated video capture device.

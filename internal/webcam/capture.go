@@ -24,9 +24,10 @@ import (
 // (swscale converts from whatever the camera emits either way) and it feeds the existing Spout
 // shim (GL_RGBA) with zero per-frame swizzle.
 type capDesc struct {
-	Device string
-	W, H   int
-	FPS    int // 0 = device default
+	Device      string
+	W, H        int
+	FPS         int    // 0 = device default
+	InputFormat string // ffmpeg -input_format (mjpeg/yuyv422/…); "" = negotiate the device default
 }
 
 type capture struct {
@@ -298,6 +299,9 @@ func captureArgs(d capDesc) []string {
 	}
 	if d.FPS > 0 {
 		args = append(args, "-framerate", strconv.Itoa(d.FPS))
+	}
+	if d.InputFormat != "" { // request the codec that hits the advertised fps (MJPEG > raw yuyv422 over USB-2)
+		args = append(args, "-input_format", d.InputFormat)
 	}
 	return append(args,
 		"-i", "video="+d.Device,

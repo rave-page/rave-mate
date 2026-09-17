@@ -52,9 +52,11 @@ func runFFStderr(ctx context.Context, ffmpeg string, args ...string) string {
 }
 
 var (
-	dshowTaggedRe  = regexp.MustCompile(`"([^"]+)"\s*\(([^)]*)\)\s*$`) // ffmpeg ≥4.3: `"Name" (video)` / `(audio, video)`
-	dshowUntagRe   = regexp.MustCompile(`"([^"]+)"\s*$`)               // older: bare `"Name"` under a section header
-	dshowOptModeRe = regexp.MustCompile(`min s=(\d+)x(\d+) fps=([0-9.]+)\s+max s=(\d+)x(\d+) fps=([0-9.]+)`)
+	dshowTaggedRe = regexp.MustCompile(`"([^"]+)"\s*\(([^)]*)\)\s*$`) // ffmpeg ≥4.3: `"Name" (video)` / `(audio, video)`
+	dshowUntagRe  = regexp.MustCompile(`"([^"]+)"\s*$`)               // older: bare `"Name"` under a section header
+	// Optional leading vcodec=/pixel_format= token (the ffmpeg -input_format value) binds to this
+	// line's size/fps - matched per line, never globally, so the codec stays with its own mode.
+	dshowOptModeRe = regexp.MustCompile(`(?:(?:vcodec|pixel_format)=(\S+)\s+)?min s=(\d+)x(\d+) fps=([0-9.]+)\s+max s=(\d+)x(\d+) fps=([0-9.]+)`)
 )
 
 // parseDshowVideoDevices extracts deduped video device names from `-list_devices` stderr.
@@ -97,26 +99,35 @@ func parseDshowVideoDevices(stderr string) []string {
 	return out
 }
 
-// parseDshowOptions extracts deduped capture modes (size + max fps) from `-list_options` stderr,
-// sorted largest-first then fastest-first.
+// parseDshowOptions extracts deduped capture modes (size + max fps + -input_format token) from
+// `-list_options` stderr, sorted largest-first then fastest-first. Per size the fastest mode wins,
+// MJPEG over raw on a tie (raw yuyv422 caps far below its advertised fps over USB-2).
 func parseDshowOptions(stderr string) []Mode {
 	type key struct{ w, h int }
-	best := map[key]float64{}
-	for _, m := range dshowOptModeRe.FindAllStringSubmatch(stderr, -1) {
-		w, _ := strconv.Atoi(m[4]) // max size (min==max on every real driver line)
-		h, _ := strconv.Atoi(m[5])
-		fps, _ := strconv.ParseFloat(m[6], 64)
+	type cand struct {
+		fps   float64
+		inFmt string // -input_format token for this size's best mode ("" = older ffmpeg / unknown)
+	}
+	best := map[key]cand{}
+	for _, line := range strings.Split(stderr, "\n") {
+		m := dshowOptModeRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		w, _ := strconv.Atoi(m[5]) // max size (min==max on every real driver line)
+		h, _ := strconv.Atoi(m[6])
+		fps, _ := strconv.ParseFloat(m[7], 64)
 		if w <= 0 || h <= 0 || fps <= 0 {
 			continue
 		}
 		k := key{w, h}
-		if fps > best[k] {
-			best[k] = fps
+		if c, ok := best[k]; !ok || fps > c.fps || (fps == c.fps && m[1] == "mjpeg" && c.inFmt != "mjpeg") {
+			best[k] = cand{fps: fps, inFmt: m[1]}
 		}
 	}
 	out := make([]Mode, 0, len(best))
-	for k, fps := range best {
-		out = append(out, Mode{W: k.w, H: k.h, FPS: fps})
+	for k, c := range best {
+		out = append(out, Mode{W: k.w, H: k.h, FPS: c.fps, InputFormat: c.inFmt})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].W*out[i].H != out[j].W*out[j].H {
