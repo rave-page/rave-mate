@@ -65,9 +65,9 @@ video=Logitech BRIO: Immediate exit requested
 
 func TestParseDshowOptions(t *testing.T) {
 	got := parseDshowOptions(fixtureOptions)
-	// Deduped by size (fastest wins, MJPEG over raw on a tie), sorted largest area first, each
-	// carrying the -input_format that actually reaches its fps. 1920x1080 = mjpeg@30 (NOT the
-	// raw yuyv422@5 on the same size); the raw-only nv12 720p keeps its raw token.
+	// Deduped by size (MJPEG preferred over raw at any fps, else fastest), sorted largest area
+	// first, each carrying the -input_format that actually reaches its fps. 1920x1080 = mjpeg@30
+	// (NOT the raw yuyv422@5 on the same size); the raw-only nv12 720p keeps its raw token.
 	want := []Mode{{1920, 1080, 30, "mjpeg"}, {1280, 720, 60.0002, "nv12"}, {640, 480, 30, "mjpeg"}}
 	if len(got) != len(want) {
 		t.Fatalf("got %v want %v", got, want)
@@ -76,6 +76,20 @@ func TestParseDshowOptions(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("mode %d: got %v want %v", i, got[i], want[i])
 		}
+	}
+}
+
+// A size offering BOTH raw and MJPEG: MJPEG wins even when raw advertises a higher (bus-
+// unsustainable) fps - the C920/BRIO 720p case (nv12@60 vs mjpeg@30 over USB-2).
+const fixtureOptions720Both = `[dshow @ x]   pixel_format=nv12  min s=1280x720 fps=10 max s=1280x720 fps=60
+[dshow @ x]   vcodec=mjpeg  min s=1280x720 fps=5 max s=1280x720 fps=30
+`
+
+func TestParseDshowOptionsPrefersMJPEGOverFasterRaw(t *testing.T) {
+	got := parseDshowOptions(fixtureOptions720Both)
+	want := []Mode{{1280, 720, 30, "mjpeg"}} // mjpeg@30 beats nv12@60
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("got %v want %v", got, want)
 	}
 }
 

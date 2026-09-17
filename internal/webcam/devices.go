@@ -100,8 +100,10 @@ func parseDshowVideoDevices(stderr string) []string {
 }
 
 // parseDshowOptions extracts deduped capture modes (size + max fps + -input_format token) from
-// `-list_options` stderr, sorted largest-first then fastest-first. Per size the fastest mode wins,
-// MJPEG over raw on a tie (raw yuyv422 caps far below its advertised fps over USB-2).
+// `-list_options` stderr, sorted largest-first then fastest-first. Per size MJPEG is preferred over
+// raw at ANY fps (the camera's hardware MJPEG sustains its advertised rate over USB-2 while raw
+// yuyv422/nv12 starves the bus - C920 1080p yuyv422 caps at 5 fps, 720p nv12@60 can't sustain);
+// within one codec the fastest mode wins.
 func parseDshowOptions(stderr string) []Mode {
 	type key struct{ w, h int }
 	type cand struct {
@@ -121,7 +123,9 @@ func parseDshowOptions(stderr string) []Mode {
 			continue
 		}
 		k := key{w, h}
-		if c, ok := best[k]; !ok || fps > c.fps || (fps == c.fps && m[1] == "mjpeg" && c.inFmt != "mjpeg") {
+		// MJPEG beats raw for a size regardless of fps; within one codec class, fastest wins.
+		newMJPEG := m[1] == "mjpeg"
+		if c, ok := best[k]; !ok || (newMJPEG && c.inFmt != "mjpeg") || (newMJPEG == (c.inFmt == "mjpeg") && fps > c.fps) {
 			best[k] = cand{fps: fps, inFmt: m[1]}
 		}
 	}
