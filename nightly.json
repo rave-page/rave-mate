@@ -1,13 +1,13 @@
 {
   "version": "nightly-39e621e",
-  "build": 366,
+  "build": 367,
   "commit": "39e621e",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-366-20261004-39e621e.exe",
-  "sha256": "c20c39a566478a574f046bd329ccecfaed4a7ba95bf8b451ebfbe5f8a1b30dd0",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-366-20261004-39e621e.exe",
-  "installer_sha256": "528d16d8747ab36967df87b79535821b15c1bef949d907cc16e337a154eb532e",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-366-20261004-39e621e",
-  "linux_sha256": "bf1a4b8e3d3be79ce3bd28430fe2876387ecbfa6779332d636e82df7dd8bb245",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-367-20261005-39e621e.exe",
+  "sha256": "662e4a19e6ad303d016267e69adf163566723e0c2f5ec6660ff0bda5ebb3875d",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-367-20261005-39e621e.exe",
+  "installer_sha256": "16e6e544cf52dfdfea1b6a8d4b7f93dcee7d317b79a0d98205523578cb95a3a5",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-367-20261005-39e621e",
+  "linux_sha256": "c228ab30295f755c14918f38d1eb88cf1104d2909aa09b2f87a58ce996d6b105",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-10-04T10:59:48Z",
+  "released": "2026-10-05T12:06:20Z",
   "notes": "fix(webcam): prefer MJPEG over faster raw per size so 720p UVC cams don't starve"
 }
