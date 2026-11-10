@@ -1,13 +1,13 @@
 {
-  "version": "nightly-b3f273a",
-  "build": 405,
-  "commit": "b3f273a",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-405-20261110-b3f273a.exe",
-  "sha256": "a8688fde0fc709337a9bd09ba8a543c00ea86e1dadfd4524ee8b74fd7d03fe3d",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-405-20261110-b3f273a.exe",
-  "installer_sha256": "3c79b562f73320a7ef6a9b842a0c418df3cd3c8c2220b7a84f3b20eaeabcd754",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-405-20261110-b3f273a",
-  "linux_sha256": "d81fb8b5a4b7066ee665b66c0532244815c88f7a7c536afb8941c73ce5b5c747",
+  "version": "nightly-5a5ab5c",
+  "build": 406,
+  "commit": "5a5ab5c",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-406-20261110-5a5ab5c.exe",
+  "sha256": "7cd845771870d8469830b12ec5eb55f322659c4f71f5fccea76ec8dedf0984da",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-406-20261110-5a5ab5c.exe",
+  "installer_sha256": "1c1fe994e7433a896f6f0702eeb6f05fd870e8944cb7baccbdba6028b0b90270",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-406-20261110-5a5ab5c",
+  "linux_sha256": "5c191221c1122ccdf1a6395daec8f0e70f5ee9db860d264416c43e5934f3826a",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-11-10T14:36:10Z",
-  "notes": "devnotes: prove the 172->171 class is Traktor re-reading poisoned tags, not the beat tracker"
+  "released": "2026-11-10T14:52:10Z",
+  "notes": "config/tagsync: BPM tag writes are opt-in (features.tagWrite.bpm, default off)"
 }
