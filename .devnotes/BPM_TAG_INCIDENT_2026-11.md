@@ -16,6 +16,14 @@ rave-mate detection cache, original Beatport tags)
 - rave-mate's real damage: **2026-06-17 tagsync wrote Traktor float grid BPMs
   (`173.999512`) into 1,355 FLAC `BPM` tags** over clean integers. Traktor truncates such
   tags on re-read → `173` → off-by-one grids that gridfix later had to repair.
+- The off-by-one mechanism, proven on the 45 tracks that went 172→171 / 174→173 between
+  the Aug-10 and Sep-2 collection backups: every cached detection of those tracks fits
+  the TRUE tempo (172.00x) in Python, in the current Go planner and in the Aug-era Go
+  planner (ddcf02c), with the true or a poisoned prior - 0 of 45 reproduce a 171. The
+  entries that changed did so with the grid marker untouched and `MODIFIED_DATE` reset
+  to `2026/6/27` (the file's mtime from the tag write): Traktor re-read the file tags of
+  files newer than the entry and took the BPM from the tag. The AI beat tracker is not
+  in that path at all.
 - 2026-10-30 22:09:42: all 1,566 unlocked Heat DnB entries got `LOCK="1"` in one batch
   inside Traktor (no rave-mate NML backup/import after 09-02). Locked entries are skipped
   by Traktor's batch Analyze unless "Replace Locked Values" → "batch won't fix, single
