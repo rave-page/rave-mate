@@ -16,6 +16,7 @@ import (
 	"rave.page/mate/internal/remotecache"
 	"rave.page/mate/internal/serato"
 	"rave.page/mate/internal/stt"
+	"rave.page/mate/internal/tagsync"
 	"rave.page/mate/internal/traktormap"
 	"rave.page/mate/internal/version"
 	"rave.page/mate/internal/vrdll"
@@ -765,7 +766,9 @@ func (u *UI) cardBlocks(id string) (string, string, []setBlock) {
 		return i18n.T("settings.card.library.title"), i18n.T("settings.card.library.desc"), []setBlock{
 			sbNote(i18n.T("settings.body.library.mpvNote")),
 			u.toolInstallBlock(mediatools.MPV, "mpv"),
-			embedRow}
+			embedRow,
+			sbToggle(i18n.T("settings.body.library.writeBpmTags"), "set:tags-bpm", f.TagWrite.BPM),
+			sbNote(i18n.T("settings.body.library.writeBpmTagsNote"))}
 	case "mediaeditor":
 		return i18n.T("settings.card.mediaeditor.title"), i18n.T("settings.card.mediaeditor.desc"), nil
 	case "transcode":
@@ -1933,6 +1936,9 @@ func (u *UI) applySet(id, val string) {
 		toFloat(&f.GridFix.ThresholdMS, 1)
 	case "gridfix-lock":
 		f.GridFix.LockFixed = b
+	case "tags-bpm":
+		f.TagWrite.BPM = b
+		tagsync.SetWriteBPM(b) // live: every tag-write path checks the gate per call
 	// Traktor
 	case "traktor-port":
 		toInt(&f.Traktor.Port, 1, 65535)

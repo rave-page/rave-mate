@@ -3054,7 +3054,9 @@
       },
       "library": {
         "embed": "Play video inside the app window",
-        "mpvNote": "The in-app player uses mpv for smooth, hardware-accelerated video. Without mpv, video falls back to a slower in-app decoder."
+        "mpvNote": "The in-app player uses mpv for smooth, hardware-accelerated video. Without mpv, video falls back to a slower in-app decoder.",
+        "writeBpmTags": "Write BPM into file tags",
+        "writeBpmTagsNote": "Off by default: Traktor re-reads the tags of a file that changed and takes the BPM from the tag, which put off-by-one tempos into the collection (2026-06). Key, genre, comment and rating still sync."
       },
       "medialink": {
         "auto": "auto",

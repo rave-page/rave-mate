@@ -100,6 +100,7 @@ import (
 	"rave.page/mate/internal/stt"
 	"rave.page/mate/internal/studio"
 	"rave.page/mate/internal/sysactivity"
+	"rave.page/mate/internal/tagsync"
 	"rave.page/mate/internal/timecode"
 	"rave.page/mate/internal/traktormap"
 	"rave.page/mate/internal/transcode"
@@ -179,7 +180,8 @@ func run(parent context.Context, serviceMode bool) error {
 	defer inst.close()
 
 	cfg, cfgErr := config.Load()
-	i18n.SetLocale(cfg.Features.UI.Language) // webui i18n: persisted pref → OS locale → en
+	i18n.SetLocale(cfg.Features.UI.Language)       // webui i18n: persisted pref → OS locale → en
+	tagsync.SetWriteBPM(cfg.Features.TagWrite.BPM) // BPM tag writes are opt-in (Traktor re-reads tags)
 	log := logbus.New(5000)
 	debuglog.Init(log) // persistent debug log + panic capture in the cwd (GUI build has no console)
 	if cfgErr != nil { // corrupt/unreadable config - recovered from .bak or reset; never silent

@@ -2324,7 +2324,9 @@
       },
       "library": {
         "embed": "Lire la vidéo dans la fenêtre de l'appli",
-        "mpvNote": "Le lecteur intégré utilise mpv pour une vidéo fluide et accélérée matériellement. Sans mpv, la vidéo bascule sur un décodeur intégré plus lent."
+        "mpvNote": "Le lecteur intégré utilise mpv pour une vidéo fluide et accélérée matériellement. Sans mpv, la vidéo bascule sur un décodeur intégré plus lent.",
+        "writeBpmTags": "Écrire le BPM dans les tags du fichier",
+        "writeBpmTagsNote": "Désactivé par défaut : Traktor relit les tags d'un fichier modifié et reprend le BPM du tag, ce qui a introduit des tempos décalés de 1 dans la collection (2026-06). Tonalité, genre, commentaire et note restent écrits."
       },
       "medialink": {
         "bitrate": "Débit (Mbps)",

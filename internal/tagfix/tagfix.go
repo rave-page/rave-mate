@@ -166,7 +166,7 @@ func scanMissing(tr musiclib.Track, cur tagwrite.Tags) []Problem {
 			Detail: "library has " + field + ", file tag empty", Proposed: lib,
 		})
 	}
-	if tr.BPM > 0 {
+	if tr.BPM > 0 && tagsync.WriteBPM() { // never propose a write the BPM gate would drop
 		add(tagwrite.FieldBPM, tagwrite.BPMTagFor(tr.Path, tr.BPM)) // propose what a write stores
 	}
 	add(tagwrite.FieldKey, tr.Key)
@@ -176,7 +176,7 @@ func scanMissing(tr musiclib.Track, cur tagwrite.Tags) []Problem {
 
 func scanMismatch(tr musiclib.Track, cur tagwrite.Tags) []Problem {
 	var out []Problem
-	if tr.BPM > 0 && cur[tagwrite.FieldBPM] != "" {
+	if tr.BPM > 0 && cur[tagwrite.FieldBPM] != "" && tagsync.WriteBPM() {
 		// Only flag a parseable tag value with a real delta (>0.05).
 		if fileBPM, err := strconv.ParseFloat(strings.TrimSpace(cur[tagwrite.FieldBPM]), 64); err == nil &&
 			math.Abs(fileBPM-tr.BPM) > 0.05 {

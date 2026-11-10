@@ -2456,7 +2456,9 @@
       },
       "library": {
         "embed": "Video im App-Fenster abspielen",
-        "mpvNote": "Der integrierte Player nutzt mpv für flüssiges, hardwarebeschleunigtes Video. Ohne mpv fällt Video auf einen langsameren integrierten Decoder zurück."
+        "mpvNote": "Der integrierte Player nutzt mpv für flüssiges, hardwarebeschleunigtes Video. Ohne mpv fällt Video auf einen langsameren integrierten Decoder zurück.",
+        "writeBpmTags": "BPM in Datei-Tags schreiben",
+        "writeBpmTagsNote": "Standard: aus. Traktor liest die Tags einer geänderten Datei neu ein und übernimmt die BPM aus dem Tag – so kamen um 1 versetzte Tempi in die Collection (2026-06). Key, Genre, Kommentar und Rating werden weiterhin geschrieben."
       },
       "medialink": {
         "auto": "auto",

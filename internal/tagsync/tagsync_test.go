@@ -10,9 +10,54 @@ import (
 	"rave.page/mate/internal/tagwrite"
 )
 
+// withBPM enables the (default-off) BPM tag gate for one test.
+func withBPM(t *testing.T) {
+	t.Helper()
+	SetWriteBPM(true)
+	t.Cleanup(func() { SetWriteBPM(false) })
+}
+
+// TestBPMGateOff: with the gate off (the default) neither Apply nor an explicit ApplyTags may
+// touch the BPM tag - other analysis fields still sync.
+func TestBPMGateOff(t *testing.T) {
+	SetWriteBPM(false)
+	db, err := libdb.Open(filepath.Join(t.TempDir(), "lib.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	mp3 := filepath.Join(t.TempDir(), "g.mp3")
+	if err := os.WriteFile(mp3, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	written, err := Apply(db, musiclib.Track{Path: mp3, BPM: 174, Key: "8A"})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if _, ok := written[tagwrite.FieldBPM]; ok || written[tagwrite.FieldKey] != "8A" {
+		t.Fatalf("gate off wrote bpm: %v", written)
+	}
+	if _, err := ApplyTags(db, musiclib.Track{Path: mp3}, tagwrite.Tags{tagwrite.FieldBPM: "174", tagwrite.FieldGenre: "DnB"}); err != nil {
+		t.Fatalf("apply tags: %v", err)
+	}
+	got, _ := tagwrite.Read(mp3)
+	if got[tagwrite.FieldBPM] != "" || got[tagwrite.FieldGenre] != "DnB" {
+		t.Fatalf("file tags with gate off = %v", got)
+	}
+	SetWriteBPM(true)
+	t.Cleanup(func() { SetWriteBPM(false) })
+	if _, err := Apply(db, musiclib.Track{Path: mp3, BPM: 174}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := tagwrite.Read(mp3); got[tagwrite.FieldBPM] != "174" {
+		t.Fatalf("gate on did not write bpm: %v", got)
+	}
+}
+
 // TestApplyAndRevert: write a track's analysis into a real file, then revert it back to the
 // pre-write state (here: empty), proving the DB-snapshot round-trips through the file.
 func TestApplyAndRevert(t *testing.T) {
+	withBPM(t)
 	db, err := libdb.Open(filepath.Join(t.TempDir(), "lib.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -120,6 +165,7 @@ func TestApplyTagsRevert(t *testing.T) {
 // logs zero (incl. a decimal BPM that must survive tag round-trip byte-exact); a genuine change
 // logs again.
 func TestApplyNoOpSuppressed(t *testing.T) {
+	withBPM(t)
 	db, err := libdb.Open(filepath.Join(t.TempDir(), "lib.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -189,6 +235,7 @@ func TestApplyNoOpSuppressed(t *testing.T) {
 // rewritten for a track carrying float grid noise (no write, no tag_edits row, no change_log).
 // This is the 2026-06-17 incident: 1,355 clean "174" tags became "173.999512".
 func TestApplyBPMFloatNoiseIsNoOp(t *testing.T) {
+	withBPM(t)
 	db, err := libdb.Open(filepath.Join(t.TempDir(), "lib.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)

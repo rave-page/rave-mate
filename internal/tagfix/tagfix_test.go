@@ -81,6 +81,8 @@ func TestScanApplyV1Only(t *testing.T) {
 }
 
 func TestScanMissingMismatchNoBasics(t *testing.T) {
+	tagsync.SetWriteBPM(true) // BPM proposals exist only while the gate is on
+	t.Cleanup(func() { tagsync.SetWriteBPM(false) })
 	path := filepath.Join(t.TempDir(), "t.mp3")
 	if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
 		t.Fatal(err)
@@ -154,6 +156,8 @@ func TestScanMojibakeEndToEnd(t *testing.T) {
 }
 
 func TestScanFLACMissing(t *testing.T) {
+	tagsync.SetWriteBPM(true)
+	t.Cleanup(func() { tagsync.SetWriteBPM(false) })
 	src, err := os.ReadFile("../tagwrite/testdata/silence.flac")
 	if err != nil {
 		t.Skipf("no flac fixture: %v", err)

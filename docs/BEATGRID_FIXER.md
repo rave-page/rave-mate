@@ -107,12 +107,15 @@ tracks from `MANUAL_GRIDDING_PREP`, verify them, then train (20+ recommended).
   (±0.05 BPM, ±20 ms). Once the DJ software re-analyzes or you re-grid it, the pin is
   *stale*: the track is planned normally, its result says `verified pin stale (…)`, and
   applying a fix drops the pin. Re-verify when you have confirmed the new grid.
-- **File BPM tags are integer-safe.** Every tag write (library sync, tag write, BPM
-  range enforcement) renders the BPM as an integer when within 0.05 of one, else two
-  decimals; MP3 `TBPM` is always the rounded integer (ID3 defines it integer-only). A
-  tag that already means the same tempo is never rewritten. Float grid values
-  (`173.999512`) written into tags got truncated to `173` by Traktor on re-read and
-  poisoned grids off by one (2026-06/09 incident) - hence the rule.
+- **BPM tag writes are off by default** (Settings → Library & media → *Write BPM into
+  file tags*). Traktor re-reads the tags of a file that is newer than its collection
+  entry and takes the BPM from the tag, so any BPM tag write re-enters the collection
+  (2026-06 off-by-one incident: `173.999512` in the tag became `173` in Traktor). With
+  the switch off, library sync, tag write, tag repair and BPM range enforcement leave
+  the BPM tag alone; key, genre, comment and rating still sync.
+- **When enabled, BPM tags are integer-safe:** an integer when within 0.05 of one, else
+  two decimals; MP3 `TBPM` is always the rounded integer (ID3 defines it integer-only).
+  A tag that already means the same tempo is never rewritten.
 - The write path normalizes XML self-closing tags (`<TEMPO/>` → `<TEMPO></TEMPO>`);
   Traktor reads both and re-canonicalizes the file on its next save.
 - **Serato** grid writeback is supported: Serato stores beatgrids in the audio files

@@ -9,11 +9,23 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"sync/atomic"
 
 	"rave.page/mate/internal/libdb"
 	"rave.page/mate/internal/musiclib"
 	"rave.page/mate/internal/tagwrite"
 )
+
+// writeBPM gates every BPM tag write in the process (config features.tagWrite.bpm, default
+// off). Traktor re-reads the tags of a file newer than its entry and takes the BPM from the
+// tag, so a BPM tag write silently re-enters the collection - the 2026-06 off-by-one incident.
+var writeBPM atomic.Bool
+
+// SetWriteBPM enables/disables BPM tag writes process-wide (wired from config at start + on toggle).
+func SetWriteBPM(on bool) { writeBPM.Store(on) }
+
+// WriteBPM reports whether BPM tag writes are enabled.
+func WriteBPM() bool { return writeBPM.Load() }
 
 // tagFieldColumn maps a tagwrite field to its change_log/tracks column name.
 var tagFieldColumn = map[string]string{
@@ -32,7 +44,7 @@ var ErrUnsupported = errors.New("tag write unsupported for this format")
 // stay untouched (those flow only through tagfix / an explicit editor).
 func desiredFromTrack(t musiclib.Track) tagwrite.Tags {
 	d := tagwrite.Tags{}
-	if s := tagwrite.BPMTagFor(t.Path, t.BPM); s != "" {
+	if s := tagwrite.BPMTagFor(t.Path, t.BPM); s != "" && WriteBPM() {
 		d[tagwrite.FieldBPM] = s // integer-safe: never float grid noise into an integer-parsed tag
 	}
 	if t.Key != "" {
@@ -73,6 +85,17 @@ func Apply(db *libdb.DB, t musiclib.Track) (tagwrite.Tags, error) {
 func ApplyTags(db *libdb.DB, t musiclib.Track, desired tagwrite.Tags) (tagwrite.Tags, error) {
 	if !tagwrite.Supported(t.Path) {
 		return nil, ErrUnsupported
+	}
+	if !WriteBPM() {
+		if _, ok := desired[tagwrite.FieldBPM]; ok { // explicit callers (tag repair, range fold) too
+			cp := make(tagwrite.Tags, len(desired))
+			for k, v := range desired {
+				if k != tagwrite.FieldBPM {
+					cp[k] = v
+				}
+			}
+			desired = cp
+		}
 	}
 	if len(desired) == 0 {
 		return desired, nil

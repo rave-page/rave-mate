@@ -205,6 +205,7 @@ type Features struct {
 	AudioRecord   AudioRecordFeature   `json:"audioRecord"`   // native audio device capture (FLAC), OBS-synced + manual
 
 	LibrarySync LibrarySyncFeature `json:"librarySync"` // cross-DJ-software library sync (hub-merge → targets)
+	TagWrite    TagWriteFeature    `json:"tagWrite"`    // which analysis fields may be written into audio file tags
 
 	AppGroups AppGroupsFeature `json:"appGroups"` // relaunch named app sets after a crash (App Groups tab)
 
@@ -1244,6 +1245,14 @@ type AppRef struct {
 	MatchName string   `json:"matchName,omitempty"`
 	DelayMs   int      `json:"delayMs,omitempty"`
 	Elevated  bool     `json:"elevated,omitempty"`
+}
+
+// TagWriteFeature gates what tag sync / tag repair / range enforcement may write into audio
+// files. BPM is OFF by default: Traktor re-reads the tags of a file newer than its collection
+// entry and takes the BPM from the tag, so a BPM tag write re-enters the collection as an
+// integer - the 2026-06 off-by-one grid incident. Key, genre, comment, rating are unaffected.
+type TagWriteFeature struct {
+	BPM bool `json:"bpm,omitempty"` // write BPM/TBPM tags (opt-in)
 }
 
 // LibrarySyncFeature configures cross-DJ-software library sync. rave-mate's merged music.db
