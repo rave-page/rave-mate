@@ -9,8 +9,10 @@ package tagwrite
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -32,6 +34,54 @@ const (
 // Tags maps a canonical field → value. Presence means "set this field"; "" means "clear it".
 // A field absent from the map is left untouched.
 type Tags map[string]string
+
+// FormatBPMTag renders a BPM for a file tag: the integer when within 0.05 of one
+// (Traktor/Beatport convention; ID3 TBPM is integer-only and Traktor truncates
+// "173.999512" to 173 on re-read - the 2026-06 grid-poisoning incident), else two
+// decimals. "" for a non-positive value.
+func FormatBPMTag(bpm float64) string {
+	if bpm <= 0 || math.IsNaN(bpm) || math.IsInf(bpm, 0) {
+		return ""
+	}
+	if r := math.RoundToEven(bpm); math.Abs(bpm-r) < 0.05 {
+		return strconv.Itoa(int(r))
+	}
+	return strconv.FormatFloat(bpm, 'f', 2, 64)
+}
+
+// BPMTagFor is the exact string a write to path will store: FormatBPMTag, except MP3
+// where TBPM is always the rounded integer.
+func BPMTagFor(path string, bpm float64) string {
+	s := FormatBPMTag(bpm)
+	if s != "" && strings.EqualFold(filepath.Ext(path), ".mp3") {
+		return strconv.Itoa(int(math.RoundToEven(bpm)))
+	}
+	return s
+}
+
+// BPMTagEqual reports whether two BPM tag strings mean the same tempo (numeric compare,
+// so "174" == "174.000732"); non-numeric values compare as plain strings.
+func BPMTagEqual(a, b string) bool {
+	fa, ea := strconv.ParseFloat(strings.TrimSpace(a), 64)
+	fb, eb := strconv.ParseFloat(strings.TrimSpace(b), 64)
+	if ea != nil || eb != nil {
+		return a == b
+	}
+	return math.Abs(fa-fb) < 0.005
+}
+
+// safeBPM normalizes a caller-supplied BPM string before it hits a file (writers call it
+// so every path - tagsync, tagfix, range enforcement - is integer-safe).
+func safeBPM(path, v string) (string, error) {
+	if v == "" {
+		return "", nil
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+	if err != nil {
+		return "", fmt.Errorf("tagwrite: bpm %q not numeric", v)
+	}
+	return BPMTagFor(path, f), nil
+}
 
 // Supported reports whether tag-writing is implemented for the file's format (mp3/flac).
 func Supported(path string) bool {

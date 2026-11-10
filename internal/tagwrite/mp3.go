@@ -124,6 +124,13 @@ func writeMP3(path string, vals Tags) error {
 			setDropsTXXX(tag, v)
 			continue
 		}
+		if field == FieldBPM { // ID3 TBPM is integer-only: never a decimal string
+			var err error
+			if v, err = safeBPM(path, v); err != nil {
+				_ = tag.Close()
+				return err
+			}
+		}
 		id, ok := mp3Frame[field]
 		if !ok {
 			continue

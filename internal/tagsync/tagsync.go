@@ -32,8 +32,8 @@ var ErrUnsupported = errors.New("tag write unsupported for this format")
 // stay untouched (those flow only through tagfix / an explicit editor).
 func desiredFromTrack(t musiclib.Track) tagwrite.Tags {
 	d := tagwrite.Tags{}
-	if t.BPM > 0 {
-		d[tagwrite.FieldBPM] = strconv.FormatFloat(t.BPM, 'f', -1, 64)
+	if s := tagwrite.BPMTagFor(t.Path, t.BPM); s != "" {
+		d[tagwrite.FieldBPM] = s // integer-safe: never float grid noise into an integer-parsed tag
 	}
 	if t.Key != "" {
 		d[tagwrite.FieldKey] = t.Key
@@ -87,7 +87,11 @@ func ApplyTags(db *libdb.DB, t musiclib.Track, desired tagwrite.Tags) (tagwrite.
 	changed := false
 	for f := range desired {
 		before[f] = cur[f]
-		if cur[f] != desired[f] {
+		same := cur[f] == desired[f]
+		if f == tagwrite.FieldBPM && cur[f] != "" && desired[f] != "" {
+			same = tagwrite.BPMTagEqual(cur[f], desired[f]) // "174" already means 173.999512
+		}
+		if !same {
 			changed = true
 		}
 	}

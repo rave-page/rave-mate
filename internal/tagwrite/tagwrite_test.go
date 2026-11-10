@@ -54,6 +54,50 @@ func roundTrip(t *testing.T, path string) {
 	}
 }
 
+// TestFormatBPMTag: integer within 0.05 of one (Traktor float noise, ID3 integer TBPM),
+// else two decimals; numeric equality ignores the noise.
+func TestFormatBPMTag(t *testing.T) {
+	cases := map[float64]string{
+		173.999512: "174", 174.000732: "174", 87: "87", 172.5: "172.50", 140.333: "140.33",
+		0: "", -1: "", 174.04: "174", 174.06: "174.06",
+	}
+	for in, want := range cases {
+		if got := FormatBPMTag(in); got != want {
+			t.Errorf("FormatBPMTag(%v) = %q, want %q", in, got, want)
+		}
+	}
+	if got := BPMTagFor("x.mp3", 172.5); got != "172" {
+		t.Errorf("BPMTagFor mp3 172.5 = %q, want 172 (integer TBPM)", got)
+	}
+	if got := BPMTagFor("x.flac", 172.5); got != "172.50" {
+		t.Errorf("BPMTagFor flac 172.5 = %q, want 172.50", got)
+	}
+	eq := [][3]any{{"174", "174.000732", true}, {"174", "173.999512", true}, {"174", "173", false}, {"abc", "abc", true}, {"abc", "174", false}}
+	for _, c := range eq {
+		if got := BPMTagEqual(c[0].(string), c[1].(string)); got != c[2].(bool) {
+			t.Errorf("BPMTagEqual(%q,%q) = %v", c[0], c[1], got)
+		}
+	}
+}
+
+// TestMP3BPMIntegerSafe: a float BPM string lands as the rounded integer in TBPM; a
+// non-numeric one is refused before the file is touched.
+func TestMP3BPMIntegerSafe(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "track.mp3")
+	if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(path, Tags{FieldBPM: "173.999512"}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if got, _ := Read(path); got[FieldBPM] != "174" {
+		t.Fatalf("TBPM = %q, want 174", got[FieldBPM])
+	}
+	if err := Write(path, Tags{FieldBPM: "fast"}); err == nil {
+		t.Fatal("non-numeric bpm accepted")
+	}
+}
+
 func TestMP3RoundTrip(t *testing.T) {
 	// id3v2 creates a valid tag on an empty file - no audio needed for tag round-trip.
 	path := filepath.Join(t.TempDir(), "track.mp3")
@@ -73,6 +117,15 @@ func TestFLACRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	roundTrip(t, path)
+	// integer-safe BPM: float noise → integer, a real fraction keeps two decimals
+	for in, want := range map[string]string{"173.999512": "174", "172.5": "172.50"} {
+		if err := Write(path, Tags{FieldBPM: in}); err != nil {
+			t.Fatalf("write bpm %s: %v", in, err)
+		}
+		if got, _ := Read(path); got[FieldBPM] != want {
+			t.Errorf("flac BPM %s → %q, want %q", in, got[FieldBPM], want)
+		}
+	}
 }
 
 // TestFLACRatingScale: canonical 0-255 ↔ on-disk 0-100, and a raw 0-255 RATING (already

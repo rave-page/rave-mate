@@ -82,6 +82,12 @@ func writeFLAC(path string, vals Tags) error {
 		idx = -1
 	}
 	for field, v := range vals {
+		if field == FieldBPM {
+			var err error
+			if v, err = safeBPM(path, v); err != nil {
+				return err
+			}
+		}
 		if field == FieldRating {
 			out := ""
 			if v != "" {

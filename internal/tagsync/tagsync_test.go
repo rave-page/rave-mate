@@ -159,8 +159,17 @@ func TestApplyNoOpSuppressed(t *testing.T) {
 		t.Fatalf("no-op re-apply added %d rows, want 0", len(second)-len(first))
 	}
 
+	// Float noise around the same tempo is NOT a change (the tag already says 174).
+	tr.BPM = 174.000732
+	if _, err := Apply(db, tr); err != nil {
+		t.Fatalf("apply 2b: %v", err)
+	}
+	if rows, _ := db.ChangesForTrack(hash); len(rows) != len(first) {
+		t.Fatalf("float-noise re-apply added %d rows, want 0", len(rows)-len(first))
+	}
+
 	// A genuine change still logs (one new bpm row).
-	tr.BPM = 174.0
+	tr.BPM = 175.0
 	if _, err := Apply(db, tr); err != nil {
 		t.Fatalf("apply 3: %v", err)
 	}
@@ -171,8 +180,44 @@ func TestApplyNoOpSuppressed(t *testing.T) {
 	if len(third) != len(second)+1 {
 		t.Fatalf("genuine change added %d rows, want 1", len(third)-len(second))
 	}
-	if third[0].Field != "bpm" || third[0].Origin != "tagsync" || third[0].NewValue != `"174"` {
-		t.Fatalf("newest change = %+v, want bpm/tagsync/\"174\"", third[0])
+	if third[0].Field != "bpm" || third[0].Origin != "tagsync" || third[0].NewValue != `"175"` {
+		t.Fatalf("newest change = %+v, want bpm/tagsync/\"175\"", third[0])
+	}
+}
+
+// TestApplyBPMFloatNoiseIsNoOp: a file already tagged with the integer tempo must not be
+// rewritten for a track carrying float grid noise (no write, no tag_edits row, no change_log).
+// This is the 2026-06-17 incident: 1,355 clean "174" tags became "173.999512".
+func TestApplyBPMFloatNoiseIsNoOp(t *testing.T) {
+	db, err := libdb.Open(filepath.Join(t.TempDir(), "lib.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	mp3 := filepath.Join(t.TempDir(), "clean.mp3")
+	if err := os.WriteFile(mp3, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := tagwrite.Write(mp3, tagwrite.Tags{tagwrite.FieldBPM: "174"}); err != nil {
+		t.Fatal(err)
+	}
+	st0, _ := os.Stat(mp3)
+	tr := musiclib.Track{Path: mp3, Artist: "A", Title: "T", DurationSec: 300, BPM: 173.999512}
+	if _, err := Apply(db, tr); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	st1, _ := os.Stat(mp3)
+	if st0.ModTime() != st1.ModTime() || st0.Size() != st1.Size() {
+		t.Fatal("file rewritten for float noise")
+	}
+	if _, ok, _ := db.LatestTagEdit(mp3); ok {
+		t.Fatal("tag_edits row recorded for a no-op")
+	}
+	if rows, _ := db.ChangesForTrack(libdb.TrackHash(tr.Artist, tr.Title, tr.DurationSec)); len(rows) != 0 {
+		t.Fatalf("change_log rows for a no-op: %+v", rows)
+	}
+	if got, _ := tagwrite.Read(mp3); got[tagwrite.FieldBPM] != "174" {
+		t.Fatalf("tag = %q, want 174", got[tagwrite.FieldBPM])
 	}
 }
 
