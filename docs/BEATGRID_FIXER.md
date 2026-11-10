@@ -102,6 +102,17 @@ tracks from `MANUAL_GRIDDING_PREP`, verify them, then train (20+ recommended).
 
 - Detection results live in `gridfix/analysis_cache.json` in the config dir (keyed by
   file path+size+mtime; capped at 100k entries).
+- **Verified pins are snapshots.** A grid-verified mark stores the BPM + marker at
+  marking time. A run protects the track only while the collection still has that grid
+  (±0.05 BPM, ±20 ms). Once the DJ software re-analyzes or you re-grid it, the pin is
+  *stale*: the track is planned normally, its result says `verified pin stale (…)`, and
+  applying a fix drops the pin. Re-verify when you have confirmed the new grid.
+- **File BPM tags are integer-safe.** Every tag write (library sync, tag write, BPM
+  range enforcement) renders the BPM as an integer when within 0.05 of one, else two
+  decimals; MP3 `TBPM` is always the rounded integer (ID3 defines it integer-only). A
+  tag that already means the same tempo is never rewritten. Float grid values
+  (`173.999512`) written into tags got truncated to `173` by Traktor on re-read and
+  poisoned grids off by one (2026-06/09 incident) - hence the rule.
 - The write path normalizes XML self-closing tags (`<TEMPO/>` → `<TEMPO></TEMPO>`);
   Traktor reads both and re-canonicalizes the file on its next save.
 - **Serato** grid writeback is supported: Serato stores beatgrids in the audio files

@@ -2,6 +2,7 @@ package gridfix
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,6 +18,21 @@ type VerifiedGrid struct {
 	BPM        float64 `json:"bpm"`
 	StartMs    float64 `json:"startMs"` // grid marker position
 	VerifiedAt string  `json:"verifiedAt"`
+}
+
+// Pin tolerances: looser than float noise (173.999512 vs 174.000000) and NML rounding,
+// tighter than any correction a plan would apply.
+const (
+	pinBPMTol     = 0.05 // BPM
+	pinStartMsTol = 20.0 // grid marker (ms)
+)
+
+// Stale reports whether the pin no longer describes the collection's grid (bpm, startMs):
+// the DJ software re-analyzed or the user re-gridded since marking. A stale pin must not
+// protect the current grid - it vouches for one that no longer exists (2026-10-30: Traktor
+// re-analyzed 1.5k pinned-or-fixed tracks; pins still said 173 where the collection said 174).
+func (v VerifiedGrid) Stale(bpm, startMs float64) bool {
+	return math.Abs(v.BPM-bpm) > pinBPMTol || math.Abs(v.StartMs-startMs) > pinStartMsTol
 }
 
 // VerifiedStore persists verified-grid marks as JSON under the gridfix data dir.
@@ -70,6 +86,14 @@ func (s *VerifiedStore) Has(path string) bool {
 	defer s.mu.Unlock()
 	_, ok := s.m[path]
 	return ok
+}
+
+// Pinned returns the mark for path (ok=false when not verified).
+func (s *VerifiedStore) Pinned(path string) (VerifiedGrid, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.m[path]
+	return v, ok
 }
 
 // All returns the verified grids sorted by path.

@@ -54,6 +54,42 @@ func TestVerifiedStoreRoundTrip(t *testing.T) {
 	}
 }
 
+// TestVerifiedGridStale: a pin matches the collection only within float noise / marker jitter;
+// a re-analyzed BPM or moved marker makes it stale (must not protect the new grid).
+func TestVerifiedGridStale(t *testing.T) {
+	pin := VerifiedGrid{Path: "x.flac", BPM: 173.999512, StartMs: -38.12}
+	cases := []struct {
+		name  string
+		bpm   float64
+		start float64
+		stale bool
+	}{
+		{"exact", 173.999512, -38.12, false},
+		{"float noise + jitter", 174.0, -30, false},
+		{"re-analyzed off by one", 173.0, -38.12, true},
+		{"octave", 87.0, -38.12, true},
+		{"marker moved a beat", 174.0, 306.7, true},
+	}
+	for _, c := range cases {
+		if got := pin.Stale(c.bpm, c.start); got != c.stale {
+			t.Errorf("%s: Stale(%v, %v) = %v, want %v", c.name, c.bpm, c.start, got, c.stale)
+		}
+	}
+	s, err := OpenVerifiedStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Pinned("x.flac"); ok {
+		t.Fatal("unmarked path reported pinned")
+	}
+	if err := s.Mark("x.flac", 174, -38); err != nil {
+		t.Fatal(err)
+	}
+	if p, ok := s.Pinned("x.flac"); !ok || p.BPM != 174 || p.StartMs != -38 {
+		t.Fatalf("Pinned = %+v, %v", p, ok)
+	}
+}
+
 func TestVerifiedStoreCorruptFileErrors(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "verified.json"), []byte("{nope"), 0o600); err != nil {

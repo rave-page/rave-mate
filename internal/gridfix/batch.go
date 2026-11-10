@@ -19,6 +19,7 @@ type BatchTrack struct {
 	MultiMarker bool     // >1 grid markers: manually gridded, never touch
 	Locked      bool     // grid lock flag: never touch, never analyze
 	Verified    bool     // user-confirmed grid: always skip (never re-touch), even in force mode
+	StalePin    string   // non-empty: a verified pin exists but no longer matches the collection's grid - planned normally, detail prefixed
 	RangeLo     float64  // target tempo band (0 = none): prior + octave choice fold into it
 	RangeHi     float64
 }
@@ -168,6 +169,10 @@ func (b *Batch) Run(ctx context.Context, tracks []BatchTrack, onProgress func(Ba
 				in.OldStartS = &s
 			}
 			res.Plan = PlanFix(*fit, det.Downbeats, in)
+		}
+		if t.StalePin != "" && res.Err == "" {
+			// the pin vouched for a grid the collection no longer has: say so next to the plan
+			res.Plan.Detail = t.StalePin + " · " + res.Plan.Detail
 		}
 		res.ElapsedMS = time.Since(t0).Milliseconds()
 		results = append(results, res)

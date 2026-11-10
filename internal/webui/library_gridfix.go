@@ -518,8 +518,10 @@ func (u *UI) gfRunTracksHook(tracks []musiclib.Track, scope string, force bool, 
 	bts := make([]gridfix.BatchTrack, 0, len(tracks))
 	for _, t := range tracks {
 		bt := gridfix.BatchTrack{Path: t.Path, Title: trackTitle(t), OldBPM: t.BPM,
-			MultiMarker: len(t.Beatgrid) > 1,
-			Verified:    vs != nil && vs.Has(t.Path)}
+			MultiMarker: len(t.Beatgrid) > 1}
+		if vs != nil {
+			bt.Verified, bt.StalePin = gfPinState(vs, t)
+		}
 		if r, ok := rules.Resolve(t.Path, t.Genre); ok {
 			bt.RangeLo, bt.RangeHi = r.Min, r.Max
 		}
@@ -791,6 +793,26 @@ func (u *UI) gfCalibrate() {
 	})
 }
 
+// gfPinState resolves a track's verified pin against the imported collection: verified only
+// while the pin still matches the current BPM + single grid marker; otherwise the pin is stale
+// (DJ software re-analyzed / user re-gridded) and must not protect the grid - the track is
+// planned normally and the result says why.
+func gfPinState(vs *gridfix.VerifiedStore, t musiclib.Track) (verified bool, stale string) {
+	pin, ok := vs.Pinned(t.Path)
+	if !ok {
+		return false, ""
+	}
+	if len(t.Beatgrid) != 1 {
+		return false, fmt.Sprintf("verified pin stale (pinned %.2f BPM @ %.0fms, collection has %d grid markers) - re-verify",
+			pin.BPM, pin.StartMs, len(t.Beatgrid))
+	}
+	if pin.Stale(t.BPM, t.Beatgrid[0].PositionMs) {
+		return false, fmt.Sprintf("verified pin stale (pinned %.2f BPM @ %.0fms, collection %.2f @ %.0fms) - re-verify",
+			pin.BPM, pin.StartMs, t.BPM, t.Beatgrid[0].PositionMs)
+	}
+	return true, ""
+}
+
 // gfTarget is one detected DJ-software write destination (cuewriteback.Target, webui view).
 type gfTarget struct {
 	key   string // "traktor" | "rekordbox" | "virtualdj" | "serato"
@@ -866,6 +888,15 @@ func (u *UI) gfApply(sw string) {
 		}
 		g.applied[sw] = res.Updated
 		g.mu.Unlock()
+		// a FIX only reaches a pinned track when its pin was stale; the applied grid is a new
+		// one the user has not confirmed - drop the pin so it cannot shadow the next run
+		if vs := u.gfVerified(); vs != nil {
+			for _, p := range fixedPaths {
+				if vs.Has(p) {
+					_ = vs.Unmark(p) // persist failure is non-fatal: the staleness check still applies
+				}
+			}
+		}
 		u.toast(i18n.T("library.gf.appliedToast", i18n.A{"n": fmt.Sprint(res.Updated)}))
 		switch sw {
 		case "traktor", "rekordbox":

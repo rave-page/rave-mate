@@ -290,6 +290,32 @@ func TestBatchForceOverridesSkipsAndCache(t *testing.T) {
 	}
 }
 
+// TestBatchStalePinPlanned: a track whose verified pin no longer matches the collection is NOT
+// protected - it is analyzed and planned like any other track, and the result names the stale
+// pin in front of the plan detail so the user knows to re-verify.
+func TestBatchStalePinPlanned(t *testing.T) {
+	dir := t.TempDir()
+	stale := writeAudioStub(t, dir, "stale.mp3", "s")
+	det := synthDet(128, 0.25, 0.5) // 120 BPM; marker at 290ms → 40ms off → FIX
+	stub := &stubAnalyzer{det: map[string]*Detection{stale: det}}
+	cache, err := OpenDetectionCache(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	note := "verified pin stale (pinned 121.00 BPM @ 290ms, collection 120.00 @ 290ms) - re-verify"
+	r := NewBatch(stub, cache, BatchOptions{}).Run(context.Background(),
+		[]BatchTrack{{Path: stale, Title: "Stale", OldBPM: 120, OldStartMs: ptr(290), StalePin: note}}, nil)
+	if stub.callCount() != 1 {
+		t.Fatalf("stale pin must be analyzed: calls=%d", stub.callCount())
+	}
+	if r[0].Plan.Status != StatusFix {
+		t.Fatalf("stale pin not planned: %+v", r[0].Plan)
+	}
+	if want := note + " · "; len(r[0].Plan.Detail) <= len(want) || r[0].Plan.Detail[:len(want)] != want {
+		t.Fatalf("detail lacks stale-pin prefix: %q", r[0].Plan.Detail)
+	}
+}
+
 // TestBatchVerifiedContradictionSurfaced: a Verified track whose checkpoint-matched cache entry
 // confidently fits a BPM that contradicts the verified value must surface as a SKIP naming the
 // contradiction (not the silent "protected" skip), with ZERO new analysis. A cache entry that
