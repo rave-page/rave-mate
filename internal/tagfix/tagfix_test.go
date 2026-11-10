@@ -85,9 +85,10 @@ func TestScanMissingMismatchNoBasics(t *testing.T) {
 	if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// File: bpm 150.2, key "8a", artist set; no title/genre.
+	// File: bpm 152 (TBPM is integer-only, so a real tempo mismatch), key "8a", artist set;
+	// no title/genre.
 	if err := tagwrite.Write(path, tagwrite.Tags{
-		tagwrite.FieldBPM: "150.2", tagwrite.FieldKey: "8a", tagwrite.FieldArtist: "Someone",
+		tagwrite.FieldBPM: "152", tagwrite.FieldKey: "8a", tagwrite.FieldArtist: "Someone",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +121,7 @@ func TestScanMissingMismatchNoBasics(t *testing.T) {
 
 	// BPM within 0.05 is NOT a mismatch.
 	tr2 := tr
-	tr2.BPM = 150.16
+	tr2.BPM = 152.04
 	ps2, _ := Scan([]musiclib.Track{tr2}, Options{Kinds: []Kind{KindMismatch}})
 	if len(ps2) != 0 {
 		t.Errorf("delta 0.04 flagged: %+v", ps2)

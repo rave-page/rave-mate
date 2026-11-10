@@ -167,7 +167,7 @@ func scanMissing(tr musiclib.Track, cur tagwrite.Tags) []Problem {
 		})
 	}
 	if tr.BPM > 0 {
-		add(tagwrite.FieldBPM, strconv.FormatFloat(tr.BPM, 'f', -1, 64))
+		add(tagwrite.FieldBPM, tagwrite.BPMTagFor(tr.Path, tr.BPM)) // propose what a write stores
 	}
 	add(tagwrite.FieldKey, tr.Key)
 	add(tagwrite.FieldGenre, tr.Genre)
@@ -183,7 +183,7 @@ func scanMismatch(tr musiclib.Track, cur tagwrite.Tags) []Problem {
 			out = append(out, Problem{
 				Path: tr.Path, Field: tagwrite.FieldBPM, Kind: KindMismatch,
 				Detail:  fmt.Sprintf("file bpm %s vs library %.2f", cur[tagwrite.FieldBPM], tr.BPM),
-				Current: cur[tagwrite.FieldBPM], Proposed: strconv.FormatFloat(tr.BPM, 'f', -1, 64),
+				Current: cur[tagwrite.FieldBPM], Proposed: tagwrite.BPMTagFor(tr.Path, tr.BPM),
 			})
 		}
 	}
