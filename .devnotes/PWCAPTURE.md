@@ -79,6 +79,22 @@ RGBA. EGL is initialised surfaceless (`EGL_PLATFORM_SURFACELESS_MESA`) on GLES2,
 the shim can't import a dmabuf it counts `dmabuf_skipped` + `dropped` (surfaced in Close logs), so a
 dmabuf-only producer is diagnosable rather than silent.
 
+## End-to-end (single box) — VERIFIED (sus, 2026-11-11)
+
+`TestCaptureEncodeE2E` drives the full sender data path on one box: the gst producer node ->
+`pwcapture.Source` -> `mediapipe.Factories` VA-API encode child -> Annex-B H.264. Result at
+1920x1080@60: **180 H.264 frames in 3.08s (~58.4 fps), 2 keyframes** (GOP 120 = 2s), ~53 KB/frame
+(~9.6 MB total). CPU during the run: `pwcap.test` ~35-41%, `ffmpeg` (h264_vaapi child) ~58-63% of
+one core (the encode is on the GPU; this CPU is RGBA capture + swscale NV12 + hwupload + pipes). RSS
+~170 MB (Go test binary) / ~126 MB (ffmpeg). 0 separate config AUs is expected - `dump_extra=freq=
+keyframe` folds SPS/PPS into each keyframe AU. The network transport past the encoder is
+codec-agnostic and already P4-shipped, owned by the transport agent; not re-exercised here.
+
+Parser bug found + fixed during E2E: pw-dump `props` mix value types (numbers like `client.id`,
+booleans like `node.async`), so the original `map[string]string` unmarshal failed on the whole
+document and discovery found nothing. Props are now `map[string]json.RawMessage` + `propStr`; the
+unit-test sample carries mixed types to lock the regression.
+
 ## Follow-ups
 
 1. **Verify DMA-BUF against the real VRChat node** when it's running (pw-dump its EnumFormat +
