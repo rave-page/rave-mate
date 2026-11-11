@@ -1,13 +1,13 @@
 {
-  "version": "nightly-4ed59bb",
-  "build": 408,
-  "commit": "4ed59bb",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-408-20261111-4ed59bb.exe",
-  "sha256": "d56b3207f4997250637cc60f5c299b72158cdb632c5462bbb6fbb7f217c4487a",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-408-20261111-4ed59bb.exe",
-  "installer_sha256": "2679e5daebad325e322c97c37dc12c129aaf6247a4b768c628d30980c7ef1de1",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-408-20261111-4ed59bb",
-  "linux_sha256": "908ae5cff54230a05db29fab58e93eec90dd52a9c6c1dafcbcf29e8ca71cdd24",
+  "version": "nightly-4b6b2d3",
+  "build": 409,
+  "commit": "4b6b2d3",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-409-20261111-4b6b2d3.exe",
+  "sha256": "209852edf807b1a38e66265bb6d2bf2eadc49ff9ac9d8c4c19d51a679049eb74",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-409-20261111-4b6b2d3.exe",
+  "installer_sha256": "9c1205d279fa2db715f973c9d205de7db468edebda0f15c7904468dfef842abe",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-409-20261111-4b6b2d3",
+  "linux_sha256": "1954862ea9c31f46fc96980c3bf61c4b36b350037adaaee6de4bedbcf8e7cc18",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-11-11T21:53:58Z",
-  "notes": "Merge feat/vram-budget: VRAM admission budget + throughput-aware planner"
+  "released": "2026-11-11T22:30:35Z",
+  "notes": "Merge feat/linux-sender: Linux build box, VA-API encode, child isolation, PipeWire capture (SHM)"
 }
