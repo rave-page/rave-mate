@@ -32,5 +32,5 @@ func Hide(c *exec.Cmd) {
 
 // LowPriority / BelowNormalPriority are no-ops on Linux: SysProcAttr has no pre-start niceness and
 // the real CPU discipline is applied after start by AssignToJobClass (setpriority on the group).
-func LowPriority(*exec.Cmd)       {}
+func LowPriority(*exec.Cmd)         {}
 func BelowNormalPriority(*exec.Cmd) {}
