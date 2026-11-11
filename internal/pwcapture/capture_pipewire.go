@@ -43,7 +43,7 @@ func openCapture(_ context.Context, log *logbus.Bus, nodeName string) (medialink
 // recycled on the next Next (Release is nil - GC owns the buffer, the consumer must not retain it,
 // which the encode feeder doesn't).
 type pwSource struct {
-	h    *C.rpw_capture
+	h    *C.struct_rpw_capture
 	log  *logbus.Bus
 	node string
 

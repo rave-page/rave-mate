@@ -3,22 +3,48 @@
 /* shim.c - PipeWire video capture via runtime dlopen (design D8: no go.mod dep, degrade to no-op
  * when libpipewire-0.3 is absent). One capture = one pw_thread_loop + one input pw_stream connected
  * by node name (auto-reconnect). Frames land in a bounded single-slot (drop-oldest + counter); the
- * Go side pulls the latest via rpw_wait_frame. SHM (MemPtr/MemFd, mapped by PipeWire) is converted
- * to RGBA here; DMA-BUF buffers are counted + skipped in this file (EGL import lands in shim_egl.c).
+ * Go side pulls the latest via rpw_wait_frame.
  *
- * Headers are compiled in (SPA POD builders/parsers are header-only inline); only the pw_* symbols
- * are dlopen'd, so nothing is load-time linked against libpipewire. */
+ * Two frame sources:
+ *   - SHM (MemPtr/MemFd, mapped by PipeWire): converted to RGBA on the loop thread.
+ *   - DMA-BUF (Spout2PW/libfunnel - dmabuf ONLY, AMD tiled modifiers): imported via EGL
+ *     (EGL_EXT_image_dma_buf_import[_modifiers]) on the GPU that produced it, FBO + glReadPixels to
+ *     RGBA. Modifiers are advertised from eglQueryDmaBufModifiersEXT; the PipeWire fixate/renegotiate
+ *     dance is handled in on_param_changed. EGL/GLES/GBM are dlopen'd too, so no EGL => SHM-only.
+ *
+ * SPA POD builders/parsers are header-only inline; only the pw_, egl, gl and gbm symbols are
+ * dlopen'd, so nothing is load-time linked. */
 #include "shim.h"
 
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <pipewire/pipewire.h>
 #include <spa/param/video/format-utils.h>
 #include <spa/param/video/raw.h>
+
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#include <gbm.h>
+#include <libdrm/drm_fourcc.h>
+
+#define RPW_MAX_MODS 64
+#define RPW_MAX_PLANES 4
+
+static int egl_dbg = 0;
+#define DBG(...)                            \
+	do {                                    \
+		if (egl_dbg)                        \
+			fprintf(stderr, __VA_ARGS__);   \
+	} while (0)
 
 /* ---- dlopen'd libpipewire entry points ---------------------------------------------------- */
 struct pw_api {
@@ -44,16 +70,12 @@ struct pw_api {
 	int (*stream_queue)(struct pw_stream *, struct pw_buffer *);
 	int (*stream_update_params)(struct pw_stream *, const struct spa_pod **, uint32_t);
 };
-
 static struct pw_api PW;
-static int pw_loaded = -1; /* -1 untried, 0 fail, 1 ok */
+static int pw_loaded = -1;
 static pthread_mutex_t load_mu = PTHREAD_MUTEX_INITIALIZER;
 
-static int resolve_all(void *h) {
-	struct {
-		const char *name;
-		void **slot;
-	} tbl[] = {
+static int resolve_pw(void *h) {
+	struct { const char *n; void **s; } t[] = {
 		{"pw_init", (void **)&PW.init},
 		{"pw_thread_loop_new", (void **)&PW.tl_new},
 		{"pw_thread_loop_destroy", (void **)&PW.tl_destroy},
@@ -76,11 +98,11 @@ static int resolve_all(void *h) {
 		{"pw_stream_queue_buffer", (void **)&PW.stream_queue},
 		{"pw_stream_update_params", (void **)&PW.stream_update_params},
 	};
-	for (size_t i = 0; i < sizeof(tbl) / sizeof(tbl[0]); i++) {
-		void *s = dlsym(h, tbl[i].name);
+	for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
+		void *s = dlsym(h, t[i].n);
 		if (!s)
 			return 0;
-		*tbl[i].slot = s;
+		*t[i].s = s;
 	}
 	return 1;
 }
@@ -88,8 +110,9 @@ static int resolve_all(void *h) {
 int rpw_available(void) {
 	pthread_mutex_lock(&load_mu);
 	if (pw_loaded == -1) {
+		egl_dbg = getenv("RPW_EGL_DEBUG") != NULL;
 		void *h = dlopen("libpipewire-0.3.so.0", RTLD_NOW | RTLD_GLOBAL);
-		if (h && resolve_all(h)) {
+		if (h && resolve_pw(h)) {
 			int argc = 0;
 			PW.init(&argc, NULL);
 			pw_loaded = 1;
@@ -101,6 +124,114 @@ int rpw_available(void) {
 	return pw_loaded == 1;
 }
 
+/* ---- dlopen'd EGL / GLES / GBM (optional: absent => SHM-only) ------------------------------ */
+struct egl_api {
+	int ok;
+	/* core egl */
+	void *(*GetProcAddress)(const char *);
+	EGLint (*GetError)(void);
+	EGLBoolean (*Initialize)(EGLDisplay, EGLint *, EGLint *);
+	EGLBoolean (*Terminate)(EGLDisplay);
+	EGLBoolean (*BindAPI)(EGLenum);
+	EGLContext (*CreateContext)(EGLDisplay, EGLConfig, EGLContext, const EGLint *);
+	EGLBoolean (*DestroyContext)(EGLDisplay, EGLContext);
+	EGLBoolean (*MakeCurrent)(EGLDisplay, EGLSurface, EGLSurface, EGLContext);
+	/* extensions via GetProcAddress */
+	PFNEGLGETPLATFORMDISPLAYEXTPROC GetPlatformDisplayEXT;
+	PFNEGLCREATEIMAGEKHRPROC CreateImageKHR;
+	PFNEGLDESTROYIMAGEKHRPROC DestroyImageKHR;
+	PFNEGLQUERYDMABUFMODIFIERSEXTPROC QueryDmaBufModifiersEXT;
+	PFNGLEGLIMAGETARGETTEXTURE2DOESPROC ImageTargetTexture2DOES;
+	/* gles core */
+	void (*GenTextures)(GLsizei, GLuint *);
+	void (*BindTexture)(GLenum, GLuint);
+	void (*DeleteTextures)(GLsizei, const GLuint *);
+	void (*TexParameteri)(GLenum, GLenum, GLint);
+	void (*GenFramebuffers)(GLsizei, GLuint *);
+	void (*BindFramebuffer)(GLenum, GLuint);
+	void (*DeleteFramebuffers)(GLsizei, const GLuint *);
+	void (*FramebufferTexture2D)(GLenum, GLenum, GLenum, GLuint, GLint);
+	GLenum (*CheckFramebufferStatus)(GLenum);
+	void (*ReadPixels)(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void *);
+	void (*Finish)(void);
+	void (*PixelStorei)(GLenum, GLint);
+	GLenum (*GlGetError)(void);
+	/* gbm */
+	struct gbm_device *(*gbm_create_device)(int);
+	void (*gbm_device_destroy)(struct gbm_device *);
+};
+static struct egl_api E;
+static int egl_loaded = -1;
+
+static int egl_load(void) {
+	if (egl_loaded != -1)
+		return egl_loaded;
+	egl_loaded = 0;
+	void *le = dlopen("libEGL.so.1", RTLD_NOW | RTLD_GLOBAL);
+	void *lg = dlopen("libGLESv2.so.2", RTLD_NOW | RTLD_GLOBAL);
+	void *lb = dlopen("libgbm.so.1", RTLD_NOW | RTLD_GLOBAL);
+	if (!le || !lg || !lb) {
+		DBG("egl_load: dlopen failed (egl=%p gles=%p gbm=%p)\n", le, lg, lb);
+		return 0;
+	}
+	E.GetProcAddress = dlsym(le, "eglGetProcAddress");
+	E.GetError = dlsym(le, "eglGetError");
+	E.Initialize = dlsym(le, "eglInitialize");
+	E.Terminate = dlsym(le, "eglTerminate");
+	E.BindAPI = dlsym(le, "eglBindAPI");
+	E.CreateContext = dlsym(le, "eglCreateContext");
+	E.DestroyContext = dlsym(le, "eglDestroyContext");
+	E.MakeCurrent = dlsym(le, "eglMakeCurrent");
+	E.GenTextures = dlsym(lg, "glGenTextures");
+	E.BindTexture = dlsym(lg, "glBindTexture");
+	E.DeleteTextures = dlsym(lg, "glDeleteTextures");
+	E.TexParameteri = dlsym(lg, "glTexParameteri");
+	E.GenFramebuffers = dlsym(lg, "glGenFramebuffers");
+	E.BindFramebuffer = dlsym(lg, "glBindFramebuffer");
+	E.DeleteFramebuffers = dlsym(lg, "glDeleteFramebuffers");
+	E.FramebufferTexture2D = dlsym(lg, "glFramebufferTexture2D");
+	E.CheckFramebufferStatus = dlsym(lg, "glCheckFramebufferStatus");
+	E.ReadPixels = dlsym(lg, "glReadPixels");
+	E.Finish = dlsym(lg, "glFinish");
+	E.PixelStorei = dlsym(lg, "glPixelStorei");
+	E.GlGetError = dlsym(lg, "glGetError");
+	E.gbm_create_device = dlsym(lb, "gbm_create_device");
+	E.gbm_device_destroy = dlsym(lb, "gbm_device_destroy");
+	if (!E.GetProcAddress || !E.Initialize || !E.CreateContext || !E.MakeCurrent ||
+	    !E.GenTextures || !E.ReadPixels || !E.gbm_create_device) {
+		DBG("egl_load: core symbol missing\n");
+		return 0;
+	}
+	E.GetPlatformDisplayEXT = (PFNEGLGETPLATFORMDISPLAYEXTPROC)E.GetProcAddress("eglGetPlatformDisplayEXT");
+	E.CreateImageKHR = (PFNEGLCREATEIMAGEKHRPROC)E.GetProcAddress("eglCreateImageKHR");
+	E.DestroyImageKHR = (PFNEGLDESTROYIMAGEKHRPROC)E.GetProcAddress("eglDestroyImageKHR");
+	E.QueryDmaBufModifiersEXT = (PFNEGLQUERYDMABUFMODIFIERSEXTPROC)E.GetProcAddress("eglQueryDmaBufModifiersEXT");
+	E.ImageTargetTexture2DOES = (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)E.GetProcAddress("glEGLImageTargetTexture2DOES");
+	if (!E.GetPlatformDisplayEXT || !E.CreateImageKHR || !E.DestroyImageKHR || !E.ImageTargetTexture2DOES) {
+		DBG("egl_load: dmabuf import extensions missing\n");
+		return 0;
+	}
+	E.ok = 1;
+	egl_loaded = 1;
+	return 1;
+}
+
+/* SPA raw format -> DRM fourcc (byte-order mapped: SPA names are byte order, DRM are LE packed). */
+static uint32_t spa_to_drm_fourcc(enum spa_video_format f) {
+	switch (f) {
+	case SPA_VIDEO_FORMAT_BGRA: return DRM_FORMAT_ARGB8888;
+	case SPA_VIDEO_FORMAT_RGBA: return DRM_FORMAT_ABGR8888;
+	case SPA_VIDEO_FORMAT_BGRx: return DRM_FORMAT_XRGB8888;
+	case SPA_VIDEO_FORMAT_RGBx: return DRM_FORMAT_XBGR8888;
+	default: return 0;
+	}
+}
+
+/* the SPA formats we offer, preference order */
+static const enum spa_video_format OFFER_FORMATS[] = {
+	SPA_VIDEO_FORMAT_BGRA, SPA_VIDEO_FORMAT_RGBA, SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_RGBx};
+#define N_OFFER (sizeof(OFFER_FORMATS) / sizeof(OFFER_FORMATS[0]))
+
 /* ---- capture state -------------------------------------------------------------------------- */
 struct rpw_capture {
 	struct pw_thread_loop *loop;
@@ -111,17 +242,200 @@ struct rpw_capture {
 
 	pthread_mutex_t mu;
 	pthread_cond_t cv;
-	int width, height;      /* negotiated dims */
+	int width, height;
 	enum spa_video_format fmt;
-	unsigned char *slot;    /* latest RGBA frame (width*height*4) */
-	int slot_cap;           /* bytes allocated for slot */
-	int has_frame;          /* slot holds an unconsumed frame */
-	int fatal;              /* stream errored */
-	long dropped;           /* drop-oldest + unsupported-buffer skips */
-	long dmabuf_skipped;    /* frames that were DMA-BUF (SHM path can't read) */
+	uint64_t modifier; /* negotiated dmabuf modifier; DRM_FORMAT_MOD_INVALID = SHM */
+	int is_dmabuf;
+
+	unsigned char *slot;
+	int slot_cap;
+	int has_frame;
+	int fatal;
+	int need_reconnect; /* stream hit ERROR (producer restart) - re-arm the connection */
+	long dropped;
+	long dmabuf_skipped;
+	long reconnects;
+
+	/* EGL (dmabuf import) - display/context built in rpw_start (no current); made current lazily
+	 * on the loop thread in on_process. */
+	int egl_ready;        /* display+context+modifiers queried */
+	int egl_current;      /* made current on the loop thread */
+	int drm_fd;
+	struct gbm_device *gbm;
+	EGLDisplay dpy;
+	EGLContext egl_ctx;
+	GLuint fbo;
+	unsigned char *rbscratch; /* glReadPixels target before vertical flip into slot */
+	int rbscratch_cap;
+	/* EGL-supported modifiers per offered format */
+	uint64_t mods[N_OFFER][RPW_MAX_MODS];
+	int n_mods[N_OFFER];
 };
 
-/* convert one frame to RGBA (Go NRGBA order: R,G,B,A) handling stride + the 4 offered layouts. */
+/* egl_setup_display: open the render node, GBM device, EGL display + GLES context (NOT current),
+ * and query dmabuf modifiers per offered format. Runs on the caller thread in rpw_start. */
+static void egl_setup_display(struct rpw_capture *c, const char *node) {
+	if (!egl_load())
+		return;
+	c->drm_fd = open(node, O_RDWR | O_CLOEXEC);
+	if (c->drm_fd < 0) {
+		DBG("egl: open %s failed\n", node);
+		return;
+	}
+	c->gbm = E.gbm_create_device(c->drm_fd);
+	if (!c->gbm) {
+		DBG("egl: gbm_create_device failed\n");
+		return;
+	}
+	c->dpy = E.GetPlatformDisplayEXT(EGL_PLATFORM_GBM_KHR, c->gbm, NULL);
+	if (c->dpy == EGL_NO_DISPLAY || !E.Initialize(c->dpy, NULL, NULL)) {
+		DBG("egl: display/init failed\n");
+		return;
+	}
+	E.BindAPI(EGL_OPENGL_ES_API);
+	EGLint ctxattr[] = {EGL_CONTEXT_MAJOR_VERSION, 2, EGL_NONE};
+	c->egl_ctx = E.CreateContext(c->dpy, (EGLConfig)0 /*EGL_NO_CONFIG_KHR*/, EGL_NO_CONTEXT, ctxattr);
+	if (c->egl_ctx == EGL_NO_CONTEXT) {
+		DBG("egl: CreateContext failed 0x%x\n", E.GetError());
+		return;
+	}
+	/* modifiers per format */
+	if (E.QueryDmaBufModifiersEXT) {
+		for (size_t i = 0; i < N_OFFER; i++) {
+			uint32_t drm = spa_to_drm_fourcc(OFFER_FORMATS[i]);
+			EGLint num = 0;
+			if (E.QueryDmaBufModifiersEXT(c->dpy, drm, RPW_MAX_MODS, c->mods[i], NULL, &num) && num > 0)
+				c->n_mods[i] = num;
+		}
+	}
+	c->egl_ready = 1;
+	DBG("egl: display ready, mods[BGRA]=%d\n", c->n_mods[0]);
+}
+
+/* egl_make_current binds the context to the CURRENT (loop) thread, once. */
+static int egl_ensure_current(struct rpw_capture *c) {
+	if (c->egl_current)
+		return 1;
+	if (!c->egl_ready)
+		return 0;
+	if (!E.MakeCurrent(c->dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, c->egl_ctx)) {
+		DBG("egl: MakeCurrent failed 0x%x\n", E.GetError());
+		return 0;
+	}
+	E.GenFramebuffers(1, &c->fbo);
+	c->egl_current = 1;
+	return 1;
+}
+
+/* egl_import_frame imports a dmabuf spa_buffer via EGL, reads it back to RGBA (vertically flipped:
+ * GL readback is bottom-up, the dmabuf top row is image-top), stores it in the slot. Loop thread. */
+static int egl_import_frame(struct rpw_capture *c, struct spa_buffer *sb) {
+	if (!egl_ensure_current(c) || c->width <= 0)
+		return 0;
+	uint32_t drm = spa_to_drm_fourcc(c->fmt);
+	if (!drm)
+		return 0;
+
+	EGLint attr[6 + RPW_MAX_PLANES * 10 + 2];
+	int a = 0;
+	attr[a++] = EGL_WIDTH;
+	attr[a++] = c->width;
+	attr[a++] = EGL_HEIGHT;
+	attr[a++] = c->height;
+	attr[a++] = EGL_LINUX_DRM_FOURCC_EXT;
+	attr[a++] = (EGLint)drm;
+	static const EGLint plane_fd[] = {EGL_DMA_BUF_PLANE0_FD_EXT, EGL_DMA_BUF_PLANE1_FD_EXT, EGL_DMA_BUF_PLANE2_FD_EXT, EGL_DMA_BUF_PLANE3_FD_EXT};
+	static const EGLint plane_off[] = {EGL_DMA_BUF_PLANE0_OFFSET_EXT, EGL_DMA_BUF_PLANE1_OFFSET_EXT, EGL_DMA_BUF_PLANE2_OFFSET_EXT, EGL_DMA_BUF_PLANE3_OFFSET_EXT};
+	static const EGLint plane_pitch[] = {EGL_DMA_BUF_PLANE0_PITCH_EXT, EGL_DMA_BUF_PLANE1_PITCH_EXT, EGL_DMA_BUF_PLANE2_PITCH_EXT, EGL_DMA_BUF_PLANE3_PITCH_EXT};
+	static const EGLint plane_ml[] = {EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT};
+	static const EGLint plane_mh[] = {EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT, EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT, EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT};
+	/* Pass every plane the producer gave (a tiled modifier needs its DCC metadata plane to detile).
+	 * Single-plane at 1080p imports fine; 4K DCC comes back multi-plane and mesa rejects it. */
+	uint32_t nplanes = sb->n_datas < RPW_MAX_PLANES ? sb->n_datas : RPW_MAX_PLANES;
+	for (uint32_t p = 0; p < nplanes; p++) {
+		struct spa_data *d = &sb->datas[p];
+		DBG("egl: plane %u fd=%d off=%u stride=%d size=%u\n", p, (int)d->fd,
+			d->chunk ? d->chunk->offset : 0, d->chunk ? d->chunk->stride : 0, d->chunk ? d->chunk->size : 0);
+		attr[a++] = plane_fd[p];
+		attr[a++] = (EGLint)d->fd;
+		attr[a++] = plane_off[p];
+		attr[a++] = (EGLint)(d->chunk ? d->chunk->offset : 0); /* dmabuf plane offset (not mapoffset: that's SHM) */
+		attr[a++] = plane_pitch[p];
+		attr[a++] = (EGLint)(d->chunk ? d->chunk->stride : c->width * 4);
+		if (c->modifier != DRM_FORMAT_MOD_INVALID) {
+			attr[a++] = plane_ml[p];
+			attr[a++] = (EGLint)(c->modifier & 0xffffffff);
+			attr[a++] = plane_mh[p];
+			attr[a++] = (EGLint)(c->modifier >> 32);
+		}
+	}
+	attr[a++] = EGL_NONE;
+
+	EGLImageKHR img = E.CreateImageKHR(c->dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attr);
+	if (img == EGL_NO_IMAGE_KHR) {
+		DBG("egl: CreateImage failed 0x%x (planes=%u mod=0x%llx)\n", E.GetError(), nplanes, (unsigned long long)c->modifier);
+		return 0;
+	}
+	GLuint tex = 0;
+	E.GenTextures(1, &tex);
+	E.BindTexture(GL_TEXTURE_2D, tex);
+	E.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	E.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	E.ImageTargetTexture2DOES(GL_TEXTURE_2D, img);
+	E.BindFramebuffer(GL_FRAMEBUFFER, c->fbo);
+	E.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+
+	int ok = 0;
+	if (E.CheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
+		int need = c->width * c->height * 4;
+		if (need > c->rbscratch_cap) {
+			unsigned char *n = realloc(c->rbscratch, need);
+			if (n) {
+				c->rbscratch = n;
+				c->rbscratch_cap = need;
+			}
+		}
+		if (c->rbscratch_cap >= need) {
+			E.PixelStorei(GL_PACK_ALIGNMENT, 1);
+			E.ReadPixels(0, 0, c->width, c->height, GL_RGBA, GL_UNSIGNED_BYTE, c->rbscratch);
+			E.Finish();
+			ok = 1;
+		}
+	} else {
+		DBG("egl: FBO incomplete\n");
+	}
+	E.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+	E.BindFramebuffer(GL_FRAMEBUFFER, 0);
+	E.DeleteTextures(1, &tex);
+	E.DestroyImageKHR(c->dpy, img);
+	if (!ok)
+		return 0;
+
+	/* flip rows (GL bottom-up -> image top-down) into the slot */
+	pthread_mutex_lock(&c->mu);
+	int need = c->width * c->height * 4;
+	if (need > c->slot_cap) {
+		unsigned char *n = realloc(c->slot, need);
+		if (!n) {
+			c->dropped++;
+			pthread_mutex_unlock(&c->mu);
+			return 0;
+		}
+		c->slot = n;
+		c->slot_cap = need;
+	}
+	int row = c->width * 4;
+	for (int y = 0; y < c->height; y++)
+		memcpy(c->slot + (size_t)y * row, c->rbscratch + (size_t)(c->height - 1 - y) * row, row);
+	if (c->has_frame)
+		c->dropped++;
+	c->has_frame = 1;
+	pthread_cond_signal(&c->cv);
+	pthread_mutex_unlock(&c->mu);
+	return 1;
+}
+
+/* convert one SHM frame to RGBA (Go NRGBA order) handling stride + the 4 layouts. */
 static void to_rgba(unsigned char *dst, const unsigned char *src, int w, int h, int stride, enum spa_video_format f) {
 	int rgb = (f == SPA_VIDEO_FORMAT_RGBA || f == SPA_VIDEO_FORMAT_RGBx);
 	int opaque = (f == SPA_VIDEO_FORMAT_BGRx || f == SPA_VIDEO_FORMAT_RGBx);
@@ -134,7 +448,7 @@ static void to_rgba(unsigned char *dst, const unsigned char *src, int w, int h, 
 				d[0] = c0;
 				d[1] = c1;
 				d[2] = c2;
-			} else { /* BGRA / BGRx */
+			} else {
 				d[0] = c2;
 				d[1] = c1;
 				d[2] = c0;
@@ -146,9 +460,7 @@ static void to_rgba(unsigned char *dst, const unsigned char *src, int w, int h, 
 	}
 }
 
-/* store_frame writes the latest RGBA frame into the bounded slot (drop-oldest). Called on the
- * PipeWire loop thread. */
-static void store_frame(struct rpw_capture *c, const unsigned char *src, int stride) {
+static void store_shm(struct rpw_capture *c, const unsigned char *src, int stride) {
 	pthread_mutex_lock(&c->mu);
 	int need = c->width * c->height * 4;
 	if (need > c->slot_cap) {
@@ -162,96 +474,37 @@ static void store_frame(struct rpw_capture *c, const unsigned char *src, int str
 		c->slot_cap = need;
 	}
 	if (c->has_frame)
-		c->dropped++; /* overwrote an unconsumed frame */
+		c->dropped++;
 	to_rgba(c->slot, src, c->width, c->height, stride, c->fmt);
 	c->has_frame = 1;
 	pthread_cond_signal(&c->cv);
 	pthread_mutex_unlock(&c->mu);
 }
 
-static void on_param_changed(void *data, uint32_t id, const struct spa_pod *param) {
-	struct rpw_capture *c = data;
-	if (param == NULL || id != SPA_PARAM_Format)
-		return;
-	uint32_t mt, mst;
-	if (spa_format_parse(param, &mt, &mst) < 0)
-		return;
-	if (mt != SPA_MEDIA_TYPE_video || mst != SPA_MEDIA_SUBTYPE_raw)
-		return;
-	struct spa_video_info_raw raw;
-	spa_zero(raw);
-	if (spa_format_video_raw_parse(param, &raw) < 0)
-		return;
-	pthread_mutex_lock(&c->mu);
-	c->width = raw.size.width;
-	c->height = raw.size.height;
-	c->fmt = raw.format;
-	pthread_mutex_unlock(&c->mu);
-
-	/* Ask for SHM buffers (MemFd/MemPtr) we can map; a DMA-BUF-only producer still sends dmabuf,
-	 * which on_process detects + counts. 8 buffers, 1 blit plane. */
-	uint8_t bb[512];
-	struct spa_pod_builder b = SPA_POD_BUILDER_INIT(bb, sizeof(bb));
-	const struct spa_pod *params[1];
-	params[0] = spa_pod_builder_add_object(&b,
-		SPA_TYPE_OBJECT_ParamBuffers, SPA_PARAM_Buffers,
-		SPA_PARAM_BUFFERS_buffers, SPA_POD_CHOICE_RANGE_Int(8, 2, 16),
-		SPA_PARAM_BUFFERS_dataType, SPA_POD_CHOICE_FLAGS_Int(
-			(1 << SPA_DATA_MemFd) | (1 << SPA_DATA_MemPtr) | (1 << SPA_DATA_DmaBuf)));
-	PW.stream_update_params(c->stream, params, 1);
+/* build_dmabuf_format: one Format object advertising all EGL modifiers for fmt as a DONT_FIXATE
+ * enum choice (the PipeWire dmabuf negotiation convention). */
+static struct spa_pod *build_dmabuf_format(struct spa_pod_builder *b, struct rpw_capture *c, int idx) {
+	struct spa_pod_frame f0, f1;
+	spa_pod_builder_push_object(b, &f0, SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat);
+	spa_pod_builder_add(b, SPA_FORMAT_mediaType, SPA_POD_Id(SPA_MEDIA_TYPE_video), 0);
+	spa_pod_builder_add(b, SPA_FORMAT_mediaSubtype, SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw), 0);
+	spa_pod_builder_add(b, SPA_FORMAT_VIDEO_format, SPA_POD_Id(OFFER_FORMATS[idx]), 0);
+	/* modifier: enum choice of EGL-supported modifiers, DONT_FIXATE so we fixate on param_changed */
+	spa_pod_builder_prop(b, SPA_FORMAT_VIDEO_modifier, SPA_POD_PROP_FLAG_MANDATORY | SPA_POD_PROP_FLAG_DONT_FIXATE);
+	spa_pod_builder_push_choice(b, &f1, SPA_CHOICE_Enum, 0);
+	spa_pod_builder_long(b, (int64_t)c->mods[idx][0]); /* default */
+	for (int i = 0; i < c->n_mods[idx]; i++)
+		spa_pod_builder_long(b, (int64_t)c->mods[idx][i]);
+	spa_pod_builder_pop(b, &f1);
+	spa_pod_builder_add(b, SPA_FORMAT_VIDEO_size,
+		SPA_POD_CHOICE_RANGE_Rectangle(&SPA_RECTANGLE(1920, 1080), &SPA_RECTANGLE(1, 1), &SPA_RECTANGLE(8192, 8192)), 0);
+	spa_pod_builder_add(b, SPA_FORMAT_VIDEO_framerate,
+		SPA_POD_CHOICE_RANGE_Fraction(&SPA_FRACTION(30, 1), &SPA_FRACTION(0, 1), &SPA_FRACTION(240, 1)), 0);
+	return spa_pod_builder_pop(b, &f0);
 }
 
-static void on_process(void *data) {
-	struct rpw_capture *c = data;
-	struct pw_buffer *pb;
-	/* drain to the most recent queued buffer (keeps latency low; drop-oldest) */
-	struct pw_buffer *last = NULL;
-	while ((pb = PW.stream_dequeue(c->stream)) != NULL) {
-		if (last) {
-			PW.stream_queue(c->stream, last);
-			c->dropped++;
-		}
-		last = pb;
-	}
-	if (!last)
-		return;
-	struct spa_buffer *sb = last->buffer;
-	if (sb->n_datas >= 1) {
-		struct spa_data *d = &sb->datas[0];
-		if (d->type == SPA_DATA_DmaBuf) {
-			c->dmabuf_skipped++;
-			c->dropped++; /* EGL import not built (shim_egl.c) */
-		} else if (d->data && d->chunk && d->chunk->size > 0 && c->width > 0) {
-			uint32_t stride = d->chunk->stride ? d->chunk->stride : (uint32_t)(c->width * 4);
-			store_frame(c, (const unsigned char *)d->data + d->chunk->offset, (int)stride);
-		} else {
-			c->dropped++;
-		}
-	}
-	PW.stream_queue(c->stream, last);
-}
-
-static void on_state_changed(void *data, enum pw_stream_state old, enum pw_stream_state state, const char *error) {
-	(void)old;
-	(void)error;
-	struct rpw_capture *c = data;
-	if (state == PW_STREAM_STATE_ERROR) {
-		pthread_mutex_lock(&c->mu);
-		c->fatal = 1;
-		pthread_cond_signal(&c->cv);
-		pthread_mutex_unlock(&c->mu);
-	}
-}
-
-static const struct pw_stream_events stream_events = {
-	.version = PW_VERSION_STREAM_EVENTS,
-	.state_changed = on_state_changed,
-	.param_changed = on_param_changed,
-	.process = on_process,
-};
-
-/* build_format offers RGBA-family raw video at any size/framerate (SHM + DMA-BUF allowed). */
-static const struct spa_pod *build_format(struct spa_pod_builder *b) {
+/* build_shm_format: one Format object (no modifier) for SHM producers. */
+static struct spa_pod *build_shm_format(struct spa_pod_builder *b) {
 	return spa_pod_builder_add_object(b,
 		SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat,
 		SPA_FORMAT_mediaType, SPA_POD_Id(SPA_MEDIA_TYPE_video),
@@ -265,7 +518,195 @@ static const struct spa_pod *build_format(struct spa_pod_builder *b) {
 			&SPA_FRACTION(30, 1), &SPA_FRACTION(0, 1), &SPA_FRACTION(240, 1)));
 }
 
-rpw_capture *rpw_start(const char *target_node) {
+/* n_enum_formats: how many Format objects we advertise (dmabuf per format where EGL has modifiers,
+ * + one SHM). */
+static uint32_t build_enum_formats(struct spa_pod_builder *b, struct rpw_capture *c, const struct spa_pod **params, uint32_t maxp) {
+	uint32_t n = 0;
+	if (c->egl_ready) {
+		for (size_t i = 0; i < N_OFFER && n < maxp - 1; i++) {
+			if (c->n_mods[i] > 0)
+				params[n++] = build_dmabuf_format(b, c, (int)i);
+		}
+	}
+	if (n < maxp)
+		params[n++] = build_shm_format(b);
+	return n;
+}
+
+/* fixate_format: re-advertise a single Format with the modifier fixed to `mod` (no DONT_FIXATE),
+ * the second step of dmabuf negotiation. */
+static struct spa_pod *fixate_format(struct spa_pod_builder *b, enum spa_video_format fmt, uint64_t mod) {
+	struct spa_pod_frame f0;
+	spa_pod_builder_push_object(b, &f0, SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat);
+	spa_pod_builder_add(b, SPA_FORMAT_mediaType, SPA_POD_Id(SPA_MEDIA_TYPE_video), 0);
+	spa_pod_builder_add(b, SPA_FORMAT_mediaSubtype, SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw), 0);
+	spa_pod_builder_add(b, SPA_FORMAT_VIDEO_format, SPA_POD_Id(fmt), 0);
+	spa_pod_builder_prop(b, SPA_FORMAT_VIDEO_modifier, SPA_POD_PROP_FLAG_MANDATORY);
+	spa_pod_builder_long(b, (int64_t)mod);
+	spa_pod_builder_add(b, SPA_FORMAT_VIDEO_size,
+		SPA_POD_CHOICE_RANGE_Rectangle(&SPA_RECTANGLE(1920, 1080), &SPA_RECTANGLE(1, 1), &SPA_RECTANGLE(8192, 8192)), 0);
+	spa_pod_builder_add(b, SPA_FORMAT_VIDEO_framerate,
+		SPA_POD_CHOICE_RANGE_Fraction(&SPA_FRACTION(30, 1), &SPA_FRACTION(0, 1), &SPA_FRACTION(240, 1)), 0);
+	return spa_pod_builder_pop(b, &f0);
+}
+
+/* egl_supports_mod: is mod in our EGL-supported set for fmt? */
+static int egl_supports_mod(struct rpw_capture *c, enum spa_video_format fmt, uint64_t mod) {
+	for (size_t i = 0; i < N_OFFER; i++) {
+		if (OFFER_FORMATS[i] != fmt)
+			continue;
+		for (int j = 0; j < c->n_mods[i]; j++)
+			if (c->mods[i][j] == mod)
+				return 1;
+	}
+	return 0;
+}
+
+static void request_buffers(struct rpw_capture *c, int dmabuf) {
+	uint8_t bb[512];
+	struct spa_pod_builder b = SPA_POD_BUILDER_INIT(bb, sizeof(bb));
+	const struct spa_pod *params[1];
+	int types = dmabuf ? (1 << SPA_DATA_DmaBuf)
+	                   : ((1 << SPA_DATA_MemFd) | (1 << SPA_DATA_MemPtr));
+	params[0] = spa_pod_builder_add_object(&b,
+		SPA_TYPE_OBJECT_ParamBuffers, SPA_PARAM_Buffers,
+		SPA_PARAM_BUFFERS_buffers, SPA_POD_CHOICE_RANGE_Int(8, 2, 16),
+		SPA_PARAM_BUFFERS_dataType, SPA_POD_CHOICE_FLAGS_Int(types));
+	PW.stream_update_params(c->stream, params, 1);
+}
+
+static void on_param_changed(void *data, uint32_t id, const struct spa_pod *param) {
+	struct rpw_capture *c = data;
+	if (param == NULL || id != SPA_PARAM_Format)
+		return;
+	uint32_t mt, mst;
+	if (spa_format_parse(param, &mt, &mst) < 0 || mt != SPA_MEDIA_TYPE_video || mst != SPA_MEDIA_SUBTYPE_raw)
+		return;
+	struct spa_video_info_raw raw;
+	spa_zero(raw);
+	if (spa_format_video_raw_parse(param, &raw) < 0)
+		return;
+
+	/* dmabuf modifier fixation dance */
+	const struct spa_pod_prop *pmod = spa_pod_find_prop(param, NULL, SPA_FORMAT_VIDEO_modifier);
+	if (pmod && c->egl_ready && (pmod->flags & SPA_POD_PROP_FLAG_DONT_FIXATE)) {
+		/* server still offers a modifier CHOICE - pick one we support (prefer non-linear) + fixate */
+		uint32_t nvals = 0, ch = 0;
+		struct spa_pod *vals = spa_pod_get_values(&pmod->value, &nvals, &ch);
+		uint64_t *mods = SPA_POD_BODY(vals);
+		/* Prefer the first TILED (non-LINEAR) modifier the producer+EGL share. libfunnel's LINEAR is
+		 * mislabelled (reports modifier 0 but the buffer is not actually linear -> garbage readback),
+		 * and importing a tiled buffer's plane-0 without its metadata gives garbage too. The native
+		 * tiled modifier imports correctly when it is single-plane (1080p here). It becomes
+		 * multi-plane (DCC metadata) at 4K, which mesa's eglCreateImageKHR rejects here
+		 * (EGL_BAD_MATCH) - a documented 4K limitation (see devnote; zero-copy dmabuf->VAAPI is the
+		 * fix). LINEAR kept only as a last resort. */
+		uint64_t pick = DRM_FORMAT_MOD_INVALID, linear = DRM_FORMAT_MOD_INVALID;
+		for (uint32_t i = 0; i < nvals; i++) {
+			uint64_t m = mods[i];
+			if (!egl_supports_mod(c, raw.format, m))
+				continue;
+			if (m == DRM_FORMAT_MOD_LINEAR) {
+				linear = m;
+				continue;
+			}
+			pick = m;
+			break;
+		}
+		if (pick == DRM_FORMAT_MOD_INVALID)
+			pick = linear;
+		if (pick == DRM_FORMAT_MOD_INVALID) {
+			DBG("fixate: no common modifier for fmt %d\n", raw.format);
+			return;
+		}
+		uint8_t fb[256];
+		struct spa_pod_builder b = SPA_POD_BUILDER_INIT(fb, sizeof(fb));
+		const struct spa_pod *params[1] = {fixate_format(&b, raw.format, pick)};
+		DBG("fixate: picked mod 0x%llx for fmt %d\n", (unsigned long long)pick, raw.format);
+		PW.stream_update_params(c->stream, params, 1);
+		return;
+	}
+
+	pthread_mutex_lock(&c->mu);
+	c->width = raw.size.width;
+	c->height = raw.size.height;
+	c->fmt = raw.format;
+	c->modifier = pmod ? raw.modifier : DRM_FORMAT_MOD_INVALID;
+	c->is_dmabuf = (pmod != NULL);
+	pthread_mutex_unlock(&c->mu);
+	DBG("format: %dx%d fmt=%d dmabuf=%d mod=0x%llx\n", c->width, c->height, c->fmt, c->is_dmabuf, (unsigned long long)c->modifier);
+	request_buffers(c, c->is_dmabuf);
+}
+
+static void on_process(void *data) {
+	struct rpw_capture *c = data;
+	struct pw_buffer *pb, *last = NULL;
+	while ((pb = PW.stream_dequeue(c->stream)) != NULL) {
+		if (last) {
+			PW.stream_queue(c->stream, last);
+			c->dropped++;
+		}
+		last = pb;
+	}
+	if (!last)
+		return;
+	struct spa_buffer *sb = last->buffer;
+	if (sb->n_datas >= 1) {
+		struct spa_data *d = &sb->datas[0];
+		if (d->type == SPA_DATA_DmaBuf) {
+			if (!egl_import_frame(c, sb)) {
+				c->dmabuf_skipped++;
+				c->dropped++;
+			}
+		} else if (d->data && d->chunk && d->chunk->size > 0 && c->width > 0) {
+			uint32_t stride = d->chunk->stride ? d->chunk->stride : (uint32_t)(c->width * 4);
+			store_shm(c, (const unsigned char *)d->data + d->chunk->offset, (int)stride);
+		} else {
+			c->dropped++;
+		}
+	}
+	PW.stream_queue(c->stream, last);
+}
+
+static void on_state_changed(void *data, enum pw_stream_state old, enum pw_stream_state state, const char *error) {
+	(void)old;
+	struct rpw_capture *c = data;
+	DBG("state: %d%s%s\n", state, error ? " err=" : "", error ? error : "");
+	/* ERROR means the producer vanished mid-stream (VRChat/producer restart) and AUTOCONNECT does
+	 * NOT recover from ERROR - flag a reconnect; rpw_wait_frame (Go thread) re-arms the stream. */
+	if (state == PW_STREAM_STATE_ERROR) {
+		pthread_mutex_lock(&c->mu);
+		c->need_reconnect = 1;
+		pthread_cond_signal(&c->cv);
+		pthread_mutex_unlock(&c->mu);
+	}
+}
+
+static const struct pw_stream_events stream_events = {
+	.version = PW_VERSION_STREAM_EVENTS,
+	.state_changed = on_state_changed,
+	.param_changed = on_param_changed,
+	.process = on_process,
+};
+
+/* do_reconnect re-arms the stream after an ERROR (producer restart). Disconnect + reconnect with
+ * fresh EnumFormat params under the thread-loop lock (safe from the Go thread). AUTOCONNECT then
+ * re-binds to the target node once the new producer appears. */
+static void do_reconnect(struct rpw_capture *c) {
+	PW.tl_lock(c->loop);
+	PW.stream_disconnect(c->stream);
+	uint8_t fb[4096];
+	struct spa_pod_builder b = SPA_POD_BUILDER_INIT(fb, sizeof(fb));
+	const struct spa_pod *params[N_OFFER + 1];
+	uint32_t np = build_enum_formats(&b, c, params, N_OFFER + 1);
+	PW.stream_connect(c->stream, PW_DIRECTION_INPUT, PW_ID_ANY,
+		PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS, params, np);
+	PW.tl_unlock(c->loop);
+	c->reconnects++;
+	DBG("reconnect #%ld\n", c->reconnects);
+}
+
+struct rpw_capture *rpw_start(const char *target_node) {
 	if (!rpw_available())
 		return NULL;
 	struct rpw_capture *c = calloc(1, sizeof(*c));
@@ -273,6 +714,11 @@ rpw_capture *rpw_start(const char *target_node) {
 		return NULL;
 	pthread_mutex_init(&c->mu, NULL);
 	pthread_cond_init(&c->cv, NULL);
+	c->modifier = DRM_FORMAT_MOD_INVALID;
+	c->drm_fd = -1;
+
+	const char *rn = getenv("RPW_EGL_DEVICE");
+	egl_setup_display(c, rn && *rn ? rn : "/dev/dri/renderD128");
 
 	c->loop = PW.tl_new("rave-mate-pwcapture", NULL);
 	if (!c->loop)
@@ -286,22 +732,19 @@ rpw_capture *rpw_start(const char *target_node) {
 		goto fail_unlock;
 
 	struct pw_properties *props = PW.props_new(
-		PW_KEY_MEDIA_TYPE, "Video",
-		PW_KEY_MEDIA_CATEGORY, "Capture",
-		PW_KEY_MEDIA_ROLE, "Camera",
-		PW_KEY_TARGET_OBJECT, target_node,
-		NULL);
+		PW_KEY_MEDIA_TYPE, "Video", PW_KEY_MEDIA_CATEGORY, "Capture",
+		PW_KEY_MEDIA_ROLE, "Camera", PW_KEY_TARGET_OBJECT, target_node, NULL);
 	c->stream = PW.stream_new(c->core, "rave-mate-capture", props);
 	if (!c->stream)
 		goto fail_unlock;
 	PW.stream_add_listener(c->stream, &c->listener, &stream_events, c);
 
-	uint8_t fb[1024];
+	uint8_t fb[4096];
 	struct spa_pod_builder b = SPA_POD_BUILDER_INIT(fb, sizeof(fb));
-	const struct spa_pod *params[1];
-	params[0] = build_format(&b);
+	const struct spa_pod *params[N_OFFER + 1];
+	uint32_t np = build_enum_formats(&b, c, params, N_OFFER + 1);
 	if (PW.stream_connect(c->stream, PW_DIRECTION_INPUT, PW_ID_ANY,
-		PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS, params, 1) < 0)
+		PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS, params, np) < 0)
 		goto fail_unlock;
 	PW.tl_unlock(c->loop);
 
@@ -316,7 +759,7 @@ fail:
 	return NULL;
 }
 
-int rpw_wait_frame(rpw_capture *c, unsigned char *dst, int cap, int *w, int *h, long timeout_ms) {
+int rpw_wait_frame(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int *h, long timeout_ms) {
 	struct timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	ts.tv_sec += timeout_ms / 1000;
@@ -326,9 +769,21 @@ int rpw_wait_frame(rpw_capture *c, unsigned char *dst, int cap, int *w, int *h, 
 		ts.tv_nsec -= 1000000000L;
 	}
 	pthread_mutex_lock(&c->mu);
-	while (!c->has_frame && !c->fatal) {
+	if (c->need_reconnect && !c->has_frame) {
+		c->need_reconnect = 0;
+		pthread_mutex_unlock(&c->mu);
+		do_reconnect(c); /* Go thread: safe to lock the pw thread-loop */
+		return 0;        /* treated as a timeout by Next -> keeps the route alive, retries */
+	}
+	while (!c->has_frame && !c->fatal && !c->need_reconnect) {
 		if (pthread_cond_timedwait(&c->cv, &c->mu, &ts) != 0)
 			break;
+	}
+	if (c->need_reconnect && !c->has_frame) {
+		c->need_reconnect = 0;
+		pthread_mutex_unlock(&c->mu);
+		do_reconnect(c);
+		return 0;
 	}
 	if (c->fatal && !c->has_frame) {
 		pthread_mutex_unlock(&c->mu);
@@ -342,7 +797,7 @@ int rpw_wait_frame(rpw_capture *c, unsigned char *dst, int cap, int *w, int *h, 
 	*w = c->width;
 	*h = c->height;
 	if (need > cap) {
-		pthread_mutex_unlock(&c->mu); /* keep the frame; caller reallocs + retries */
+		pthread_mutex_unlock(&c->mu);
 		return -2;
 	}
 	memcpy(dst, c->slot, need);
@@ -351,10 +806,10 @@ int rpw_wait_frame(rpw_capture *c, unsigned char *dst, int cap, int *w, int *h, 
 	return need;
 }
 
-long rpw_dropped(rpw_capture *c) { return c ? c->dropped : 0; }
-long rpw_dmabuf_skipped(rpw_capture *c) { return c ? c->dmabuf_skipped : 0; }
+long rpw_dropped(struct rpw_capture *c) { return c ? c->dropped : 0; }
+long rpw_dmabuf_skipped(struct rpw_capture *c) { return c ? c->dmabuf_skipped : 0; }
 
-void rpw_stop(rpw_capture *c) {
+void rpw_stop(struct rpw_capture *c) {
 	if (!c)
 		return;
 	if (c->loop)
@@ -369,6 +824,18 @@ void rpw_stop(rpw_capture *c) {
 		PW.ctx_destroy(c->context);
 	if (c->loop)
 		PW.tl_destroy(c->loop);
+	/* EGL teardown: the context was made current on the loop thread, now stopped. Best-effort. */
+	if (c->egl_ready) {
+		if (c->egl_ctx)
+			E.DestroyContext(c->dpy, c->egl_ctx);
+		if (c->dpy)
+			E.Terminate(c->dpy);
+		if (c->gbm)
+			E.gbm_device_destroy(c->gbm);
+		if (c->drm_fd >= 0)
+			close(c->drm_fd);
+	}
+	free(c->rbscratch);
 	free(c->slot);
 	pthread_mutex_destroy(&c->mu);
 	pthread_cond_destroy(&c->cv);

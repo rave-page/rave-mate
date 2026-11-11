@@ -59,25 +59,65 @@ media.class=Stream/Output/Video"` creates a Stream/Output/Video producer. The ca
 each (1920x1080 RGBA), ~56.7 fps, non-zero pixels**. Discovery + `ctl pw-nodes` list it as
 capturable with the right dims/fps.
 
-## DMA-BUF path — NOT IMPLEMENTED (designed)
+## libfunnel producer EnumFormat (measured 2026-11-11, sus)
 
-`spout2pw.VRChat.VRCSender1` was NOT present on sus at implementation time (VRChat not running,
-confirmed via `pw-cli ls Node`), so the DMA-BUF path cannot be verified against the real producer.
-libfunnel (Spout2PW) is very likely DMA-BUF only, so the SHM path alone may not capture the real
-VRChat node - the EGL import is required for it and is **not yet implemented**: shipping speculative
-EGL C that can only be compile-checked (no dmabuf producer to run it against) would be a false
-"done". The shim detects + counts dmabuf (next para) so the gap is visible, and the design is
-recorded here so the next step - run against a live VRChat node, then build + verify EGL - is exact.
+Test producer `contrib/linux-build/testprod/funnel-producer.c` (libfunnel, the exact lib Spout2PW
+publishes with; headless surfaceless EGL, frame-counter pattern). Its node
+(`page.rave.mate.testprod.<name>`, media.class Stream/Output/Video) advertises:
+- **8 formats**: BGRA, ABGR, RGBA, ARGB, BGRx, xBGR, RGBx, xRGB (all 32bpp).
+- Each format carries a **modifier CHOICE** of ~11 values: AMD GFX11 (Navi31) tiling modifiers
+  `0x0200000028a6bf04, …28a67f04, …28a37f04, …28a01f04, …28a6bb04, …28a67b04, …28a37b04,
+  …28a01b04, …28801604, 0x02000000000a04` + **LINEAR `0`** (vendor 0x02 = AMD).
+- **NO SHM entry** — every format is dmabuf-with-modifier. So the SHM-only consumer CANNOT capture
+  libfunnel/Spout2PW (confirmed): dmabuf+EGL with modifier negotiation is mandatory. The same GPU's
+  EGL reports these same AMD modifiers, so a non-linear (zero-copy tiled) modifier is fixated.
+- Sync: producer run with `-either` (FUNNEL_SYNC_BOTH); explicit-sync fences ride the buffer meta
+  (SPA_META_SyncTimeline / dmabuf fence), handled at capture time, not in the node params.
 
-The shim currently DETECTS dmabuf buffers and counts them (`dmabuf_skipped`, surfaced in Close +
-`ctl` so a dmabuf-only producer is diagnosable, not silent). The EGL readback is the next step -
-status noted at the top of this section's commit. Design: on a `SPA_DATA_DmaBuf` buffer, import via
-`eglCreateImageKHR(EGL_LINUX_DMA_BUF_EXT)` with the fd/stride/offset/modifier from the SPA buffer +
-negotiated format, bind to a texture (`glEGLImageTargetTexture2DOES`), FBO + `glReadPixels` back to
-RGBA. EGL is initialised surfaceless (`EGL_PLATFORM_SURFACELESS_MESA`) on GLES2, dlopen'd from
-`libEGL.so.1` + `libGLESv2.so.2`. Do NOT mmap a dmabuf and assume linear pixels (AMD tiling). When
-the shim can't import a dmabuf it counts `dmabuf_skipped` + `dropped` (surfaced in Close logs), so a
-dmabuf-only producer is diagnosable rather than silent.
+## DMA-BUF path — IMPLEMENTED (shim.c); 1080p VERIFIED, 4K limited (2026-11-12)
+
+EGL import + readback is implemented in `shim.c` and verified against the libfunnel producer:
+- **dlopen** `libEGL.so.1` + `libGLESv2.so.2` + `libgbm.so.1` (no link, so absent EGL => SHM-only,
+  same degrade as libpipewire). EGL display/context + `eglQueryDmaBufModifiersEXT` per format run in
+  `rpw_start` (no current context needed); `eglMakeCurrent` + all GL run on the pw loop thread.
+- **Modifier negotiation + fixate dance**: EnumFormat advertises, per format, the EGL-reported
+  modifiers as a DONT_FIXATE enum choice (`build_dmabuf_format`) plus a SHM fallback object. On
+  `param_changed` with the modifier still a choice, `fixate_format` re-submits a single modifier
+  (intersection of the producer's offer and EGL's list). Verified: the fixate picks the native
+  AMD GFX11 tiled modifier `0x200000028a6bf04` and negotiates dmabuf.
+- **Import**: `eglCreateImageKHR(EGL_LINUX_DMA_BUF_EXT)` with per-plane fd/offset(chunk)/pitch +
+  modifier LO/HI, `glEGLImageTargetTexture2DOES` -> GL_TEXTURE_2D -> FBO -> `glReadPixels(GL_RGBA)`
+  (channel-correct: the GL stack swizzles per fourcc) -> vertical flip (GL is bottom-up) into the
+  bounded slot. GL objects reused across frames (one FBO); EGLImage + texture per frame, destroyed.
+- **Pixel-verified** at 1080p (`TestCaptureDmabufPattern`): corners TL=red TR=green BL=blue BR=white,
+  alpha=255 - orientation/flip, channel order and detile all correct.
+
+### Modifier / plane findings (hard-won)
+- The chosen tiled modifier is **single-plane at 1080p** (imports correctly) but **multi-plane at 4K**
+  (DCC adds metadata planes: 3 at 3840x2160). mesa's `eglCreateImageKHR` returns **EGL_BAD_MATCH**
+  for that multi-plane DCC layout here, so 4K dmabuf import fails on the first consumer.
+- libfunnel's **LINEAR (modifier 0) is mislabelled**: it reports modifier 0 but the buffer is not
+  actually linear (garbage on readback) and comes with a stray `chunk->size==0` plane. So LINEAR is
+  NOT a usable fallback; the shim prefers the first real tiled modifier and keeps LINEAR last.
+- Net: **1080p60 dmabuf works** (the primary VRChat resolution). **4K60 is limited** - import fails
+  on the multi-plane DCC buffer, and even where it negotiates a single-plane layout the readback is
+  CPU-bound below 60fps (see measurements). The real fix for 4K is the zero-copy path below.
+
+### DMA-BUF measurements (sus RX 7900 XTX, libfunnel producer, 2026-11-12)
+
+capture -> VA-API H.264 encode (`TestCaptureEncodeE2E`), 180 frames:
+- **1080p60**: ~58.5 fps (realtime). CPU: pwcap ~41%, ffmpeg(vaapi) ~75% of one core. RSS pwcap ~97 MB,
+  ffmpeg ~126 MB. Pattern pixel-check PASS.
+- **4K60**: ~36 fps (BELOW realtime). CPU: pwcap ~146%, ffmpeg ~204%. Pattern FAILS (multi-plane DCC
+  import). So 4K readback cannot hold 60: the 33 MB/frame glReadPixels + flip + copy pins >1 core and
+  the DCC multi-plane import is rejected.
+
+**Zero-copy dmabuf -> VAAPI (follow-up, NOT built):** the 4K answer. Instead of
+EGLImage->glReadPixels->RGBA->ffmpeg rawvideo pipe, hand the dmabuf straight to the VAAPI encoder:
+feed ffmpeg `-hwaccel vaapi -hwaccel_output_format vaapi` consuming the dmabuf (or a native libva
+path) so the tiled surface (incl. DCC) never leaves the GPU and no readback/copy happens. That also
+sidesteps the EGL multi-plane-DCC import limitation (VAAPI imports the dmabuf directly). Prefer the
+TILED modifier there (not LINEAR). Build it only once 4K is actually required.
 
 ## End-to-end (single box) — VERIFIED (sus, 2026-11-11)
 
