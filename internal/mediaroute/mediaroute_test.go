@@ -338,6 +338,39 @@ func TestParkedReuseNotGatedUnderPressure(t *testing.T) {
 	_ = s2
 }
 
+// TestDestinationGeometryInvariantAcrossCodedResize: a VRAM resolution cap changes the CODED size,
+// never the republished destination geometry. Reopening at a smaller size must keep the nominal
+// sender (no rebuild, no new interop registration) - a mid-set size change breaks Resolume mappings.
+func TestDestinationGeometryInvariantAcrossCodedResize(t *testing.T) {
+	sf := &sinkFactory{shared: true}
+	m := New(Options{
+		Log: logbus.New(16), Router: newFakeRouter(),
+		Cfg:      func() config.MediaLinkFeature { return config.MediaLinkFeature{} },
+		OpenSink: sf.open,
+	})
+	name := linkPrefix + "OBS"
+	s1, err := m.openReceiveSink(name, 3840, 2160) // nominal 4K
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s1.Close() // park at nominal 4K
+	// Reopen at a SMALLER coded size (as if a cap engaged): the sender MUST stay nominal 4K.
+	s2, err := m.openReceiveSink(name, 1920, 1080)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ks, ok := s2.(*keptSink)
+	if !ok {
+		t.Fatalf("want *keptSink, got %T", s2)
+	}
+	if ks.w != 3840 || ks.h != 2160 {
+		t.Fatalf("destination rebuilt at coded size %dx%d; must stay nominal 3840x2160", ks.w, ks.h)
+	}
+	if sf.opens != 1 {
+		t.Fatalf("opens=%d, want 1 (a cap must not re-create the sender / re-register interop)", sf.opens)
+	}
+}
+
 func TestReceiveSinkTTLReaped(t *testing.T) {
 	sf := &sinkFactory{}
 	m := keptManager(sf)

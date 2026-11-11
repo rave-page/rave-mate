@@ -93,6 +93,46 @@ func TestPlanDecodeUnknownVRAMFailsOpen(t *testing.T) {
 	}
 }
 
+func TestResolveDevicePlanUnmeasuredStaysEngineDefault(t *testing.T) {
+	adapters := []AdapterInfo{{LUID: "gpu0", Name: "RTX 3060"}}
+	devs := []Device{{Key: "gpu0", Name: "RTX 3060", Family: FamilyNVENC, Encoder: "h264_nvenc", LoadPct: 10, VRAMFree: -1, Sessions: -1}} // throughput 0
+	d := ResolveDevicePlan(PolicyAuto, "", adapters, Report{}, devs, PixelRate(3840, 2160, 60))
+	if d.Pinned() || d.Index != -1 {
+		t.Fatalf("unmeasured auto must stay engine-default, got %+v", d)
+	}
+}
+
+func TestResolveDevicePlanMeasuredPicksAdapter(t *testing.T) {
+	adapters := []AdapterInfo{{LUID: "igpu", Name: "Intel"}, {LUID: "dgpu", Name: "RTX 3060"}}
+	// Both measured; dgpu idle + fast, igpu busy. Plan should pick dgpu (most headroom, sustains).
+	devs := []Device{
+		{Key: "igpu", Name: "Intel", Family: FamilyQSV, Encoder: "h264_qsv", LoadPct: 80, VRAMFree: -1, Sessions: -1, ThroughputPPS: 300e6},
+		{Key: "dgpu", Name: "RTX 3060", Family: FamilyNVENC, Encoder: "h264_nvenc", LoadPct: 10, VRAMFree: -1, Sessions: -1, ThroughputPPS: 900e6},
+	}
+	d := ResolveDevicePlan(PolicyAuto, "", adapters, Report{}, devs, PixelRate(3840, 2160, 60))
+	if d.LUID != "dgpu" || d.Index != 1 {
+		t.Fatalf("measured auto must pick the sustaining least-busy adapter dgpu(idx1), got %+v", d)
+	}
+}
+
+func TestResolveDevicePlanMeasuredButNoneSustainsFallsBack(t *testing.T) {
+	adapters := []AdapterInfo{{LUID: "gpu0", Name: "RTX 3060"}}
+	// Measured but too slow for 4K60 => plan pauses => engine default (no worse than before).
+	devs := []Device{{Key: "gpu0", Family: FamilyNVENC, Encoder: "h264_nvenc", LoadPct: 10, VRAMFree: -1, Sessions: -1, ThroughputPPS: 100e6}}
+	d := ResolveDevicePlan(PolicyAuto, "", adapters, Report{}, devs, PixelRate(3840, 2160, 60))
+	if d.Pinned() {
+		t.Fatalf("no-sustain auto must fall back to engine default, got %+v", d)
+	}
+}
+
+func TestResolveDevicePlanPinUnchanged(t *testing.T) {
+	adapters := []AdapterInfo{{LUID: "0xa_0xb", Name: "RTX"}}
+	d := ResolveDevicePlan(PolicyPin, "0xa_0xb", adapters, Report{}, nil, 0)
+	if d.LUID != "0xa_0xb" || d.Index != 0 {
+		t.Fatalf("pin must be unchanged by the plan path, got %+v", d)
+	}
+}
+
 func TestBenchAllowed(t *testing.T) {
 	ok := BenchGate{HeadroomPresent: true, FreeMB: 6000, ReserveMB: 768, BenchCostMB: 400, MachineIdle: true}
 	if allow, _ := BenchAllowed(ok); !allow {

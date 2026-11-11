@@ -17,6 +17,11 @@ const (
 	govDefaultFloorMB = 1024
 )
 
+// OnResolutionCapChange, when non-nil, is called whenever the governor changes the resolution cap
+// (engage or lift). App wires it to mfenc.NoteDecodeResizeGrace so the local decoder tolerates the
+// brief re-init stall when the coded size changes, instead of recycling a healthy pipeline. nil-safe.
+var OnResolutionCapChange func()
+
 // govResolutionCapH is the last-resort resolution cap: at the DEEPEST pressure tier the governor
 // caps the sender to 1080p. A route already at/below 1080p is unaffected (the sender only scales a
 // taller source), so the most-visible degradation only ever hits the highest-res routes under the
@@ -26,9 +31,12 @@ const govResolutionCapH = 1080
 // rateLadder maps free VRAM to an ABSOLUTE RateHint: trim BITRATE first, then FRAMERATE, and - only
 // at the deepest tier - RESOLUTION as the last resort (Decision 2026-11-11, superseding the earlier
 // "never cut resolution" rule: under VRAM admission failure the lead chose a visible downscale over a
-// held/frozen pipeline; see .devnotes/VRAM_BUDGET_AND_PLANNER). base* are the route's negotiated
-// ceilings (the healthy target the hint restores on recovery). Pure, so the whole ladder is tested
-// off-set; MaxHeight is omitempty so old peers ignore it and the sender scales before encode.
+// held/frozen pipeline; see .devnotes/VRAM_BUDGET_AND_PLANNER). MaxHeight caps the CODED resolution
+// ONLY: the sender scales down before encode; the receiver scales back up into its unchanged
+// nominal-size destination, so the republished geometry Resolume sees never changes (Decision
+// 2026-11-11: "resolution cap = coded resolution only; destination geometry is invariant"). base* are
+// the route's negotiated ceilings (the healthy target the hint restores on recovery). Pure, so the
+// whole ladder is tested off-set; MaxHeight is omitempty so old peers ignore it.
 func rateLadder(freeMB, floorMB uint64, baseKbps, baseFPS int, stream uint16) RateHint {
 	if floorMB == 0 {
 		floorMB = govDefaultFloorMB
@@ -106,10 +114,14 @@ func (rm *RouteManager) rateGovernor(ctx context.Context, rio *routeIO, stream u
 		if sent && h == last {
 			continue
 		}
+		capChanged := h.MaxHeight != last.MaxHeight // includes the first emit (last zero-value)
 		if rio.writeMeta(h, rm.clock.Now()) != nil {
 			return
 		}
 		last, sent = h, true
+		if capChanged && OnResolutionCapChange != nil {
+			OnResolutionCapChange() // coded size about to change downstream: grant the decoder re-init grace
+		}
 		rm.infof("rate governor", map[string]any{"stream": stream, "freeMB": free,
 			"maxKbps": h.MaxBitrateKbps, "maxFPS": h.MaxFPS, "baseKbps": baseKbps, "baseFPS": baseFPS})
 	}

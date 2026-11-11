@@ -3,6 +3,7 @@ package encoderscan
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // planselect.go - DELIBERATE resource selection (owner intent: "figure out the proper resource for
@@ -76,6 +77,39 @@ func sustainNote(d Device, reqPPS float64) string {
 		return ""
 	}
 	return fmt.Sprintf(" sustains %.0f/%.0f Mpps", d.ThroughputPPS/1e6, reqPPS/1e6)
+}
+
+// ResolveDevicePlan resolves the encode adapter for one route. pin/avoid keep ResolveDevice's
+// meaning. AUTO becomes plan-driven: once the candidate silicon is MEASURED, the throughput-aware
+// planner picks the adapter (sustains the pixel rate + most headroom + VRAM); UNMEASURED stays at the
+// engine default (adapter 0 / native-first) so a fresh machine is exactly as before. devices = the
+// live inventory for the NEGOTIATED encoder (one per candidate adapter), with LoadPct / VRAMFree /
+// ThroughputPPS filled by the wiring layer. reqPPS = W*H*fps. Never errors; an unresolvable pick
+// degrades to the engine default with the reason recorded.
+func ResolveDevicePlan(policy, pin string, adapters []AdapterInfo, rep Report, devices []Device, reqPPS float64) DeviceChoice {
+	if NormalizePolicy(policy) != PolicyAuto {
+		return ResolveDevice(policy, pin, adapters, rep)
+	}
+	measured := false
+	for _, d := range devices {
+		if d.ThroughputPPS > 0 {
+			measured = true
+			break
+		}
+	}
+	if !measured {
+		return DeviceChoice{Index: -1, Reason: "automatic (unmeasured - engine default)"}
+	}
+	plan := PlanEncodeFor(devices, DefaultEncodeCost(), DefaultCeilings(), ExhaustReduceQuality, reqPPS)
+	if plan.Action == ActionPause || plan.Device == "" { // pause, or CPU/software: no GPU to pin
+		return DeviceChoice{Index: -1, Reason: "automatic (plan: " + plan.Reason + ")"}
+	}
+	for i, a := range adapters {
+		if strings.EqualFold(a.LUID, plan.Device) {
+			return DeviceChoice{LUID: a.LUID, Index: i, Name: a.Name, Reason: "plan-driven: " + plan.Reason}
+		}
+	}
+	return DeviceChoice{Index: -1, Reason: "automatic (planned adapter not enumerable - engine default)"}
 }
 
 // ── decode placement ──

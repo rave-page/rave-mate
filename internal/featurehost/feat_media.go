@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"rave.page/mate/internal/config"
-	"rave.page/mate/internal/encoderscan"
 	"rave.page/mate/internal/eventbus"
+	"rave.page/mate/internal/gpubench"
 	"rave.page/mate/internal/gpumem"
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/mediapipe"
@@ -47,7 +47,8 @@ type mediaFeature struct {
 	cam     *webcam.Manager
 	pw      *pwcapture.Manager // Linux PipeWire video-node capture (no-op where unavailable)
 	secrets *mediaSecretStore
-	vram    *VramBudget // unified VRAM admission (decode/sender/encode); ctl explainability
+	vram    *VramBudget      // unified VRAM admission (decode/sender/encode); ctl explainability
+	bench   *gpubench.Runner // throughput micro-benchmark (feeds plan-driven auto); lazy, idle-gated
 
 	mu       sync.Mutex
 	mediaCfg config.MediaLinkFeature
@@ -103,7 +104,12 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 	// reserve + self-cap), installed into the mfenc decode/encode seams. Its sender gate is handed to
 	// mediaroute below. DecHeadroom/DecRebuildFloorMB above stay as the static-floor fallback.
 	f.vram = WireVramBudget(liveCfg, gpuSampler, VramCostPath(), rt.Log)
-	devSel := encoderscan.NewDeviceSelector(func() (string, string) { return liveCfg().DevicePref() }, nil)
+	// Resolution-cap changes grant the local decoder a re-init grace so a coded-size switch is not
+	// mistaken for a frozen-destination wedge (the destination geometry stays nominal regardless).
+	medialink.OnResolutionCapChange = mfenc.NoteDecodeResizeGrace
+	// Plan-driven AUTO device selection (throughput-aware; pin/avoid unchanged; unmeasured => engine
+	// default). The sender-side CPU% is not sampled here (a HW encoder is the common case); nil.
+	encDevResolver := NewEncodeDeviceResolver(liveCfg, f.vram.Budget, nil, rt.Log)
 	f.router = medialink.New(medialink.Options{
 		Self: in.Self, Bus: mediaBusAdapter{f.bus}, Secrets: f.secrets, Clock: f.clock,
 		Log: rt.Log, Encoder: encFac, Decoder: decFac, UDP: true, // §2.5 UDP profile (falls back to TCP)
@@ -112,7 +118,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 			c := liveCfg()
 			return c.PreferCodec, c.PinnedEncoder()
 		},
-		EncodeDevice:     func() (string, int) { d := devSel(); return d.LUID, d.Index },
+		EncodeDevice:     encDevResolver,
 		Headroom:         func() (uint64, bool) { h := gpumem.ReadHeadroom(gpuSampler); return h.FreeMB, h.Present },
 		GovernorEnabled:  func() bool { return liveCfg().VramGovernorEnabled() },
 		GovernorFloorMB:  uint64(liveCfg().ResolvedVramReserveMB()),
@@ -135,6 +141,10 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 		},
 		AdmitSender: f.vram.AdmitSender, // unified budget gate (static-floor fallback stays via Headroom)
 	})
+
+	// Throughput micro-benchmark: lazy + idle-gated, skips while any route is live. Feeds the
+	// plan-driven auto device selection. Runs only in this supervised child (never the daemon).
+	f.bench = NewBenchRunner(f.vram.Budget, gpuSampler, func() bool { return len(f.router.Stats()) > 0 }, rt.Log)
 
 	f.cam = webcam.New(rt.Log, f.bus, in.Self, in.Label, func() config.WebcamFeature {
 		f.mu.Lock()
@@ -169,6 +179,7 @@ func (f *mediaFeature) Start(ctx context.Context) error {
 	for {
 		f.rt.Beat()
 		f.emitTelemetry()
+		f.benchTick(ctx)
 		if c := f.clockEvent(); c != lastClock {
 			f.rt.Emit(evMediaClockOffset, c)
 			lastClock = c
@@ -266,6 +277,24 @@ func (f *mediaFeature) Handle(_ context.Context, method string, params json.RawM
 }
 
 // ── telemetry + clock mirror (child → daemon) ──
+
+// benchTick drives the lazy throughput benchmark: when no route is live, enqueue the standard encode
+// buckets for the working hardware encoder, then let the Runner measure one (gated + background).
+func (f *mediaFeature) benchTick(ctx context.Context) {
+	if f.bench == nil {
+		return
+	}
+	if len(f.router.Stats()) == 0 {
+		if caps, ok := mediapipe.Cached(); ok {
+			if enc, ok := FirstHWEncoder(caps.Encoders); ok {
+				for _, t := range gpubench.EncodeTargets("", enc, EncCodec(enc), 60) {
+					f.bench.Want(t)
+				}
+			}
+		}
+	}
+	f.bench.Tick(ctx)
+}
 
 func (f *mediaFeature) emitTelemetry() {
 	cams := f.cam.Instances()

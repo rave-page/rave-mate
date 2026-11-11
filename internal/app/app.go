@@ -744,12 +744,13 @@ func run(parent context.Context, serviceMode bool) error {
 	// own budget; here it governs the legacy in-proc path and backs `ctl encoder-scan`'s budget panel
 	// (live headroom/cap/reserve + the shared learned-cost file).
 	vramBudget := featurehost.WireVramBudget(mediaLinkCfg, gpuGovSampler, featurehost.VramCostPath(), log)
+	medialink.OnResolutionCapChange = mfenc.NoteDecodeResizeGrace // decoder re-init grace on a cap change
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,
 		Encoder: encFac, Decoder: decFac, UDP: true, // §2.5 UDP datagram profile (reachability-gated, TCP fallback)
 		EncodeMaxHeight:  cfg.Features.MediaLink.MaxHeight,
 		EncodePolicy:     mediaEncodePolicy(mediaLinkCfg),
-		EncodeDevice:     mediaEncodeDevice(log, mediaLinkCfg),
+		EncodeDevice:     featurehost.NewEncodeDeviceResolver(mediaLinkCfg, vramBudget.Budget, nil, log),
 		Headroom:         func() (uint64, bool) { h := gpumem.ReadHeadroom(gpuGovSampler); return h.FreeMB, h.Present },
 		GovernorEnabled:  func() bool { return mediaLinkCfg().VramGovernorEnabled() },
 		GovernorFloorMB:  uint64(mediaLinkCfg().ResolvedVramReserveMB()),
@@ -3658,6 +3659,7 @@ func (c *appControl) EncoderScan() string {
 	// plane the per-route admit decisions log in the MEDIA CHILD's stream; this daemon-side view shows
 	// the live budget + the learned costs (shared cost file), and a sample decode admission preview.
 	if c.vram != nil {
+		c.vram.ReloadStore() // pick up the media child's benchmark/measurement writes (shared cost file)
 		b.WriteString(c.vram.Report() + "\n")
 	}
 	return b.String()

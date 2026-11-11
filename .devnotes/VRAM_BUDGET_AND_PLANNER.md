@@ -73,6 +73,93 @@ the child so the encode-args scaler rebuilds; a cleared hint restores the base, 
 Native MF applies bitrate live; its fps/resolution caps stay OPEN-TIME only - a gap (needs a Zig
 live control op to re-type the MFT output). Reported, not silently dropped.
 
+## Resolution cap = coded resolution only; destination geometry is invariant (Decision 2026-11-11)
+
+A route has a NOMINAL geometry = the source's real size. The republished destination (Spout
+sender / shared texture) is created at the nominal geometry and KEEPS it for the whole route,
+whatever cap is active - a Spout sender that changes size mid-set breaks Resolume
+compositions/mappings. A cap lowers only the CODED resolution (sender scales down before encode,
+so coded size + bitrate + the receiver's decode DPB/surfaces all shrink), and the receiver scales
+the decoded picture back UP into the unchanged nominal destination. No sender recreate, no interop
+re-registration, no `SenderSize` change when a cap engages/lifts.
+
+Audit of bb33db2 (the shipped ffmpeg-substitute cap): CORRECT under this rule. The cap lives on
+the ENCODER (sender side); it has no Spout destination, so nothing re-creates a sink. The receiver
+sink is created once at `desc.Width/Height` (nominal, from the advert) and the immortal-sender
+logic keeps it across any source/coded size change (mediaroute `openReceiveSink`). Test
+`TestDestinationGeometryInvariantAcrossCodedResize` locks it (reopen at a smaller size keeps the
+nominal sender, no new interop).
+
+Nominal on the wire: already carried. The advert's `SourceDesc.Width/Height` is the nominal size,
+independent of the coded size (which is in-band SPS only). No negotiate.go field needed; an in-band
+SPS size change is a coded-size change only.
+
+Decode re-init tolerance (Go-side, Zig-free): when the rate governor changes the cap it calls
+`medialink.OnResolutionCapChange` -> `mfenc.NoteDecodeResizeGrace`, opening a 5 s window during
+which `decCheck` treats a publish stall (handle unchanged) as an expected decoder re-init, NOT a
+frozen-destination wedge - so a coded-size change never triggers `recycleDest` / the ffmpeg-CPU
+demotion. Tested (`decCheck` CODED-RESIZE case + the grace window). A handle CHANGE still recycles.
+
+DEFERRED (need GPU verification - blocked by a live card, see below - and are risky unverified
+native MFT code):
+- Native encoder LIVE cap (Zig control op): the MF encode child must change its VP output /
+  encoder input size on the fly (dynamic resolution change where the MFT supports it, else re-init
+  the encoder MFT in place; force an IDR with new SPS/PPS; no gpubudget "new" allocation, avoid
+  holding both pools at once). Bounded switch rate (hysteresis: >=1 change / N s; restore only after
+  sustained healthy headroom). Today only the ffmpeg substitute applies the cap live; the native MF
+  path applies MaxHeight at OPEN only.
+- Native decoder in-place stream-change (Zig): handle the decoder MFT output-type change for a new
+  coded size without recycling; re-allocate the DPB/surfaces at the smaller size (this is where the
+  decode-side VRAM actually drops - the point of the cap). The Go-side grace above already prevents
+  the recycle; the Zig child still needs to emit/handle the stream-change and shrink the pool.
+- ffmpeg DECODE-path upscale to nominal: under a cap the ffmpeg CPU decoder outputs the coded size;
+  the current sink drops the mismatched frame (stale picture) rather than upscaling. The invariant
+  HOLDS (sink geometry unchanged) but the picture freezes on that path. A decode-side scale filter
+  belongs in `internal/mediapipe/args.go` (owned by another agent) - left as a small follow-up.
+
+## Live plan-driven `auto` + the throughput benchmark that feeds it (2026-11-11, follow-up)
+
+- **Benchmark runner** (`internal/gpubench`): OS-neutral, gated, serialized, wall-clock-bounded.
+  `Want`/`Tick` lazy path runs ONE bucket only when the adapter is idle (no live route) and
+  `BenchAllowed` passes (headroom above reserve, machine idle >=30s, no protected OBS/Parsec
+  encode, room for the bench's own cost); the GPU timing is an injected `Timer`
+  (`featurehost.encodeBenchTimer` = an mfenc ProcSession fed synthetic frames, admitted through
+  gpubudget, ctx/timeout-killed). The media child's telemetry loop enqueues the working HW
+  encoder's standard buckets (1080p/1440p/2160p) when idle and Ticks. `RunAll` is the explicit
+  path. Measured throughput persists per adapter+driver.
+- **Cache key**: `vendor | model@driverVersion | op | codec | bucket`. The model distinguishes
+  GPUs; the registry DriverVersion (display-adapter class key; "" fallback) distinguishes driver
+  updates. Justified fallback: when the registry read fails, the model name alone keys it.
+- **Live `auto`** (`encoderscan.ResolveDevicePlan` via `featurehost.NewEncodeDeviceResolver`):
+  once the candidate silicon is MEASURED, `auto` picks the encode adapter from `PlanEncodeFor`
+  (sustains the pixel rate + most headroom + VRAM); UNMEASURED stays at the engine default
+  (adapter 0 / native-first) so a fresh machine is exactly as before. `pin`/`avoid-busiest`
+  unchanged. Negotiated codec wins (the planner picks the adapter within what the peer accepted).
+  The decision is per open; a re-plan happens on reopen/renegotiation. A plan HOLD/pause degrades
+  to the engine default (the VRAM HOLD proper is already enforced by `mfenc.EncAdmit`).
+- **Explainability**: `ctl encoder-scan` reloads the shared cost file and the budget panel lists
+  measured throughput (Mpps) + learned costs + the last per-op admit decision; the per-route
+  chosen adapter/encoder + reqMpps + why is logged by the resolver (medialink log stream).
+
+Real benchmark + `TestMFBridgeHardware` NOT RUN: at execution the card had **Resolume Arena live
+at ~80% GPU (sm), encoder ~4%**, plus **OBS64 and parsecd** present (nvidia-smi pmon). That is
+exactly the protected/live condition the brief says to skip under - a GPU benchmark would contend
+with the user's live visuals and a possible live Parsec session. `native/zigenc` was therefore not
+built/run either (the exe only matters for a GPU run). `encodeBenchTimer` compiles against the
+Windows mfenc build but is GPU-unverified. The lead should run it on an idle card: close
+Resolume/OBS, leave the machine idle ~30s, then the media child's lazy sweep measures the HW
+encoder; `ctl encoder-scan` then shows the throughput table. Multi-GPU placement cannot be verified
+on this single-dGPU PC - on a two-adapter machine the lead should confirm `auto` picks the
+measured, least-busy, sustaining adapter and that non-primary throughput keys correctly (today
+non-primary throughput falls back to headroom-based selection; see the follow-up below).
+
+Follow-ups (bounded, documented): a forced synchronous `ctl encoder-bench` needs a daemon->child
+proxy (the lazy sweep + encoder-scan table cover the need today); the decode benchmark needs a
+throwaway GPU destination + pre-encoded AUs (encode is measured, decode throughput stays
+unmeasured => its sustain gate is skipped); multi-GPU per-adapter throughput keying (the budget
+resolves the PRIMARY adapter, so a non-primary encoder's measured rate is not retrieved - it
+degrades to headroom-based `auto`, no worse than before).
+
 ## Deliberate selection (`internal/encoderscan`, OS-neutral)
 
 - `PlanEncodeFor` adds a measured-throughput sustain gate (pixels/sec >= W*H*fps * 1.15); `auto`

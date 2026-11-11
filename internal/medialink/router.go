@@ -249,9 +249,10 @@ type Options struct {
 	EncodePolicy func() (prefer, pin string)
 
 	// EncodeDevice resolves which GPU to encode on, LIVE (read per route open; the resolver is
-	// TTL-cached in encoderscan). Returns the adapter LUID key + its DXGI ordinal; ("", -1) = the
+	// TTL-cached in encoderscan). Args = the route's geometry + negotiated encoder so AUTO can run the
+	// throughput-aware planner. Returns the adapter LUID key + its DXGI ordinal; ("", -1) = the
 	// engine's own default device, which emits no device flags at all. nil = always default.
-	EncodeDevice func() (luid string, index int)
+	EncodeDevice func(w, h, fps int, codec string) (luid string, index int)
 
 	// VRAM congestion governor (recv side): the DJ-PC emits MetaRate backpressure to trim the
 	// sender's bitrate (then fps; resolution last-resort) when primary-adapter free VRAM drops.
@@ -290,9 +291,9 @@ type RouteManager struct {
 	decoders     []string // §3.2 decodable video codecs (advertised + carried in offers; mu)
 	encFac       EncoderFactory
 	decFac       DecoderFactory
-	encMaxHeight int                           // encoder downscale ceiling (Options.EncodeMaxHeight; 0 = native)
-	encPolicy    func() (prefer, pin string)   // sender-side codec preference + encoder pin (live)
-	encDevice    func() (luid string, idx int) // sender-side encode-device resolver (live)
+	encMaxHeight int                                                      // encoder downscale ceiling (Options.EncodeMaxHeight; 0 = native)
+	encPolicy    func() (prefer, pin string)                              // sender-side codec preference + encoder pin (live)
+	encDevice    func(w, h, fps int, codec string) (luid string, idx int) // sender-side encode-device resolver (live)
 
 	headroom    func() (freeMB uint64, present bool) // recv-side VRAM governor input (nil = no governor)
 	governorOn  func() bool                          // governor live enable (nil = on when headroom present)
@@ -998,7 +999,7 @@ func (rm *RouteManager) pumpSource(ctx context.Context, session string, pa *pend
 			Software: pa.choice.Software, Width: pa.srcDesc.Width, Height: pa.srcDesc.Height,
 			FPS: pa.srcDesc.FPS, BitrateKbps: pa.offer.Bitrate, MaxHeight: maxH, DeviceIndex: -1}
 		if rm.encDevice != nil {
-			spec.DeviceLUID, spec.DeviceIndex = rm.encDevice()
+			spec.DeviceLUID, spec.DeviceIndex = rm.encDevice(spec.Width, spec.Height, int(spec.FPS), spec.Encoder)
 		}
 		esrc, err := rm.encFac(rctx, spec, src)
 		if err != nil {
