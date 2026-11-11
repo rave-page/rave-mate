@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -67,6 +68,11 @@ type encoder struct {
 func newEncoder(ctx context.Context, log *logbus.Bus, ffmpeg string, spec medialink.EncodeSpec, src medialink.Source) (*encoder, error) {
 	if spec.Width <= 0 || spec.Height <= 0 || spec.Width > 16384 || spec.Height > 16384 {
 		return nil, fmt.Errorf("mediapipe: bad encode size %dx%d", spec.Width, spec.Height)
+	}
+	// Resolve the VA-API render node once, here, so the encode child's argv names the node whose
+	// driver actually has the encode entrypoint (not a blind default). No-op off Linux / non-vaapi.
+	if strings.HasSuffix(spec.Encoder, "_vaapi") && spec.VAAPIRenderNode == "" {
+		spec.VAAPIRenderNode = ensureVAAPINode(ctx, ffmpeg)
 	}
 	cctx, cancel := context.WithCancel(ctx)
 	e := &encoder{

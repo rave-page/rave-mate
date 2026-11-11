@@ -166,6 +166,27 @@ binary. Run via `make generate-api`.
 | `github.com/oapi-codegen/oapi-codegen/v2` | v2.7.1 | 2026-06-05 | Generates the filtered Go API client from `/openapi.json`. 2.7.1 closes GHSA-rjwr-m7qx-3fjr (server-description comment injection; we generate from our own spec, defense in depth). |
 | `github.com/getkin/kin-openapi` | v0.144.0 | 2026-07-23 | OpenAPI 3 loader; lets us fix up the spec before generation. 0.144.0 closes GHSA-r277-6w6q-xmqw (critical, ValidationHandler fail-open) + GHSA-jpcw-4wr7-c3vq — neither path reachable from genapi (pure codegen, no request validation), fixed anyway. **One-time soak exemption** (user-approved 2026-07-25, `.modage-allow`): release was 2d old; verified before adoption — go checksum-DB verify clean, module-proxy bytes byte-identical to the GitHub v0.144.0 tag (0 differing files), release cut by the long-time maintainer (fenollp), and a danger-pattern scan of every added line in the v0.135.0→v0.144.0 diff found no exec/syscall/net/unsafe/linkname additions outside testdata. Exemption covers EXACTLY this version; future bumps re-enter the normal 7-day soak. Transitives pulled by the bump (jsonpointer v0.22.5, swag/jsonname v0.25.5, oasdiff/yaml v0.1.1, yaml3 v0.0.14, jsonschema/v6 v6.0.2, regexp2 v1.11.0, testify/v2 v2.4.0) are all ≥30d old — no exemption needed. |
 
+### Build containers (build-time only, NOT shipped, NOT a Go dep)
+
+The Linux sender binary (`sus`, Arch) is cross-built on a Windows dev PC in a pinned Docker
+box - `contrib/linux-build/Dockerfile`, driven by `scripts/build-linux.ps1`. Debian 13 (trixie)
+glibc 2.41 is <= Arch's, so the output runs on `sus`. The base image is digest-pinned and the
+apt feed is a fixed snapshot (both >7 days old, same soak rule as Go deps); the Go toolchain is
+the exact version `go.mod` requires, tarball SHA-256-verified. Nothing here is linked into any
+shipped artifact - it only produces the binary.
+
+| Component | Source | Integrity anchor |
+|---|---|---|
+| Debian 13 base | `debian:trixie-20261027-slim` (shared with `spout2pw/contrib/build`) | digest `sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4` + apt snapshot `20261027T000000Z` (snapshot.debian.org). |
+| Go toolchain | `go.dev/dl/go1.26.6.linux-amd64.tar.gz` (the version `go.mod` pins) | hard-pinned `sha256:708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89`. |
+
+apt build deps (cgo: Fyne/Gio/oto need a C toolchain + GL/X11/Wayland even for the headless
+`--service` binary, which still links the GUI): the CI Linux set (`gcc pkg-config
+libgl1-mesa-dev xorg-dev libasound2-dev libwayland-dev libxkbcommon{,-x11}-dev libvulkan-dev
+libegl1-mesa-dev libx11-xcb-dev libxcursor-dev libxfixes-dev`) plus `libpipewire-0.3-dev
+libgbm-dev libdrm-dev` for the `-tags pipewire` capture source (unit 4). All from the pinned
+Debian snapshot.
+
 ### Native toolchain (build-time only, NOT a Go dep)
 
 | Tool | Version | Why |

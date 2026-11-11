@@ -19,11 +19,12 @@ import (
 
 // Caps is the probed capability set fed into medialink Options / SetCodecCaps.
 type Caps struct {
-	Encoders []string          // working video encoders (§3.2 matrix candidates: build-present AND test-encode passed)
-	InBuild  []string          // candidates present in `ffmpeg -encoders` (superset of Encoders; diff = in build but failed to encode)
-	Errors   map[string]string // encoder name → last stderr line, for in-build candidates whose test-encode failed
-	Decoders []string          // decodable codec capability names (medialink.Decode*)
-	HWAccels []string          // decode hwaccel methods, preference-ordered
+	Encoders  []string          // working video encoders (§3.2 matrix candidates: build-present AND test-encode passed)
+	InBuild   []string          // candidates present in `ffmpeg -encoders` (superset of Encoders; diff = in build but failed to encode)
+	Errors    map[string]string // encoder name → last stderr line, for in-build candidates whose test-encode failed
+	Decoders  []string          // decodable codec capability names (medialink.Decode*)
+	HWAccels  []string          // decode hwaccel methods, preference-ordered
+	VAAPINode string            // picked /dev/dri/renderD* when a *_vaapi encoder works ("" otherwise / non-Linux)
 	// Validated is false for a LISTING-ONLY probe (ProbeListing): Encoders is then the in-build
 	// candidate set, not a test-encode-proven set, so an entry may still fail at route time.
 	Validated bool
@@ -184,6 +185,7 @@ func runProbe(ctx context.Context, ffmpeg string) Caps {
 	}
 	c.Decoders = parseDecoders(ffmpegText(ctx, ffmpeg, "-decoders"))
 	c.HWAccels = parseHWAccels(ffmpegText(ctx, ffmpeg, "-hwaccels"))
+	c.VAAPINode = vaapiDevice() // the render node ensureVAAPINode picked while test-encoding *_vaapi
 	return c
 }
 
@@ -204,12 +206,13 @@ func ffmpegText(ctx context.Context, ffmpeg, flag string) string {
 // the caller can report WHY a build-present HW encoder didn't work (device/driver/resolution).
 // 1280x720 (not a tiny 160x120) so HW encoders with a minimum-resolution floor aren't false-negatived.
 func testEncode(ctx context.Context, ffmpeg, name string) (bool, string) {
+	args, ok := testEncodeArgs(ctx, ffmpeg, name)
+	if !ok {
+		return false, "no usable VA-API render node (enumerated /dev/dri/renderD*)"
+	}
 	cctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, ffmpeg,
-		"-hide_banner", "-loglevel", "warning", // warning: surface the encoder's OWN init failure, not just the muxer's downstream complaint
-		"-f", "lavfi", "-i", "color=c=black:s=1280x720:r=10",
-		"-frames:v", "3", "-pix_fmt", "yuv420p", "-c:v", name, "-f", "null", "-")
+	cmd := exec.CommandContext(cctx, ffmpeg, args...)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	sysexec.Hide(cmd)
@@ -222,6 +225,26 @@ func testEncode(ctx context.Context, ffmpeg, name string) (bool, string) {
 		return false, bestErrLine(strings.TrimSpace(stderr.String()))
 	}
 	return true, ""
+}
+
+// testEncodeArgs returns the throwaway test-encode argv for an encoder. *_vaapi encoders get a
+// VA-API-specific argv on the deliberately-picked render node (the generic color-source probe
+// has no -vaapi_device/hwupload and false-negatives them); everything else gets the generic
+// probe. loglevel warning surfaces the encoder's OWN init failure, not just the muxer's
+// downstream complaint. ok=false => a *_vaapi encoder with no usable render node (skip it).
+func testEncodeArgs(ctx context.Context, ffmpeg, name string) ([]string, bool) {
+	if strings.HasSuffix(name, "_vaapi") {
+		node := ensureVAAPINode(ctx, ffmpeg)
+		if node == "" {
+			return nil, false
+		}
+		return vaapiTestEncodeArgs(node, name), true
+	}
+	return []string{
+		"-hide_banner", "-loglevel", "warning",
+		"-f", "lavfi", "-i", "color=c=black:s=1280x720:r=10",
+		"-frames:v", "3", "-pix_fmt", "yuv420p", "-c:v", name, "-f", "null", "-",
+	}, true
 }
 
 // bestErrLine picks the encoder's real init error from ffmpeg stderr: the FIRST line naming the

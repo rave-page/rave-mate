@@ -1,4 +1,4 @@
-//go:build !spout && !syphon && !pipewire
+//go:build !spout && !syphon
 
 package videoshare
 
@@ -9,6 +9,10 @@ import (
 )
 
 // backendName is the compiled-in transport label. The default build has no native backend.
+// NOTE: `pipewire` is intentionally NOT excluded here. The Linux `-tags pipewire` build is the
+// PipeWire video-node CAPTURE source (internal/pwcapture), not a videoshare pipewire SENDER; the
+// sender stays the no-op until a real sender_pipewire.go lands, so `-tags pipewire` BUILDS (it was
+// unbuildable before: the tag excluded this file but no sender_pipewire.go exists).
 const backendName = "none"
 
 // newSender returns the no-op sender: the sink runs (gate + render) but publishes nothing. Build
