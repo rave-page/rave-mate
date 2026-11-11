@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/binary"
 	"errors"
+	"sync"
 
 	"rave.page/mate/internal/wirecrypto"
 )
@@ -274,13 +275,14 @@ func numFrags(wireLen, bodyMax int) int {
 
 // reasmEntry collects a frame's fragments until all FragCount arrive.
 type reasmEntry struct {
-	key     uint64 // stream<<32 | frameSeq
-	frags   [][]byte
-	have    int
-	count   uint16
-	bytes   int
-	seq     uint64 // highest datagram seq seen for this frame (deadline/ordering aid)
-	addedAt int64  // media-clock ns at first fragment (deadline sweep input)
+	key      uint64 // stream<<32 | frameSeq
+	frags    [][]byte
+	have     int
+	count    uint16
+	bytes    int
+	seq      uint64 // highest datagram seq seen for this frame (deadline/ordering aid)
+	addedAt  int64  // media-clock ns at first fragment (deadline sweep input)
+	lastNack int64  // media-clock ns of the last fragment-NACK emitted for this frame (rate limit)
 }
 
 func reasmKey(stream uint16, frameSeq uint32) uint64 {
@@ -289,19 +291,26 @@ func reasmKey(stream uint16, frameSeq uint32) uint64 {
 
 // reassembler holds in-flight frames, bounded by frame COUNT and total BYTES. On a cap breach the
 // OLDEST incomplete frame is evicted (drop-oldest); the conn additionally sweeps entries past their
-// playout deadline (sweepExpired). Not safe for concurrent use - the conn's single recv goroutine
-// owns it.
+// playout deadline (sweepExpired). mu guards it: the conn's recvLoop (accept) and maintLoop
+// (sweepExpired/scanNack) both touch it.
 type reassembler struct {
+	mu        sync.Mutex
 	entries   map[uint64]*reasmEntry
 	order     []uint64 // insertion order for drop-oldest eviction
 	bytes     int
 	maxFrames int
 	maxBytes  int
-	// completed guards against a late/duplicate fragment resurrecting a just-finished frame: the
-	// highest completed/evicted frameSeq per stream (wrap-aware signed compare).
-	doneSeq map[uint16]uint32
-	dropped uint64 // frames dropped at reassembly (cap breach or expiry) - telemetry
+	// done guards against a late/duplicate fragment resurrecting a just-finished frame: a BOUNDED
+	// SET of recently completed/evicted frame keys (NOT a highest-watermark - a watermark would
+	// false-reject an earlier frame still legitimately in flight when a later one completes first
+	// under reorder/retransmit).
+	done      map[uint64]struct{}
+	doneOrder []uint64
+	dropped   uint64 // frames dropped at reassembly (cap breach or expiry) - telemetry
 }
+
+// doneRingMax bounds the recently-finished frame-key set (drop-oldest).
+const doneRingMax = 512
 
 func newReassembler(maxFrames, maxBytes int) *reassembler {
 	if maxFrames <= 0 {
@@ -311,17 +320,19 @@ func newReassembler(maxFrames, maxBytes int) *reassembler {
 		maxBytes = 32 << 20
 	}
 	return &reassembler{entries: map[uint64]*reasmEntry{}, maxFrames: maxFrames, maxBytes: maxBytes,
-		doneSeq: map[uint16]uint32{}}
+		done: map[uint64]struct{}{}}
 }
 
 // accept folds one media fragment in. Returns a completed frame's full wire bytes (header||payload)
 // when the last fragment arrives, else nil. chunk is copied (the caller's datagram buffer is
 // recycled). A fragment for an already-completed/evicted frame, or a duplicate, is ignored.
 func (r *reassembler) accept(h dgHeader, chunk []byte, nowNs int64) ([]byte, bool) {
-	if done, ok := r.doneSeq[h.Stream]; ok && int32(h.FrameSeq-done) <= 0 {
-		return nil, false // already finished or older than the last finished frame on this stream
-	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	key := reasmKey(h.Stream, h.FrameSeq)
+	if _, ok := r.done[key]; ok {
+		return nil, false // this frame already completed / was dropped - ignore its stragglers
+	}
 	e := r.entries[key]
 	if e == nil {
 		e = &reasmEntry{key: key, frags: make([][]byte, h.FragCount), count: h.FragCount, addedAt: nowNs}
@@ -373,6 +384,8 @@ func (r *reassembler) accept(h dgHeader, chunk []byte, nowNs int64) ([]byte, boo
 // missing returns the fragment indices not yet received for an in-flight frame (NACK input). nil if
 // the frame is unknown or complete.
 func (r *reassembler) missing(stream uint16, frameSeq uint32) []uint16 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	e := r.entries[reasmKey(stream, frameSeq)]
 	if e == nil {
 		return nil
@@ -390,6 +403,8 @@ func (r *reassembler) missing(stream uint16, frameSeq uint32) []uint16 {
 // playout deadline). Returns the dropped (stream, frameSeq) pairs so the conn can PLI inter-coded
 // streams. Drop-expired-incomplete policy (brief req 1).
 func (r *reassembler) sweepExpired(cutoffNs int64) [][2]uint32 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if len(r.order) == 0 {
 		return nil
 	}
@@ -443,8 +458,16 @@ func (r *reassembler) remove(key uint64) {
 }
 
 func (r *reassembler) markDone(stream uint16, frameSeq uint32) {
-	if cur, ok := r.doneSeq[stream]; !ok || int32(frameSeq-cur) > 0 {
-		r.doneSeq[stream] = frameSeq
+	key := reasmKey(stream, frameSeq)
+	if _, ok := r.done[key]; ok {
+		return
+	}
+	r.done[key] = struct{}{}
+	r.doneOrder = append(r.doneOrder, key)
+	if len(r.doneOrder) > doneRingMax { // drop-oldest; the set never grows with traffic
+		old := r.doneOrder[0]
+		r.doneOrder = r.doneOrder[1:]
+		delete(r.done, old)
 	}
 }
 
