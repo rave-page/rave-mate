@@ -19,12 +19,12 @@ import (
 
 // Caps is the probed capability set fed into medialink Options / SetCodecCaps.
 type Caps struct {
-	Encoders []string          // working video encoders (§3.2 matrix candidates: build-present AND test-encode passed)
-	InBuild  []string          // candidates present in `ffmpeg -encoders` (superset of Encoders; diff = in build but failed to encode)
-	Errors   map[string]string // encoder name → last stderr line, for in-build candidates whose test-encode failed
-	Decoders []string          // decodable codec capability names (medialink.Decode*)
-	HWAccels []string          // decode hwaccel methods, preference-ordered
-	VAAPINode string           // picked /dev/dri/renderD* when a *_vaapi encoder works ("" otherwise / non-Linux)
+	Encoders  []string          // working video encoders (§3.2 matrix candidates: build-present AND test-encode passed)
+	InBuild   []string          // candidates present in `ffmpeg -encoders` (superset of Encoders; diff = in build but failed to encode)
+	Errors    map[string]string // encoder name → last stderr line, for in-build candidates whose test-encode failed
+	Decoders  []string          // decodable codec capability names (medialink.Decode*)
+	HWAccels  []string          // decode hwaccel methods, preference-ordered
+	VAAPINode string            // picked /dev/dri/renderD* when a *_vaapi encoder works ("" otherwise / non-Linux)
 	// Validated is false for a LISTING-ONLY probe (ProbeListing): Encoders is then the in-build
 	// candidate set, not a test-encode-proven set, so an entry may still fail at route time.
 	Validated bool
