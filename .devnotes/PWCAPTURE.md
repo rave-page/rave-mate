@@ -112,6 +112,11 @@ capture -> VA-API H.264 encode (`TestCaptureEncodeE2E`), 180 frames:
   import). So 4K readback cannot hold 60: the 33 MB/frame glReadPixels + flip + copy pins >1 core and
   the DCC multi-plane import is rejected.
 
+**Soak (1080p60 dmabuf, 600s, 5 producer restarts, `TestCaptureSoak`):** capture -> VA-API encode
+sustained **~58.9 fps, 0 stalls** across all 5 restarts (reconnect via `do_reconnect` on stream
+ERROR recovers every time). **No leak**: pwcap RSS 97656 -> 97948 kB (+0.3 MB/10 min), fds 44 -> 44;
+ffmpeg RSS 125756 -> 126528 kB, fds 8 -> 8. 35360 frames / 1405 MB total.
+
 **Zero-copy dmabuf -> VAAPI (follow-up, NOT built):** the 4K answer. Instead of
 EGLImage->glReadPixels->RGBA->ffmpeg rawvideo pipe, hand the dmabuf straight to the VAAPI encoder:
 feed ffmpeg `-hwaccel vaapi -hwaccel_output_format vaapi` consuming the dmabuf (or a native libva
