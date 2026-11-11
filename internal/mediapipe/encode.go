@@ -62,6 +62,7 @@ type encoder struct {
 	dropped atomic.Uint64 // undersized/foreign input frames skipped
 	framed  atomic.Bool   // child emitted at least one AU (hw-scaler demotion probe)
 	swScale atomic.Bool   // MaxHeight downscale pinned to CPU swscale (GPU scaler failed here)
+	resCap  *resCapGate   // anti-flap gate shared in spirit with the native bridge (per-engine instance)
 }
 
 // newEncoder validates the spec and starts the supervision loop.
@@ -80,6 +81,7 @@ func newEncoder(ctx context.Context, log *logbus.Bus, ffmpeg string, spec medial
 		size:   spec.Width * spec.Height * 4,
 		frames: make(chan *medialink.Frame, encFramesBuf),
 		cancel: cancel, done: make(chan struct{}),
+		resCap: newResCapGate(effCapHeight(spec.MaxHeight, spec.Height)),
 	}
 	go e.run(cctx)
 	return e, nil
@@ -133,18 +135,22 @@ func (e *encoder) SetRateHint(h medialink.RateHint) {
 	if h.MaxHeight > 0 && (want == 0 || h.MaxHeight < want) {
 		want = h.MaxHeight
 	}
-	e.mu.Lock()
-	changed := want != e.spec.MaxHeight
+	// Route the target through the shared anti-flap gate (effective coded height; 0 -> source), so the
+	// substitute respawns at most once per window and a restore needs the pressure sustained-gone.
+	target, changed := e.resCap.decide(effCapHeight(want, e.spec.Height))
 	if changed {
-		e.spec.MaxHeight = want
+		newMax := target
+		if target >= e.spec.Height {
+			newMax = 0 // at/above source = no downscale
+		}
+		e.mu.Lock()
+		e.spec.MaxHeight = newMax
 		if e.runStop != nil {
 			e.runStop() // respawn with the new downscale ceiling
 		}
-	}
-	e.mu.Unlock()
-	if changed {
+		e.mu.Unlock()
 		e.log.Info(source, "rate hint: resolution cap applied via child respawn (VRAM last resort)",
-			map[string]any{"maxHeight": want, "hintHeight": h.MaxHeight, "base": e.baseMaxHeight})
+			map[string]any{"maxHeight": newMax, "codedHeight": target, "hintHeight": h.MaxHeight, "base": e.baseMaxHeight})
 	}
 	if h.MaxBitrateKbps > 0 || h.MaxFPS > 0 {
 		e.log.Debug(source, "rate hint bitrate/fps on the ffmpeg substitute is reserved (spawn-time only) - ignored", map[string]any{

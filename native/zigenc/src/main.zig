@@ -11,6 +11,7 @@
 //!    "dir":"enc"|"dec","codec":"h264"|"hevc","dsh":<u64 dest share handle>,
 //!    "dfmt":<DXGI fmt>,"dname":"<dest sender>","in_ring_kb":..}
 //!   {"op":"close","sid":1} | {"op":"bitrate","sid":1,"kbps":..} | {"op":"idr","sid":1}
+//!   {"op":"capheight","sid":1,"out_w":..,"out_h":..} (proto v4: live coded-resolution cap)
 //!   {"op":"quit"}
 //! stdout events: {"ev":"hello","ver":2,"luid":..} {"ev":"opened","sid":..,"ok":..,
 //!   "err":..,"name":..,"bgra":..,"src":..,"cap":"zerocopy"|"downgraded","err_src":..}
@@ -265,6 +266,11 @@ const Session = struct {
     mu: Lock = .{},
     want_idr: bool = false,
     want_kbps: u32 = 0,
+    // want_cap_w/h: a pending LIVE coded-resolution cap (0 = none). The session thread applies it via
+    // enc.reconfigureOutput and clears it; the parent sends even target dims (aspect-exact, never
+    // above source), so the child never computes geometry.
+    want_cap_w: i32 = 0,
+    want_cap_h: i32 = 0,
     closing: bool = false,
 
     thread: ?std.Thread = null,
@@ -512,19 +518,26 @@ fn sessionMain(s: *Session) void {
         _ = WaitForSingleObject(s.ev_frame, 20);
         var want_idr = false;
         var want_kbps: u32 = 0;
+        var cap_w: i32 = 0;
+        var cap_h: i32 = 0;
         var closing = false;
         {
             s.mu.lock();
             defer s.mu.unlock();
             want_idr = s.want_idr;
             want_kbps = s.want_kbps;
+            cap_w = s.want_cap_w;
+            cap_h = s.want_cap_h;
             closing = s.closing;
             s.want_idr = false;
             s.want_kbps = 0;
+            s.want_cap_w = 0;
+            s.want_cap_h = 0;
         }
         if (closing) break;
         if (want_idr) enc.forceIDR();
         if (want_kbps > 0) _ = enc.setBitrate(want_kbps);
+        if (cap_w > 0 and cap_h > 0 and enc.reconfigureOutput(cap_w, cap_h, sink) == -2) break; // device lost
         const seq = s.hdr.frameSeq();
         if (seq != last_seq) {
             last_seq = seq;
@@ -571,14 +584,16 @@ fn sessionMain(s: *Session) void {
 }
 
 // Mailbox is one drained control snapshot (stdin thread → session thread).
-const Mailbox = struct { idr: bool, kbps: u32, closing: bool };
+const Mailbox = struct { idr: bool, kbps: u32, cap_w: i32, cap_h: i32, closing: bool };
 
 fn drainMailbox(s: *Session) Mailbox {
     s.mu.lock();
     defer s.mu.unlock();
-    const m = Mailbox{ .idr = s.want_idr, .kbps = s.want_kbps, .closing = s.closing };
+    const m = Mailbox{ .idr = s.want_idr, .kbps = s.want_kbps, .cap_w = s.want_cap_w, .cap_h = s.want_cap_h, .closing = s.closing };
     s.want_idr = false;
     s.want_kbps = 0;
+    s.want_cap_w = 0;
+    s.want_cap_h = 0;
     return m;
 }
 
@@ -614,6 +629,7 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
         if (m.closing) break;
         if (m.idr) enc.forceIDR();
         if (m.kbps > 0) _ = enc.setBitrate(m.kbps);
+        if (m.cap_w > 0 and m.cap_h > 0 and enc.reconfigureOutput(m.cap_w, m.cap_h, sink) == -2) break; // device lost
         if (!live) {
             _ = enc.pump(sink); // async MFT events still arrive; keep draining the tail
             continue;
@@ -855,13 +871,15 @@ pub fn main(init: std.process.Init) !void {
     }
 
     _ = timeBeginPeriod(1); // media child: 1 ms scheduler quantum (Sleep(1) is ~15.6 ms without it)
-    // ver 2 = src:"spout" + header v2; ver 3 = dir:"dec" (the inbound-ring layout). The version gate
-    // is the ONLY thing standing between an older child and a mapping it would size wrong: a v2
-    // child ignores an unknown "dir" and would open an ENCODE session sized from in_w*in_h*4, i.e.
-    // past the end of the parent's much smaller dec mapping.
+    // ver 2 = src:"spout" + header v2; ver 3 = dir:"dec" (the inbound-ring layout); ver 4 = the
+    // "capheight" live coded-resolution cap op. The version gate is the ONLY thing standing between an
+    // older child and a mapping it would size wrong: a v2 child ignores an unknown "dir" and would
+    // open an ENCODE session sized from in_w*in_h*4, past the end of the parent's smaller dec mapping.
+    // The capheight op is additive and ignored by a pre-v4 child (cap applied at open only), so the
+    // parent version-gates sending it rather than relying on the silent-ignore alone.
     emit(struct {
         ev: []const u8 = "hello",
-        ver: u32 = 3,
+        ver: u32 = 4,
         luid: i64,
         // Active policies: the only channel that says WHICH code path this child is running.
         dev: []const u8,
@@ -970,6 +988,16 @@ pub fn main(init: std.process.Init) !void {
             s.mu.lock();
             s.want_idr = true;
             s.mu.unlock();
+        } else if (std.mem.eql(u8, cmd.op, "capheight")) {
+            // Live coded-resolution cap (proto v4). out_w/out_h carry the new even target dims the
+            // parent computed. A pre-v4 child never reaches here (unknown op ignored), so it degrades
+            // to "cap applied at open only" - the version gate the parent enforces before sending.
+            if (cmd.out_w > 0 and cmd.out_h > 0) {
+                s.mu.lock();
+                s.want_cap_w = cmd.out_w;
+                s.want_cap_h = cmd.out_h;
+                s.mu.unlock();
+            }
         }
     }
 

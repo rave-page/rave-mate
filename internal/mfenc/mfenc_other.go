@@ -98,6 +98,7 @@ func (s *ProcSession) Encode(_ []byte, _ int64) error { return ErrUnsupported }
 func (s *ProcSession) Output() <-chan AU              { return nil }
 func (s *ProcSession) ForceKeyframe()                 {}
 func (s *ProcSession) SetBitrate(int)                 {}
+func (s *ProcSession) SetCapHeight(int, int) bool     { return false }
 func (s *ProcSession) Close()                         {}
 func (s *ProcSession) Name() string                   { return "" }
 func (s *ProcSession) InputIsBGRA() bool              { return false }
