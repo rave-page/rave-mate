@@ -147,7 +147,9 @@ func TestEncodeArgsShapes(t *testing.T) {
 func TestDecodeArgsShapes(t *testing.T) {
 	spec := medialink.DecodeSpec{Codec: medialink.CodecH264, Width: 1280, Height: 720, FPS: 60}
 	sw := decodeArgs(spec, "")
-	if contains(sw, "-hwaccel") || !contains(sw, "h264") || !contains(sw, "1280x720") {
+	// The nominal size now rides a scale filter (upscales a VRAM-capped coded frame back to nominal),
+	// not the old "-s WxH" output option.
+	if contains(sw, "-hwaccel") || !contains(sw, "h264") || !contains(sw, "-vf") || !contains(sw, "scale=1280:720") {
 		t.Fatalf("sw decode args: %v", sw)
 	}
 	hw := decodeArgs(spec, "cuda")
