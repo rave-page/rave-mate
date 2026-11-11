@@ -59,6 +59,7 @@ type Control interface {
 	RemoteVRInputDiag(nodeID string) string                // a paired peer's VR input/binding diagnostic (nodeID "" = first connected)
 	Perf() string                                          // this instance's perf-diagnosis report (perfmon rings + system + probes; samples ~1s)
 	EncoderScan() string                                   // encoder-contention scan + affinity plan preview (ctl encoder-scan; read-only)
+	PipewireNodes() string                                 // discovered PipeWire video nodes + which are capturable (ctl pw-nodes; Linux sender)
 	// FrameShot samples a local video-share sender's CONTENT and writes the last frame (ctl
 	// frame-shot). The origin-side "is this picture actually moving" oracle; read-only.
 	FrameShot(path, sender string, n int, crop [4]int) string
@@ -429,6 +430,8 @@ func handleConn(conn net.Conn, ctrl Control) {
 		fmt.Fprintln(conn, ctrl.Perf())
 	case cmd == "ENCODER-SCAN":
 		fmt.Fprint(conn, ctrl.EncoderScan()) // multi-line; client reads to EOF
+	case cmd == "PW-NODES":
+		fmt.Fprint(conn, ctrl.PipewireNodes()) // multi-line; read to EOF
 
 	case strings.HasPrefix(cmd, "REMOTE-ENCODER-SCAN"):
 		fmt.Fprintln(conn, ctrl.RemoteEncoderScan(strings.TrimSpace(cmd[len("REMOTE-ENCODER-SCAN"):])))

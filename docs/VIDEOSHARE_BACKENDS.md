@@ -19,7 +19,10 @@ ships the no-op backend (`sender_noop.go`, tag `!spout && !syphon && !pipewire`)
 | macOS | `syphon` | Syphon (Metal/OpenGL shared texture) | **Not implemented** (no `sender_syphon.go`, no mac CI job) |
 
 A tag whose `sender_*.go` is absent **does not compile** (`undefined: newSender, backendName`),
-so a tag is wired into CI only once its backend file lands.
+so a tag is wired into CI only once its backend file lands. **Exception, `-tags pipewire`:** the
+no-op sender (`sender_noop.go`) now covers it, so the tag BUILDS (it drives the PipeWire video
+CAPTURE source in `internal/pwcapture`, not a videoshare pipewire sender). `syphon` is still
+unbuildable until `sender_syphon.go` lands.
 
 ## Windows - Spout (shipped)
 
@@ -60,17 +63,21 @@ so a tag is wired into CI only once its backend file lands.
   raw-exe feed carries the DLL. If updating a legacy install, deliver the first spout release via
   the full installer (or extend `internal/selfupdate` to fetch the sibling DLL).
 
-## Linux - PipeWire (to implement)
+## Linux - PipeWire
 
-Backend not written. To turn on once `sender_pipewire.go` (tag `pipewire`, defining `newSender`
-+ `backendName`) lands:
+Two separate things share the `pipewire` tag:
 
-1. `.gitlab-ci.yml` `build:linux` before_script → add `pkg-config` (already have a C toolchain)
-   and the PipeWire dev headers: **`libpipewire-0.3-dev`** (pulls `libspa-0.2-dev`). Skip the dev
-   dep only if the backend uses pure-Go PipeWire bindings (check its build constraints / cgo use).
-2. `build:linux` go build → add `-tags pipewire` (keep `CGO_ENABLED=1` if the backend is cgo).
-3. RUNTIME: PipeWire is part of the modern Linux desktop session (`libpipewire-0.3-0`); no file
-   ships beside the binary. Receiver side is any PipeWire video consumer (OBS PipeWire capture).
+- **CAPTURE source (`internal/pwcapture`, SHIPPED under `-tags pipewire`):** the Linux SENDER
+  captures a PipeWire video node (Spout2PW's `spout2pw.VRChat.VRCSender1`, a camera, any
+  `Stream/Output/Video` / `Video/Source`) and exposes it as a `medialink.Source` a peer routes by
+  node name. cgo shim (`shim.c`) dlopens `libpipewire-0.3` at runtime - no load-time link, no
+  go.mod dep; absent libpipewire => clean no-op. See `.devnotes/PWCAPTURE.md`.
+- **videoshare SENDER (publishing a local deck as a pipewire node): NOT written.** `sender_noop.go`
+  covers the tag so the build is green; a real `sender_pipewire.go` is a future add.
+
+Build: `CGO_ENABLED=1 go build -tags pipewire ./cmd/rave-mate` (the pinned Debian box,
+`contrib/linux-build/`, carries `libpipewire-0.3-dev` + `libspa-0.2-dev`). RUNTIME: PipeWire is
+part of the modern Linux desktop session (`libpipewire-0.3.so.0`); nothing ships beside the binary.
 
 ## macOS - Syphon (to implement; no mac CI today)
 

@@ -75,6 +75,7 @@ import (
 	"rave.page/mate/internal/peers"
 	"rave.page/mate/internal/perfmon"
 	"rave.page/mate/internal/playsync"
+	"rave.page/mate/internal/pwcapture"
 	"rave.page/mate/internal/remotectl"
 	"rave.page/mate/internal/rtspserve"
 	"rave.page/mate/internal/session"
@@ -3644,6 +3645,34 @@ func (c *appControl) EncoderScan() string {
 	fmt.Fprintf(&b, "plan: %s family=%s encoder=%s device=%s scale=%d%%  (%s)\n",
 		plan.Action, plan.Family, plan.Encoder, plan.Device, plan.ScalePct, plan.Reason)
 	b.WriteString("note: app-agnostic headroom planner; adapter binding is a vendor-name join (exact per-encoder LUID pinning pending), encode-session counts need a vendor SDK and stay unknown\n")
+	return b.String()
+}
+
+// PipewireNodes lists discovered PipeWire video producer nodes and which are capturable (ctl
+// pw-nodes, Linux sender). A direct pw-dump read (no media child needed); empty off Linux / with
+// no PipeWire session.
+func (c *appControl) PipewireNodes() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	nodes, ok := pwcapture.DiscoverNodes(ctx)
+	built := "capture shim: " + map[bool]string{true: "built + libpipewire loaded", false: "NOT built (no -tags pipewire) or libpipewire missing - discovery only"}[pwcapture.CaptureBuilt()]
+	if !ok {
+		return "pipewire: pw-dump unavailable (not a PipeWire session, or pw-dump not installed)\n" + built + "\n"
+	}
+	if len(nodes) == 0 {
+		return "pipewire: no video producer nodes (Stream/Output/Video or Video/Source) found\n" + built + "\n"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "pipewire video nodes (%d):\n", len(nodes))
+	for _, n := range nodes {
+		tag := "capturable"
+		if !n.Capturable {
+			tag = "not-capturable (no RGBA-family format)"
+		}
+		fmt.Fprintf(&b, "  id=%-5d %-20s %-40s %dx%d@%.0f  [%s]\n",
+			n.ID, n.MediaClass, n.Name, n.Width, n.Height, n.FPS, tag)
+	}
+	b.WriteString(built + "\n")
 	return b.String()
 }
 

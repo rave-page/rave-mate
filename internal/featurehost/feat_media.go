@@ -16,6 +16,7 @@ import (
 	"rave.page/mate/internal/mediapipe"
 	"rave.page/mate/internal/mediaroute"
 	"rave.page/mate/internal/mfenc"
+	"rave.page/mate/internal/pwcapture"
 	"rave.page/mate/internal/webcam"
 )
 
@@ -44,6 +45,7 @@ type mediaFeature struct {
 	router  *medialink.RouteManager
 	routes  *mediaroute.Manager
 	cam     *webcam.Manager
+	pw      *pwcapture.Manager // Linux PipeWire video-node capture (no-op where unavailable)
 	secrets *mediaSecretStore
 
 	mu       sync.Mutex
@@ -134,6 +136,12 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 		return f.camCfg
 	})
 	f.cam.SetRouter(f.router)
+
+	// PipeWire video-node capture (Linux sender): discovers Stream/Output/Video + Video/Source
+	// nodes and offers the capturable ones as medialink sources. No-op where libpipewire/-tags
+	// pipewire is absent (every non-Linux build, and Linux without the shim).
+	f.pw = pwcapture.New(rt.Log, pwcapture.Config{})
+	f.pw.SetRouter(f.router)
 	return nil
 }
 
@@ -146,6 +154,7 @@ func (f *mediaFeature) Start(ctx context.Context) error {
 		f.router.Stop()
 		return err
 	}
+	_ = f.pw.Start(ctx) // best-effort; Start no-ops (logged) when capture is unavailable
 	f.bridgeUp()
 
 	t := time.NewTicker(telemetryEvery)
@@ -163,6 +172,7 @@ func (f *mediaFeature) Start(ctx context.Context) error {
 			for _, u := range f.upUnsub {
 				u()
 			}
+			f.pw.Stop()
 			f.cam.Stop()
 			f.router.Stop()
 			return nil

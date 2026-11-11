@@ -1,0 +1,89 @@
+# PipeWire video capture source (`internal/pwcapture`)
+
+Linux SENDER side: capture a PipeWire video node and route it to a paired Windows rave-mate over
+the existing medialink. Target producer is Spout2PW from VRChat under Proton
+(`spout2pw.VRChat.VRCSender1`, media.class `Stream/Output/Video`, 1920x1080). Implements
+`.devnotes/MEDIALINK_DESIGN.md` §P7/D8 (cgo `libpipewire-0.3` dlopen shim, no go.mod dep, GStreamer
++ pure-Go rejected).
+
+## Architecture
+
+- **Discovery** (`pwcapture.go`, cross-platform, pure Go): parse `pw-dump -N` JSON, keep nodes whose
+  `media.class` is `Stream/Output/Video` or `Video/Source`. Pull name + description + `EnumFormat`
+  (format, size, framerate). A node is **capturable** when it offers an RGBA-family format
+  (BGRA/RGBA/BGRx/RGBx) - a YUY2/NV12 camera is listed but not registered (no colour-convert path in
+  v1). Pure pw-dump => testable without hardware (`pwcapture_test.go`), and the daemon can read it
+  directly for `ctl pw-nodes` without touching the media child.
+- **Manager** (`manager.go`, cross-platform): polls discovery (3s), reconciles `RegisterSource`/
+  `UnregisterSource` on the medialink router with the real dims/fps so a peer routes by node name;
+  withdraws a node that vanishes. This is the appear/disappear half of reconnect (VRChat restart);
+  the mid-stream half is the capture stream auto-reconnecting by node name.
+- **Capture** (`shim.c` + `capture_pipewire.go`, `//go:build linux && pipewire`): a cgo shim that
+  `dlopen`s `libpipewire-0.3.so.0` at runtime (nothing load-time-linked, no go.mod dep; absent
+  libpipewire => `rpw_available()==0` => clean no-op). One capture = one `pw_thread_loop` + one
+  input `pw_stream` connected by `PW_KEY_TARGET_OBJECT` name with `AUTOCONNECT` (reconnects when the
+  producer returns). Frames land in a **bounded single slot** (drop-oldest + `dropped`/
+  `dmabuf_skipped` counters); `on_process` drains to the newest queued buffer (low latency). The Go
+  `pwSource.Next` pulls the latest (`rpw_wait_frame`, 200ms timeout → loop so a reconnect gap
+  doesn't EOF the route). One reusable RGBA buffer, returned without a copy (serial Next/consume by
+  the encode feeder; `Release` nil).
+- **No-op** (`capture_noop.go`, `!(linux && pipewire)`): discovery still works for `ctl pw-nodes`;
+  `openCapture` errors, nothing is registered. Every non-Linux build and Linux-without-the-shim
+  degrades cleanly.
+
+Wired in `internal/featurehost/feat_media.go` beside the webcam manager (same isolated media child).
+
+## Formats
+
+Offered in `EnumFormat`: BGRA/RGBA/BGRx/RGBx, size 1..8192, framerate 0..240. `on_param_changed`
+reads the negotiated format; requests SHM buffers (`MemFd|MemPtr`, also `DmaBuf`). `to_rgba` converts
+to Go NRGBA order handling stride + the 4 layouts.
+
+## Build
+
+`CGO_ENABLED=1 go build -tags pipewire ./cmd/rave-mate` in the pinned Debian box
+(`contrib/linux-build/`, carries `libpipewire-0.3-dev` + `libspa-0.2-dev` + EGL/GLES2/gbm/drm). The
+shim CFLAGS hardcode the Debian include dirs (`/usr/include/pipewire-0.3`, `/usr/include/spa-0.2`)
+on purpose - this builds ONLY in that box, and pkg-config would add `-lpipewire` (load-time link),
+which we must not have. Build headers are pipewire 1.4.2; runtime on sus is 1.6.10 (API/ABI stable).
+
+Fixed the previously-unbuildable `-tags pipewire` state: `videoshare/sender_noop.go` now also covers
+`pipewire` (the tag drives this CAPTURE source, not a videoshare pipewire SENDER, which stays no-op).
+
+## SHM path — VERIFIED (sus, 2026-11-11)
+
+`gst-launch-1.0 videotestsrc is-live=true ! video/x-raw,format=BGRx,width=1920,height=1080,
+framerate=60/1 ! pipewiresink mode=provide stream-properties="props,node.name=rmtest.video,
+media.class=Stream/Output/Video"` creates a Stream/Output/Video producer. The capture test binary
+(`go test -c -tags pipewire`, built in the box, run on sus) captured **60 frames, 8294400 bytes
+each (1920x1080 RGBA), ~56.7 fps, non-zero pixels**. Discovery + `ctl pw-nodes` list it as
+capturable with the right dims/fps.
+
+## DMA-BUF path — NOT IMPLEMENTED (designed)
+
+`spout2pw.VRChat.VRCSender1` was NOT present on sus at implementation time (VRChat not running,
+confirmed via `pw-cli ls Node`), so the DMA-BUF path cannot be verified against the real producer.
+libfunnel (Spout2PW) is very likely DMA-BUF only, so the SHM path alone may not capture the real
+VRChat node - the EGL import is required for it and is **not yet implemented**: shipping speculative
+EGL C that can only be compile-checked (no dmabuf producer to run it against) would be a false
+"done". The shim detects + counts dmabuf (next para) so the gap is visible, and the design is
+recorded here so the next step - run against a live VRChat node, then build + verify EGL - is exact.
+
+The shim currently DETECTS dmabuf buffers and counts them (`dmabuf_skipped`, surfaced in Close +
+`ctl` so a dmabuf-only producer is diagnosable, not silent). The EGL readback is the next step -
+status noted at the top of this section's commit. Design: on a `SPA_DATA_DmaBuf` buffer, import via
+`eglCreateImageKHR(EGL_LINUX_DMA_BUF_EXT)` with the fd/stride/offset/modifier from the SPA buffer +
+negotiated format, bind to a texture (`glEGLImageTargetTexture2DOES`), FBO + `glReadPixels` back to
+RGBA. EGL is initialised surfaceless (`EGL_PLATFORM_SURFACELESS_MESA`) on GLES2, dlopen'd from
+`libEGL.so.1` + `libGLESv2.so.2`. Do NOT mmap a dmabuf and assume linear pixels (AMD tiling). When
+the shim can't import a dmabuf it counts `dmabuf_skipped` + `dropped` (surfaced in Close logs), so a
+dmabuf-only producer is diagnosable rather than silent.
+
+## Follow-ups
+
+1. **Verify DMA-BUF against the real VRChat node** when it's running (pw-dump its EnumFormat +
+   modifiers; run the capture test with `RPW_TEST_NODE=spout2pw.VRChat.VRCSender1`).
+2. **Zero-copy dmabuf → VAAPI** (import the dmabuf straight into the VAAPI encoder, no RGBA readback)
+   - the §6 zero-copy path; only if the EGL readback can't hold 4K60.
+3. **YUV camera formats** (NV12/YUY2) so `Video/Source` cameras are capturable too.
+4. Multi-GPU EGL device selection (match the VAAPI render-node pick).
