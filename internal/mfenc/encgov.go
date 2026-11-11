@@ -19,3 +19,7 @@ var EncAdmit func(outW, outH, fps int, codec string) (allow bool, reason string)
 // encode session. The mediapipe factory detects it and HOLDS the route (retries on renegotiation)
 // rather than demoting to the ffmpeg encoder (no lighter on one GPU).
 var ErrEncodeHeldVRAM = errors.New("mfenc: native encode held - VRAM pressure")
+
+// EncObserve, when non-nil, records a MEASURED encode cost (MB) for an output geometry so the budget
+// refines its estimate. Fed from the primary-adapter free-VRAM delta across a successful open.
+var EncObserve func(outW, outH, fps int, codec string, deltaMB float64)

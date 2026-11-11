@@ -17,6 +17,7 @@ package gpubudget
 
 import (
 	"fmt"
+	"strings"
 
 	"rave.page/mate/internal/gpumem"
 )
@@ -150,6 +151,24 @@ func EstimateCostMB(op Op, g Geom) float64 {
 	default:
 		return (px * bppRGBA) / mib
 	}
+}
+
+// VendorOf extracts a cost-key vendor token from an adapter name ("NVIDIA GeForce RTX 3060" ->
+// "nvidia"). Unknown => the first word lowercased, or "" when empty.
+func VendorOf(name string) string {
+	n := strings.ToLower(name)
+	switch {
+	case strings.Contains(n, "nvidia"), strings.Contains(n, "geforce"), strings.Contains(n, "rtx"), strings.Contains(n, "quadro"):
+		return "nvidia"
+	case strings.Contains(n, "amd"), strings.Contains(n, "radeon"):
+		return "amd"
+	case strings.Contains(n, "intel"), strings.Contains(n, "arc"):
+		return "intel"
+	}
+	if f := strings.Fields(n); len(f) > 0 {
+		return f[0]
+	}
+	return ""
 }
 
 // dpbSurfaces is the decode reference-pool surface count estimate per codec (H.264 keeps more refs).

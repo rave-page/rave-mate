@@ -1111,7 +1111,11 @@ func OpenProcSessionOpts(o ProcOpts) (*ProcSession, error) {
 			return nil, fmt.Errorf("%w: %s", ErrEncodeHeldVRAM, reason)
 		}
 	}
+	beforeH := DecHeadroom() // measurement baseline (same primary-adapter headroom seam as decode)
 	s, err := openProcSessionOn(o)
+	if err == nil && EncObserve != nil {
+		observeCost(beforeH, func(mb float64) { EncObserve(o.OutW, o.OutH, int(o.FPS), "h264", mb) })
+	}
 	if err == nil || o.Spout == nil || len(o.ZeroCopyAdapters) == 0 || !errors.Is(err, ErrZeroCopyRefused) {
 		return s, err
 	}

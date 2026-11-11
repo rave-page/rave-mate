@@ -50,6 +50,24 @@ type DecVerdict struct {
 // reserve is geometry-aware (a 4K rebuild needs more than a 1080p one).
 var DecAdmit func(inW, inH, outW, outH, fps int, hevc bool) DecVerdict
 
+// DecObserve, when non-nil, records a MEASURED decode cost (MB) for a geometry so the budget refines
+// its estimate. Fed from the primary-adapter free-VRAM delta across a successful open (observeCost).
+var DecObserve func(inW, inH, fps int, hevc bool, deltaMB float64)
+
+// observeCost turns a primary-adapter free-VRAM before/after pair into a learned cost for obs. Only
+// fires when both readings are present and free dropped (our allocation consumed it). Cheap: two
+// adapter samples, no process sweep; confounds from other apps smooth out via the store's EMA.
+func observeCost(before gpumem.Headroom, obs func(deltaMB float64)) {
+	if obs == nil || !before.Present {
+		return
+	}
+	after := DecHeadroom()
+	if !after.Present || before.FreeMB <= after.FreeMB {
+		return
+	}
+	obs(float64(before.FreeMB - after.FreeMB))
+}
+
 // vramPressureSignature recognizes a reopen/open failure caused by a FULL card (interop OOM, surface
 // allocation timeout) vs a genuine codec/driver capability failure. A VRAM-pressure failure must
 // HOLD (never pin to the heavier ffmpeg CPU decode, which re-registers Spout interop and crashes

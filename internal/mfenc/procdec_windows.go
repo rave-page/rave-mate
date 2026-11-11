@@ -156,6 +156,7 @@ func OpenProcDecSession(o ProcDecOpts) (*ProcDecSession, error) {
 	if fps <= 0 {
 		fps = 30
 	}
+	beforeH := DecHeadroom() // measurement baseline: free VRAM before this pipeline allocates
 	// Same rule as the outbound ring: half a second of bitstream, 4-16 MiB, derived from BITRATE so
 	// a stream resize costs zero SHM realloc.
 	ringKB := ringKBFor(o.KbpsHint)
@@ -206,6 +207,9 @@ func OpenProcDecSession(o ProcDecOpts) (*ProcDecSession, error) {
 		child.mu.Unlock()
 		d.watchDone = make(chan struct{})
 		go d.watchDest()
+		if DecObserve != nil {
+			observeCost(beforeH, func(mb float64) { DecObserve(o.InW, o.InH, int(o.FPS), o.HEVC, mb) })
+		}
 		return d, nil
 	}
 	return nil, fmt.Errorf("mfenc: decode session open failed: %w", lastErr)
