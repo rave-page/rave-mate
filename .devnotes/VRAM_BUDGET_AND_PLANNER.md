@@ -73,6 +73,50 @@ the child so the encode-args scaler rebuilds; a cleared hint restores the base, 
 Native MF applies bitrate live; its fps/resolution caps stay OPEN-TIME only - a gap (needs a Zig
 live control op to re-type the MFT output). Reported, not silently dropped.
 
+## Resolution cap = coded resolution only; destination geometry is invariant (Decision 2026-11-11)
+
+A route has a NOMINAL geometry = the source's real size. The republished destination (Spout
+sender / shared texture) is created at the nominal geometry and KEEPS it for the whole route,
+whatever cap is active - a Spout sender that changes size mid-set breaks Resolume
+compositions/mappings. A cap lowers only the CODED resolution (sender scales down before encode,
+so coded size + bitrate + the receiver's decode DPB/surfaces all shrink), and the receiver scales
+the decoded picture back UP into the unchanged nominal destination. No sender recreate, no interop
+re-registration, no `SenderSize` change when a cap engages/lifts.
+
+Audit of bb33db2 (the shipped ffmpeg-substitute cap): CORRECT under this rule. The cap lives on
+the ENCODER (sender side); it has no Spout destination, so nothing re-creates a sink. The receiver
+sink is created once at `desc.Width/Height` (nominal, from the advert) and the immortal-sender
+logic keeps it across any source/coded size change (mediaroute `openReceiveSink`). Test
+`TestDestinationGeometryInvariantAcrossCodedResize` locks it (reopen at a smaller size keeps the
+nominal sender, no new interop).
+
+Nominal on the wire: already carried. The advert's `SourceDesc.Width/Height` is the nominal size,
+independent of the coded size (which is in-band SPS only). No negotiate.go field needed; an in-band
+SPS size change is a coded-size change only.
+
+Decode re-init tolerance (Go-side, Zig-free): when the rate governor changes the cap it calls
+`medialink.OnResolutionCapChange` -> `mfenc.NoteDecodeResizeGrace`, opening a 5 s window during
+which `decCheck` treats a publish stall (handle unchanged) as an expected decoder re-init, NOT a
+frozen-destination wedge - so a coded-size change never triggers `recycleDest` / the ffmpeg-CPU
+demotion. Tested (`decCheck` CODED-RESIZE case + the grace window). A handle CHANGE still recycles.
+
+DEFERRED (need GPU verification - blocked by a live card, see below - and are risky unverified
+native MFT code):
+- Native encoder LIVE cap (Zig control op): the MF encode child must change its VP output /
+  encoder input size on the fly (dynamic resolution change where the MFT supports it, else re-init
+  the encoder MFT in place; force an IDR with new SPS/PPS; no gpubudget "new" allocation, avoid
+  holding both pools at once). Bounded switch rate (hysteresis: >=1 change / N s; restore only after
+  sustained healthy headroom). Today only the ffmpeg substitute applies the cap live; the native MF
+  path applies MaxHeight at OPEN only.
+- Native decoder in-place stream-change (Zig): handle the decoder MFT output-type change for a new
+  coded size without recycling; re-allocate the DPB/surfaces at the smaller size (this is where the
+  decode-side VRAM actually drops - the point of the cap). The Go-side grace above already prevents
+  the recycle; the Zig child still needs to emit/handle the stream-change and shrink the pool.
+- ffmpeg DECODE-path upscale to nominal: under a cap the ffmpeg CPU decoder outputs the coded size;
+  the current sink drops the mismatched frame (stale picture) rather than upscaling. The invariant
+  HOLDS (sink geometry unchanged) but the picture freezes on that path. A decode-side scale filter
+  belongs in `internal/mediapipe/args.go` (owned by another agent) - left as a small follow-up.
+
 ## Deliberate selection (`internal/encoderscan`, OS-neutral)
 
 - `PlanEncodeFor` adds a measured-throughput sustain gate (pixels/sec >= W*H*fps * 1.15); `auto`

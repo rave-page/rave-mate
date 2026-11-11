@@ -101,6 +101,9 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 	// reserve + self-cap), installed into the mfenc decode/encode seams. Its sender gate is handed to
 	// mediaroute below. DecHeadroom/DecRebuildFloorMB above stay as the static-floor fallback.
 	f.vram = WireVramBudget(liveCfg, gpuSampler, VramCostPath(), rt.Log)
+	// Resolution-cap changes grant the local decoder a re-init grace so a coded-size switch is not
+	// mistaken for a frozen-destination wedge (the destination geometry stays nominal regardless).
+	medialink.OnResolutionCapChange = mfenc.NoteDecodeResizeGrace
 	devSel := encoderscan.NewDeviceSelector(func() (string, string) { return liveCfg().DevicePref() }, nil)
 	f.router = medialink.New(medialink.Options{
 		Self: in.Self, Bus: mediaBusAdapter{f.bus}, Secrets: f.secrets, Clock: f.clock,

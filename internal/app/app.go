@@ -743,6 +743,7 @@ func run(parent context.Context, serviceMode bool) error {
 	// own budget; here it governs the legacy in-proc path and backs `ctl encoder-scan`'s budget panel
 	// (live headroom/cap/reserve + the shared learned-cost file).
 	vramBudget := featurehost.WireVramBudget(mediaLinkCfg, gpuGovSampler, featurehost.VramCostPath(), log)
+	medialink.OnResolutionCapChange = mfenc.NoteDecodeResizeGrace // decoder re-init grace on a cap change
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,
 		Encoder: encFac, Decoder: decFac,

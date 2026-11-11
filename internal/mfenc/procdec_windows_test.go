@@ -184,6 +184,17 @@ func TestDecCheckOracle(t *testing.T) {
 			mtxTimeouts: 47, prevMtxTimeouts: 12,
 			lastPubNs: 1_000_000_000, nowNs: 9_000_000_000, staleNs: stale,
 		}, spoutHealthy},
+		{"CODED RESIZE: AUs arriving, pub stalled, handle unchanged -> HOLD (cap re-init, not a wedge)", decProbe{
+			curHandle: 0xA, newHandle: 0xA, resolved: true,
+			decFrames: 120, prevFrames: 120, appended: 200, prevAppended: 130,
+			codedResize: true,
+			lastPubNs:   1_000_000_000, nowNs: 9_000_000_000, staleNs: stale,
+		}, spoutHealthy},
+		{"RESIZE but handle CHANGED: still recycle (a re-created sender is a real wedge)", decProbe{
+			curHandle: 0xA, newHandle: 0xB, resolved: true, codedResize: true,
+			decFrames: 120, prevFrames: 60, appended: 130, prevAppended: 65,
+			lastPubNs: 8_900_000_000, nowNs: 9_000_000_000, staleNs: stale,
+		}, spoutRecycleNow},
 		{"IDLE route: no AUs, nothing published - healthy, must not churn reopens", decProbe{
 			curHandle: 0xA, newHandle: 0xA, resolved: true,
 			decFrames: 120, prevFrames: 120, appended: 130, prevAppended: 130,
@@ -264,6 +275,24 @@ func TestDecodePinning(t *testing.T) {
 	}
 	if DecodePinnedToFrames("other") {
 		t.Fatal("pinning must be per sender")
+	}
+}
+
+// TestDecodeResizeGrace: NoteDecodeResizeGrace opens a bounded window during which a coded-size
+// re-init stall is tolerated, and it closes afterwards.
+func TestDecodeResizeGrace(t *testing.T) {
+	decResizeGraceUntil.Store(0)
+	defer decResizeGraceUntil.Store(0)
+	if inDecodeResizeGrace() {
+		t.Fatal("grace must be closed initially")
+	}
+	NoteDecodeResizeGrace()
+	if !inDecodeResizeGrace() {
+		t.Fatal("grace must open after a cap change")
+	}
+	decResizeGraceUntil.Store(time.Now().Add(-time.Second).UnixNano()) // expire
+	if inDecodeResizeGrace() {
+		t.Fatal("grace must close after its deadline")
 	}
 }
 

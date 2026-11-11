@@ -339,6 +339,30 @@ func (d *ProcDecSession) IsHardware() bool {
 	return atomic.LoadUint32((*uint32)(unsafe.Add(d.shm.base, offDecFlags)))&(1<<4) != 0
 }
 
+// ── coded-resolution-change grace: a known VRAM cap toggle is not a wedge ──
+
+// decResizeGrace is how long after a resolution-cap change a decode publish stall is treated as an
+// expected re-init rather than a frozen-destination wedge. The receiver's rate governor calls
+// NoteDecodeResizeGrace when it changes a cap; the coded-size change arrives at the decoder RTT+buffer
+// later, so the window must comfortably cover that.
+const decResizeGrace = 5 * time.Second
+
+// decResizeGraceUntil is the unix-ns deadline of the current resize grace (0 = none). Global: cap
+// changes are rare + deduped, and a few seconds of extra recycle tolerance across all live decode
+// sessions is a safe trade against recycling a healthy pipeline mid-resize.
+var decResizeGraceUntil atomic.Int64
+
+// NoteDecodeResizeGrace opens the resize grace window. Called by the receiver's rate governor on a
+// resolution-cap change (engage or lift). Cheap; safe from any goroutine.
+func NoteDecodeResizeGrace() {
+	decResizeGraceUntil.Store(time.Now().Add(decResizeGrace).UnixNano())
+}
+
+func inDecodeResizeGrace() bool {
+	u := decResizeGraceUntil.Load()
+	return u != 0 && time.Now().UnixNano() < u
+}
+
 // ── destination health: a stale destination texture is a SILENTLY FROZEN picture ──
 
 // watchDest runs the frozen-destination oracle on the registry-scan cadence. Same two independent
@@ -374,7 +398,7 @@ func (d *ProcDecSession) watchDest() {
 		v, why := decCheck(decProbe{curHandle: cur, newHandle: newH, resolved: ok,
 			decFrames: frames, prevFrames: prevFrames,
 			appended: appended, prevAppended: prevAppended,
-			mtxTimeouts: mtx, prevMtxTimeouts: prevMtx,
+			mtxTimeouts: mtx, prevMtxTimeouts: prevMtx, codedResize: inDecodeResizeGrace(),
 			lastPubNs: atomic.LoadInt64(d.shm.i64(offLastPubNs)), nowNs: childNowNs(),
 			staleNs: int64(decRingRecovery)})
 		prevFrames, prevAppended, prevMtx = frames, appended, mtx
@@ -404,6 +428,7 @@ type decProbe struct {
 	prevAppended    uint64
 	mtxTimeouts     uint64 // destination-texture acquire timeouts (receiver/DWM contention)
 	prevMtxTimeouts uint64
+	codedResize     bool // a VRAM resolution cap changed recently: a re-init stall is expected, not a wedge
 	lastPubNs       int64
 	nowNs           int64
 	staleNs         int64
@@ -423,6 +448,14 @@ func decCheck(p decProbe) (spoutVerdict, string) {
 	}
 	if p.staleNs > 0 && p.lastPubNs > 0 && p.decFrames == p.prevFrames &&
 		p.appended > p.prevAppended && p.nowNs-p.lastPubNs > p.staleNs {
+		// Coded-resolution change in flight (a VRAM cap just engaged/lifted): the decoder MFT is
+		// re-initing its output for the new coded size, so a brief publish stall is EXPECTED and must
+		// NOT recycle (a recycle would free the resident pipeline + drop to ffmpeg CPU decode = the
+		// DECODE_DEST crash). The destination handle is unchanged (checked above), so this is a
+		// coded-size change only - the invariant "destination geometry is invariant" holds.
+		if p.codedResize {
+			return spoutHealthy, "coded resolution change in progress (VRAM cap) - not a destination wedge, holding"
+		}
 		// Publish clock stopped while AUs keep arriving - two causes, only ONE wants a reopen.
 		// mtxTimeouts climbing = the decoder IS producing but publish() cannot acquire the
 		// destination texture: a receiver (Resolume) / DWM holds it under GPU/VRAM pressure. The
