@@ -6,7 +6,7 @@ import "testing"
 // camera (Video/Source, not capturable - no RGBA-family format), a ranged-framerate camera, an
 // audio node + a non-node object (both skipped).
 const samplePwDump = `[
- {"id":124,"type":"PipeWire:Interface:Node","info":{"props":{"media.class":"Stream/Output/Video","node.name":"spout2pw.VRChat.VRCSender1","node.description":"VRChat Sender"},
+ {"id":124,"type":"PipeWire:Interface:Node","info":{"props":{"media.class":"Stream/Output/Video","node.name":"spout2pw.VRChat.VRCSender1","node.description":"VRChat Sender","client.id":122,"factory.id":9,"node.async":true,"clock.quantum-limit":8192},
    "params":{"Format":[],"EnumFormat":[{"mediaType":"video","mediaSubtype":"raw","format":"BGRx","size":{"width":1920,"height":1080},"framerate":{"num":60,"denom":1}}]}}},
  {"id":99,"type":"PipeWire:Interface:Node","info":{"props":{"media.class":"Video/Source","node.name":"v4l2_cam","node.description":"HD Pro Webcam C920 (V4L2)"},
    "params":{"EnumFormat":[{"mediaType":"video","mediaSubtype":"raw","format":"YUY2","size":{"width":640,"height":480},"framerate":{"default":{"num":30,"denom":1},"alt1":{"num":24,"denom":1}}}]}}},

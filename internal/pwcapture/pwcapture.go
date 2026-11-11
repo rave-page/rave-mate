@@ -97,17 +97,17 @@ func parsePwDump(data []byte) []Node {
 			continue
 		}
 		p := o.Info.Props
-		mc := p["media.class"]
+		mc := propStr(p, "media.class")
 		if !captureClasses[mc] {
 			continue
 		}
-		name := p["node.name"]
+		name := propStr(p, "node.name")
 		if name == "" {
 			continue
 		}
 		w, h, fps, capturable := bestFormat(o.Info.Params)
 		nodes = append(nodes, Node{
-			ID: o.ID, Name: name, Desc: firstNonEmpty(p["node.description"], p["media.name"]),
+			ID: o.ID, Name: name, Desc: firstNonEmpty(propStr(p, "node.description"), propStr(p, "media.name")),
 			MediaClass: mc, Width: w, Height: h, FPS: fps, Capturable: capturable,
 		})
 	}
@@ -115,15 +115,29 @@ func parsePwDump(data []byte) []Node {
 	return nodes
 }
 
-// pwObject is the slice of a pw-dump entry we read (props are stringly-typed; sizes are read from
-// params when present).
+// pwObject is the slice of a pw-dump entry we read. Props are RawMessage (NOT map[string]string):
+// pw-dump mixes value types in props (numbers like client.id, booleans like node.async), so a
+// map[string]string unmarshal fails on the whole document. propStr pulls the string-valued ones.
 type pwObject struct {
 	ID   uint32 `json:"id"`
 	Type string `json:"type"`
 	Info struct {
-		Props  map[string]string          `json:"props"`
+		Props  map[string]json.RawMessage `json:"props"`
 		Params map[string]json.RawMessage `json:"params"`
 	} `json:"info"`
+}
+
+// propStr returns a prop's value when it is a JSON string, else "" (number/bool props are skipped).
+func propStr(p map[string]json.RawMessage, key string) string {
+	raw, ok := p[key]
+	if !ok {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	return s
 }
 
 // fmtEntry is one EnumFormat/Format entry (pw-dump shape).
