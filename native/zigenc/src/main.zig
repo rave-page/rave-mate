@@ -211,6 +211,10 @@ const off_last_pub_ns = 176;
 const off_dec_flags = 184;
 const off_dec_dropped = 192;
 const off_dec_mtx_timeouts = 200;
+// In-band coded-resize telemetry (208..223, within the 256 B header): count + the current coded size
+// (w<<32 | h). The parent reads these to confirm the receiver VRAM cap engaged at the right size.
+const off_dec_resizes = 208;
+const off_dec_coded = 216;
 
 // fault_after_frames > 0: crash the process after N encoded frames (test hook - proves
 // route continuity across an encoder-child death; parent injects on first spawn only).
@@ -777,6 +781,8 @@ fn decLoop(s: *Session, d: *dec.Dec) void {
                 s.hdr.setI64At(off_last_pub_ns, @intCast(qpcNs()));
             }
             s.hdr.setU64At(off_dec_mtx_timeouts, d.mtx_timeouts);
+            s.hdr.setU64At(off_dec_resizes, d.resizes);
+            s.hdr.setU64At(off_dec_coded, (@as(u64, @intCast(d.coded_w)) << 32) | @as(u64, @as(u32, @bitCast(d.coded_h))));
         }
         if (n == 0) _ = d.pump();
     }

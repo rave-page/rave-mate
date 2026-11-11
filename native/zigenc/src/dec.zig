@@ -180,6 +180,9 @@ pub const Dec = struct {
     fed_n: u64 = 0,
     pub_n: u64 = 0,
     mtx_timeouts: u64 = 0, // destination-texture acquire timeouts (receiver/DWM contention)
+    resizes: u64 = 0, // in-band coded-resize handled (receiver VRAM cap engaged/lifted); telemetry
+    coded_w: i32 = 0, // current decoder coded size (= src rect); the parent reads it to confirm the
+    coded_h: i32 = 0, // cap engaged at the right size (no 16-row-alignment squash)
     drain_done: bool = false,
     reason: Reason = .decoder_failed,
     name_buf: [128]u8 = @splat(0),
@@ -229,6 +232,8 @@ pub const Dec = struct {
             .share = share,
             .au_cap = auCapFor(ring_bytes),
             .src_rect = .{ .left = 0, .top = 0, .right = in_w, .bottom = in_h },
+            .coded_w = in_w,
+            .coded_h = in_h,
         };
         if (in_w <= 0 or in_h <= 0 or out_w <= 0 or out_h <= 0 or fps_n <= 0 or share == 0) {
             gpa.destroy(d);
@@ -505,7 +510,13 @@ pub const Dec = struct {
             if (mf.failed(d.dec.v.GetOutputAvailableType(@ptrCast(d.dec), 0, i, &c)) or c == null) break;
             const s = api.getGUID(c.?, &api.A_SUBTYPE);
             if (s != null and api.guidsEqual(s.?, api.FMT_NV12)) {
-                if (api.getU64(c.?, &api.A_FRAME_SIZE)) |fs| {
+                // Prefer the DISPLAY aperture: a decoder's coded surface is 16-row aligned (1088 for a
+                // 1080 stream) and MF_MT_FRAME_SIZE reports that aligned size, so a src rect taken from
+                // it squashes the picture. MF_MT_MINIMUM_DISPLAY_APERTURE is the true display size.
+                if (api.getDisplayArea(c.?, &api.A_MIN_DISPLAY_APERTURE)) |area| {
+                    nw.* = area.cx;
+                    nh.* = area.cy;
+                } else if (api.getU64(c.?, &api.A_FRAME_SIZE)) |fs| {
                     const sz = unpackFrameSize(fs);
                     nw.* = sz.w;
                     nh.* = sz.h;
@@ -532,6 +543,9 @@ pub const Dec = struct {
     fn onCodedResize(d: *Dec, nw: i32, nh: i32) bool {
         d.in_w = nw;
         d.in_h = nh;
+        d.coded_w = nw;
+        d.coded_h = nh;
+        d.resizes += 1;
         d.src_rect = .{ .left = 0, .top = 0, .right = nw, .bottom = nh };
         // Flush the bounded input-view cache: every entry is bound to the OLD enumerator AND the
         // pre-resize DPB surfaces. inputView() rebuilds against the new enumerator on the next publish

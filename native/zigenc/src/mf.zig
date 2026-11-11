@@ -36,6 +36,10 @@ const MFMediaType_Video = g(0x73646976, 0x0000, 0x0010, .{ 0x80, 0x00, 0x00, 0xa
 const MF_MT_MAJOR_TYPE = g(0x48eba18e, 0xf8c9, 0x4687, .{ 0xbf, 0x11, 0x0a, 0x74, 0xc9, 0xf9, 0x6a, 0x8f });
 const MF_MT_SUBTYPE = g(0xf7e34c9a, 0x42e8, 0x4714, .{ 0xb7, 0x4b, 0xcb, 0x29, 0xd7, 0x2c, 0x35, 0xe5 });
 const MF_MT_FRAME_SIZE = g(0x1652c33d, 0xd6b2, 0x4012, .{ 0xb8, 0x34, 0x72, 0x03, 0x08, 0x49, 0xa3, 0x7d });
+// MF_MT_MINIMUM_DISPLAY_APERTURE {d7388766-18fe-48c6-a177-ee894867c8c4}: the DISPLAY rect a decoder
+// reports when its coded surface is 16-row-aligned (1088 for a 1080 stream). FRAME_SIZE is the
+// aligned size, so the decode src rect must come from HERE or the picture is squashed into the output.
+const MF_MT_MINIMUM_DISPLAY_APERTURE = g(0xd7388766, 0x18fe, 0x48c6, .{ 0xa1, 0x77, 0xee, 0x89, 0x48, 0x67, 0xc8, 0xc4 });
 const MF_MT_FRAME_RATE = g(0xc459a2e8, 0x3d2c, 0x4e44, .{ 0xb1, 0x32, 0xfe, 0xe5, 0x15, 0x6c, 0x7b, 0xb0 });
 const MF_MT_PIXEL_ASPECT_RATIO = g(0xc6376a1e, 0x8d0a, 0x4027, .{ 0xbe, 0x45, 0x6d, 0x9a, 0x0a, 0xd3, 0x9b, 0xb6 });
 const MF_MT_AVG_BITRATE = g(0x20332624, 0xfb0d, 0x4d9e, .{ 0xbd, 0x0d, 0xcb, 0xf6, 0x78, 0x6c, 0x10, 0x2e });
@@ -160,7 +164,9 @@ const AttrVtbl = extern struct {
     GetGUID: *const fn (*anyopaque, *const GUID, *GUID) callconv(.winapi) HRESULT,
     _get2: [1]VOP, // GetStringLength
     GetString: *const fn (*anyopaque, *const GUID, [*]u16, u32, ?*u32) callconv(.winapi) HRESULT,
-    _get3: [5]VOP, // GetAllocatedString GetBlobSize GetBlob GetAllocatedBlob GetUnknown
+    _get3a: [2]VOP, // GetAllocatedString GetBlobSize
+    GetBlob: *const fn (*anyopaque, *const GUID, [*]u8, u32, ?*u32) callconv(.winapi) HRESULT,
+    _get3b: [2]VOP, // GetAllocatedBlob GetUnknown
     _set0: [3]VOP, // SetItem DeleteItem DeleteAllItems
     SetUINT32: *const fn (*anyopaque, *const GUID, u32) callconv(.winapi) HRESULT,
     SetUINT64: *const fn (*anyopaque, *const GUID, u64) callconv(.winapi) HRESULT,
@@ -415,6 +421,22 @@ fn attrGetU64(p: anytype, key: *const GUID) ?u64 {
     var v: u64 = 0;
     if (failed(a.GetUINT64(@ptrCast(p), key, &v))) return null;
     return v;
+}
+
+// VideoArea is the display size (cx, cy) read from an MFVideoArea blob.
+pub const VideoArea = struct { cx: i32, cy: i32 };
+
+// attrGetDisplayArea reads MF_MT_MINIMUM_DISPLAY_APERTURE (a 16-byte MFVideoArea: OffsetX(4),
+// OffsetY(4), Area{cx:i32, cy:i32}). Returns the DISPLAY size, or null when the key is absent.
+fn attrGetDisplayArea(p: anytype, key: *const GUID) ?VideoArea {
+    const a: *const AttrVtbl = @ptrCast(@alignCast(p.v));
+    var buf: [16]u8 = @splat(0);
+    var got: u32 = 0;
+    if (failed(a.GetBlob(@ptrCast(p), key, &buf, 16, &got)) or got < 16) return null;
+    const cx = std.mem.readInt(i32, buf[8..12], .little);
+    const cy = std.mem.readInt(i32, buf[12..16], .little);
+    if (cx <= 0 or cy <= 0) return null;
+    return .{ .cx = cx, .cy = cy };
 }
 
 fn guidEq(a: GUID, b: GUID) bool {
@@ -1959,6 +1981,8 @@ pub const api = struct {
     pub const setGUID = attrSetGUID;
     pub const getU32 = attrGetU32;
     pub const getU64 = attrGetU64;
+    pub const getDisplayArea = attrGetDisplayArea;
+    pub const DisplayArea = VideoArea;
     pub const getGUID = attrGetGUID;
     pub const guidsEqual = guidEq;
     pub const mediaType = mtVideo;
@@ -1973,6 +1997,7 @@ pub const api = struct {
     pub const A_MAJOR_TYPE = MF_MT_MAJOR_TYPE;
     pub const A_SUBTYPE = MF_MT_SUBTYPE;
     pub const A_FRAME_SIZE = MF_MT_FRAME_SIZE;
+    pub const A_MIN_DISPLAY_APERTURE = MF_MT_MINIMUM_DISPLAY_APERTURE;
     pub const A_FRAME_RATE = MF_MT_FRAME_RATE;
     pub const A_D3D11_AWARE = MF_SA_D3D11_AWARE;
     pub const A_ASYNC_UNLOCK = MF_TRANSFORM_ASYNC_UNLOCK;

@@ -161,6 +161,9 @@ type ProcDecStats struct {
 	Restarts    int
 	ChildCPUPct float64
 	Downgrades  int
+	DecResizes  uint64
+	DecCodedW   int
+	DecCodedH   int
 }
 
 // ProcDecSession is unavailable on this platform (no Zig MF decode child).
