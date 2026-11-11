@@ -44,3 +44,58 @@ func TestDecHeadroomDefaultFailsOpen(t *testing.T) {
 		t.Fatal("default seam must fail open (recycle allowed when headroom unknown)")
 	}
 }
+
+func TestVramPressureSignature(t *testing.T) {
+	pressure := []string{
+		"open timeout", "reopen refused: E_OUTOFVIDEOMEMORY", "hr=0x8876017C",
+		"CreateTexture2D failed: out of memory", "OpenSharedResource failed",
+		"insufficient video memory",
+	}
+	for _, s := range pressure {
+		if !vramPressureSignature(s) {
+			t.Errorf("expected %q classified as VRAM pressure", s)
+		}
+	}
+	capability := []string{
+		"decoder MFT not found", "unsupported codec profile", "foreign adapter",
+		"child protocol v1", "",
+	}
+	for _, s := range capability {
+		if vramPressureSignature(s) {
+			t.Errorf("expected %q classified as a capability failure, not VRAM pressure", s)
+		}
+	}
+}
+
+func TestReopenFailedForVRAM(t *testing.T) {
+	const floor = 768
+	present := func(free uint64) gpumem.Headroom { return gpumem.Headroom{Present: true, FreeMB: free} }
+	// Signature wins regardless of headroom.
+	if !reopenFailedForVRAM("open timeout", present(5000), floor) {
+		t.Fatal("signature must classify as VRAM pressure even with ample headroom")
+	}
+	// No signature but headroom now below floor => pressure.
+	if !reopenFailedForVRAM("decoder MFT gone", present(200), floor) {
+		t.Fatal("headroom below floor must classify as VRAM pressure")
+	}
+	// Genuine capability failure with healthy headroom => NOT pressure (may count toward pin).
+	if reopenFailedForVRAM("unsupported profile", present(5000), floor) {
+		t.Fatal("capability failure with headroom must not be VRAM pressure")
+	}
+	// Headroom unknown + capability error => fails safe to NOT-pressure (counts toward pin).
+	if reopenFailedForVRAM("unsupported profile", gpumem.Headroom{}, floor) {
+		t.Fatal("unknown headroom + capability error must not be VRAM pressure")
+	}
+}
+
+func TestDecAdmitSeam(t *testing.T) {
+	old := DecAdmit
+	defer func() { DecAdmit = old }()
+	DecAdmit = func(_, _, _, _, _ int, _ bool) DecVerdict {
+		return DecVerdict{Allow: false, Present: true, FreeMB: 300, ReserveMB: 1152, Reason: "test deny"}
+	}
+	v := DecAdmit(3840, 2160, 3840, 2160, 60, false)
+	if v.Allow {
+		t.Fatal("wired DecAdmit must be able to deny")
+	}
+}

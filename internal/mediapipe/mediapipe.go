@@ -19,6 +19,7 @@ package mediapipe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -77,7 +78,7 @@ func Factories(log *logbus.Bus) (medialink.EncoderFactory, medialink.DecoderFact
 		}
 		return newEncoder(ctx, log, ffmpeg, spec, src)
 	}
-	var mfDecWarned bool
+	var mfDecWarned, mfDecHeldWarned bool
 	dec := func(ctx context.Context, spec medialink.DecodeSpec, sink medialink.Sink) (medialink.Sink, error) {
 		// Native GPU-resident decode first (zigmedia inc 2, flag-gated): it needs the child, a
 		// supported codec and a sink that exposes a GPU destination texture. Anything missing falls
@@ -87,6 +88,18 @@ func Factories(log *logbus.Bus) (medialink.EncoderFactory, medialink.DecoderFact
 			if err == nil {
 				go decodeTelemetry(ctx, log, "native", spec, s)
 				return s, nil
+			}
+			// GPU-destination route under VRAM pressure: the ffmpeg CPU decode is HEAVIER GPU-side
+			// (readback + re-upload + a fresh Spout interop registration that itself fails on a full
+			// card and can crash Resolume). HOLD the route - it re-establishes on renegotiation when
+			// headroom returns - instead of demoting to the crash-prone heavier path.
+			if errors.Is(err, mfenc.ErrDecodeHeldVRAM) {
+				if !mfDecHeldWarned {
+					mfDecHeldWarned = true
+					log.Warn(source, "native MF decode HELD under VRAM pressure - not demoting to the heavier ffmpeg CPU decode on a full card; route waits for VRAM",
+						map[string]any{"err": err.Error()})
+				}
+				return nil, err
 			}
 			if !mfDecWarned {
 				mfDecWarned = true

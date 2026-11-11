@@ -52,6 +52,12 @@ const (
 // decoder). The caller falls back to the ffmpeg decode child - never a dead route.
 var ErrDecodeRefused = errors.New("mfenc: native decode refused")
 
+// ErrDecodeHeldVRAM is the VRAM-pressure refusal: free headroom cannot afford a NEW decode pipeline.
+// It wraps ErrDecodeRefused (legacy callers still see "native unavailable") but the mediapipe factory
+// detects it specifically and HOLDS the route rather than opening the heavier ffmpeg CPU decode - on
+// a full card that path re-registers Spout interop and crashes Resolume (DECODE_DEST_CONTENDED_HOLD).
+var ErrDecodeHeldVRAM = fmt.Errorf("%w: native decode held - VRAM pressure", ErrDecodeRefused)
+
 // DecodeDest is the destination video-share sender: Go created it and owns its lifetime, the child
 // only renders into it. Resolve re-reads the handle so a sender that was re-created while the child
 // was down never gets its DEAD texture re-issued (the receive side's R1).
@@ -136,6 +142,15 @@ func OpenProcDecSession(o ProcDecOpts) (*ProcDecSession, error) {
 	}
 	if os.Getenv("RAVE_MATE_MFDEC_OPEN_FAIL") != "" {
 		return nil, errors.New("mfenc: native decode disabled (RAVE_MATE_MFDEC_OPEN_FAIL)")
+	}
+	// VRAM admission (the unified budget). A new decode pipeline allocates device + DXVA DPB + VP;
+	// on a saturated card the open fails AND the ffmpeg fallback is heavier (readback + a fresh Spout
+	// interop registration that crashes Resolume). Refuse with ErrDecodeHeldVRAM so the caller HOLDS
+	// instead of demoting. Only reached for GPU-destination routes (Dest.Resolve != nil). Fails open.
+	if DecAdmit != nil {
+		if v := DecAdmit(o.InW, o.InH, o.OutW, o.OutH, int(o.FPS), o.HEVC); !v.Allow {
+			return nil, fmt.Errorf("%w: %s", ErrDecodeHeldVRAM, v.Reason)
+		}
 	}
 	fps := o.FPS
 	if fps <= 0 {
@@ -428,27 +443,48 @@ func (d *ProcDecSession) onDstGone(reason string) {
 	}
 }
 
-// recycleDest closes + reopens the session with a FRESH destination handle. After decMaxRecycles
-// failures the sender is pinned to the frame path: the session fails cleanly (the route
-// re-establishes on the ffmpeg decoder) rather than publishing nothing forever.
+// admitRebuild reports whether a decode close()+reopen may run, with the numbers behind it. Uses the
+// unified gpubudget policy when wired (geometry-aware reserve), else the static floor. Fails open.
+func (d *ProcDecSession) admitRebuild() (allow bool, freeMB uint64, reason string) {
+	if DecAdmit != nil {
+		v := DecAdmit(d.inW, d.inH, d.outW, d.outH, int(d.fps), d.hevc)
+		r := v.Reason
+		if r == "" {
+			r = "budget admission"
+		}
+		return v.Allow, v.FreeMB, r
+	}
+	h := DecHeadroom()
+	return recycleAllowed(h, DecRebuildFloorMB), h.FreeMB,
+		fmt.Sprintf("static floor (free %d MB vs %d MB)", h.FreeMB, DecRebuildFloorMB)
+}
+
+// vramHold freezes the resident pipeline under VRAM pressure: set the held flag, log once per
+// episode, and - crucially - DO NOT count toward the pin budget. The picture freezes on its last
+// frame (the owner accepts this) and publish resumes when headroom returns.
+func (d *ProcDecSession) vramHold(why string, freeMB uint64, reason string) {
+	d.dstMu.Lock()
+	first := !d.dstHeld
+	d.dstHeld = true
+	d.dstMu.Unlock()
+	if first {
+		Warnf("mfenc: native decode destination %q recycle HELD - %s (free %d MB, trigger: %s); holding the resident pipeline, not reopening on a full card",
+			d.dstName, reason, freeMB, why)
+	}
+}
+
+// recycleDest closes + reopens the session with a FRESH destination handle. VRAM-pressure holds and
+// reopen failures NEVER count toward decMaxRecycles; only GENUINE capability failures do, and only
+// those pin the sender to the (heavier) ffmpeg decode path. A successful reopen clears the budget.
 func (d *ProcDecSession) recycleDest(why string) {
 	if d.closed.Load() {
 		return
 	}
-	// VRAM-headroom gate: a close()+reopen cannot re-allocate device/VP/decoder/DXVA-pool on a
-	// saturated card - it frees a healthy resident pipeline and then fails to rebuild, cascading to
-	// the ffmpeg CPU path (a NEW shared texture => Resolume re-registers interop => the crash). Under
-	// low free VRAM HOLD the resident pipeline instead; the picture freezes on its last frame and
-	// publish resumes when headroom returns. Fails open (headroom unknown => behave as before).
-	if h := DecHeadroom(); !recycleAllowed(h, DecRebuildFloorMB) {
-		d.dstMu.Lock()
-		first := !d.dstHeld
-		d.dstHeld = true
-		d.dstMu.Unlock()
-		if first {
-			Warnf("mfenc: native decode destination %q recycle HELD - free VRAM %d MB < rebuild floor %d MB (%s); holding the resident pipeline, not reopening on a full card",
-				d.dstName, h.FreeMB, DecRebuildFloorMB, why)
-		}
+	// Pre-allocation admission: a close()+reopen reallocates device/VP/decoder/DXVA-pool. If VRAM
+	// can't afford the rebuild, HOLD the resident pipeline instead of freeing what we cannot rebuild
+	// on a full card (=> ffmpeg CPU => new shared texture => Resolume re-registers interop => crash).
+	if allow, freeMB, reason := d.admitRebuild(); !allow {
+		d.vramHold(why, freeMB, reason)
 		return
 	}
 	d.dstMu.Lock()
@@ -458,18 +494,9 @@ func (d *ProcDecSession) recycleDest(why string) {
 		return // one recycle per tick however many detectors fired
 	}
 	d.dstLastMove = time.Now()
-	d.dstRecycles++
-	n := d.dstRecycles
 	d.dstMu.Unlock()
 	d.downgrades.Add(1)
-	if n > decMaxRecycles {
-		pinDecodeFrames(d.dstName)
-		Warnf("mfenc: native decode destination %q unusable after %d reopen attempts (%s) - pinning this sender to the ffmpeg decode path",
-			d.dstName, decMaxRecycles, why)
-		d.fail("mfenc: native decode destination gone - " + why)
-		return
-	}
-	Warnf("mfenc: native decode destination %q recycling (%s), attempt %d/%d", d.dstName, why, n, decMaxRecycles)
+	Warnf("mfenc: native decode destination %q recycling (%s)", d.dstName, why)
 	d.recovering.Store(true)
 	defer d.recovering.Store(false)
 	closedCh := make(chan struct{})
@@ -487,15 +514,39 @@ func (d *ProcDecSession) recycleDest(why string) {
 	atomic.StoreUint64(d.shm.u64(offInRead), 0)
 	atomic.StoreUint64(d.shm.u64(offInWrite), 0)
 	ev, err := d.child.openDecSession(d)
-	if err != nil || !ev.OK {
-		msg := "reopen refused"
-		if err != nil {
-			msg = err.Error()
-		} else if ev.ErrDst != "" {
-			msg = ev.ErrDst
-		}
-		Warnf("mfenc: native decode destination %q reopen failed: %s", d.dstName, msg)
+	if err == nil && ev.OK {
+		// Reopen succeeded: the pipeline is healthy again, clear the failure budget.
+		d.dstMu.Lock()
+		d.dstRecycles = 0
+		d.dstMu.Unlock()
+		return
 	}
+	msg := "reopen refused"
+	if err != nil {
+		msg = err.Error()
+	} else if ev.ErrDst != "" {
+		msg = ev.ErrDst
+	}
+	// No-pin-under-pressure: a reopen that failed because the card is FULL (interop OOM / allocation
+	// timeout / headroom now below the floor) is NOT a capability failure. HOLD instead of counting
+	// it toward the pin that drops this route to the heavier ffmpeg CPU decode.
+	if reopenFailedForVRAM(msg, DecHeadroom(), DecRebuildFloorMB) {
+		d.vramHold(why, DecHeadroom().FreeMB, "reopen failed under VRAM pressure: "+msg)
+		return
+	}
+	// Genuine capability failure: count it; pin only after decMaxRecycles such failures.
+	d.dstMu.Lock()
+	d.dstRecycles++
+	n := d.dstRecycles
+	d.dstMu.Unlock()
+	if n > decMaxRecycles {
+		pinDecodeFrames(d.dstName)
+		Warnf("mfenc: native decode destination %q unusable after %d genuine reopen failures (%s) - pinning this sender to the ffmpeg decode path",
+			d.dstName, decMaxRecycles, msg)
+		d.fail("mfenc: native decode destination gone - " + why)
+		return
+	}
+	Warnf("mfenc: native decode destination %q reopen failed (%s), attempt %d/%d", d.dstName, msg, n, decMaxRecycles)
 }
 
 // ── frame-path pinning: senders whose native decode proved unusable ──
