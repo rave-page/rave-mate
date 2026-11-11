@@ -81,6 +81,7 @@ type udpStats struct {
 	LossPct       float64 // datagram loss over the last interval (congestion input)
 	RTTns         int64   // smoothed round-trip (keepalive ping/pong)
 	OwdJitterNs   int64   // one-way-delay jitter estimate (datagram arrival)
+	OwdNs         int64   // smoothed signed one-way delay (congestion delay-gradient input)
 	NacksSent     uint64
 	NacksRecv     uint64
 	Retransmits   uint64 // datagrams re-sent on a fragment NACK
@@ -122,7 +123,8 @@ type udpConn struct {
 
 	lastRecvNs atomic.Int64 // media-clock ns of the last AUTHENTICATED datagram (liveness)
 	rttNs      atomic.Int64
-	owdJitter  atomic.Int64
+	owdJitter  atomic.Int64 // |transit delta| EWMA (telemetry)
+	owdNs      atomic.Int64 // smoothed signed one-way delay (congestion delay-gradient input)
 
 	st udpStatsMu
 
@@ -298,6 +300,7 @@ func (u *udpConn) Stats() udpStats {
 	s.Encrypted = u.crypto != nil
 	s.RTTns = u.rttNs.Load()
 	s.OwdJitterNs = u.owdJitter.Load()
+	s.OwdNs = u.owdNs.Load()
 	s.LossPct = u.seqTrk.lossFraction() * 100
 	s.PacerDepth = len(u.sendCh)
 	return s
@@ -429,6 +432,15 @@ func (u *udpConn) onMedia(h dgHeader, chunk []byte) {
 		u.owdJitter.Store(j)
 	}
 	u.lastRTx[f.Stream] = transit
+	// Smoothed SIGNED one-way delay: its TREND is the congestion controller's delay-gradient input.
+	// A constant clock-domain offset is irrelevant (the controller differentiates it away).
+	o := u.owdNs.Load()
+	if o == 0 {
+		o = transit
+	} else {
+		o += (transit - o) / 8
+	}
+	u.owdNs.Store(o)
 	u.deliver(f)
 }
 
