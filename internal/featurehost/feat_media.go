@@ -10,6 +10,7 @@ import (
 
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/eventbus"
+	"rave.page/mate/internal/gpubench"
 	"rave.page/mate/internal/gpumem"
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/mediapipe"
@@ -44,7 +45,8 @@ type mediaFeature struct {
 	routes  *mediaroute.Manager
 	cam     *webcam.Manager
 	secrets *mediaSecretStore
-	vram    *VramBudget // unified VRAM admission (decode/sender/encode); ctl explainability
+	vram    *VramBudget      // unified VRAM admission (decode/sender/encode); ctl explainability
+	bench   *gpubench.Runner // throughput micro-benchmark (feeds plan-driven auto); lazy, idle-gated
 
 	mu       sync.Mutex
 	mediaCfg config.MediaLinkFeature
@@ -138,6 +140,10 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 		AdmitSender: f.vram.AdmitSender, // unified budget gate (static-floor fallback stays via Headroom)
 	})
 
+	// Throughput micro-benchmark: lazy + idle-gated, skips while any route is live. Feeds the
+	// plan-driven auto device selection. Runs only in this supervised child (never the daemon).
+	f.bench = NewBenchRunner(f.vram.Budget, gpuSampler, func() bool { return len(f.router.Stats()) > 0 }, rt.Log)
+
 	f.cam = webcam.New(rt.Log, f.bus, in.Self, in.Label, func() config.WebcamFeature {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -164,6 +170,7 @@ func (f *mediaFeature) Start(ctx context.Context) error {
 	for {
 		f.rt.Beat()
 		f.emitTelemetry()
+		f.benchTick(ctx)
 		if c := f.clockEvent(); c != lastClock {
 			f.rt.Emit(evMediaClockOffset, c)
 			lastClock = c
@@ -260,6 +267,24 @@ func (f *mediaFeature) Handle(_ context.Context, method string, params json.RawM
 }
 
 // ── telemetry + clock mirror (child → daemon) ──
+
+// benchTick drives the lazy throughput benchmark: when no route is live, enqueue the standard encode
+// buckets for the working hardware encoder, then let the Runner measure one (gated + background).
+func (f *mediaFeature) benchTick(ctx context.Context) {
+	if f.bench == nil {
+		return
+	}
+	if len(f.router.Stats()) == 0 {
+		if caps, ok := mediapipe.Cached(); ok {
+			if enc, ok := FirstHWEncoder(caps.Encoders); ok {
+				for _, t := range gpubench.EncodeTargets("", enc, EncCodec(enc), 60) {
+					f.bench.Want(t)
+				}
+			}
+		}
+	}
+	f.bench.Tick(ctx)
+}
 
 func (f *mediaFeature) emitTelemetry() {
 	cams := f.cam.Instances()

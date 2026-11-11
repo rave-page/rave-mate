@@ -3654,6 +3654,7 @@ func (c *appControl) EncoderScan() string {
 	// plane the per-route admit decisions log in the MEDIA CHILD's stream; this daemon-side view shows
 	// the live budget + the learned costs (shared cost file), and a sample decode admission preview.
 	if c.vram != nil {
+		c.vram.ReloadStore() // pick up the media child's benchmark/measurement writes (shared cost file)
 		b.WriteString(c.vram.Report() + "\n")
 	}
 	return b.String()

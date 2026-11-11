@@ -107,17 +107,38 @@ func (s *CostStore) Observe(a Adapter, op Op, g Geom, mb float64) bool {
 
 // Snapshot returns the learned costs as a sorted slice for explainability (ctl).
 func (s *CostStore) Snapshot() []LearnedCost {
+	return snapshotMap(s, func() map[string]costEntry { return s.data })
+}
+
+// ThroughputSnapshot returns the learned throughputs (pixels/sec) as a sorted slice.
+func (s *CostStore) ThroughputSnapshot() []LearnedCost {
+	return snapshotMap(s, func() map[string]costEntry { return s.tput })
+}
+
+func snapshotMap(s *CostStore, pick func() map[string]costEntry) []LearnedCost {
 	if s == nil {
 		return nil
 	}
 	s.mu.Lock()
-	out := make([]LearnedCost, 0, len(s.data))
-	for k, e := range s.data {
+	m := pick()
+	out := make([]LearnedCost, 0, len(m))
+	for k, e := range m {
 		out = append(out, LearnedCost{Key: k, MB: e.MB, Samples: e.Samples})
 	}
 	s.mu.Unlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out
+}
+
+// Reload re-reads the cost file from disk (the daemon's store sees the media child's fresh writes).
+func (s *CostStore) Reload() {
+	if s == nil || s.path == "" {
+		return
+	}
+	fresh := NewCostStore(s.path, nil)
+	s.mu.Lock()
+	s.data, s.tput = fresh.data, fresh.tput
+	s.mu.Unlock()
 }
 
 // LearnedCost is one persisted cost row (ctl / diagnostics).

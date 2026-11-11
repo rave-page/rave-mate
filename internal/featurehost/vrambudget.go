@@ -7,10 +7,12 @@ import (
 
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/encoderscan"
+	"rave.page/mate/internal/gpubench"
 	"rave.page/mate/internal/gpubudget"
 	"rave.page/mate/internal/gpumem"
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/mfenc"
+	"rave.page/mate/internal/sysactivity"
 )
 
 // VramBudget bundles the ONE gpubudget.Budget for this process with the sender-gate closure the
@@ -37,7 +39,12 @@ func WireVramBudget(liveCfg func() config.MediaLinkFeature, sampler gpumem.Sampl
 	var adpOnce sync.Once
 	var adp gpubudget.Adapter
 	adapter := func() gpubudget.Adapter {
-		adpOnce.Do(func() { adp = gpubudget.Adapter{Vendor: gpubudget.VendorOf(gpumem.ReadHeadroom(sampler).Name)} })
+		adpOnce.Do(func() {
+			name := gpumem.ReadHeadroom(sampler).Name
+			// Key by vendor + model@driver: the model distinguishes GPUs, the driver version
+			// distinguishes measurements across driver updates (registry; "" when unavailable).
+			adp = gpubudget.Adapter{Vendor: gpubudget.VendorOf(name), Driver: name + "@" + primaryGPUDriverVersion(name)}
+		})
 		return adp
 	}
 	pol := gpubudget.Policy{ReserveCfgMB: uint64(liveCfg().ResolvedVramReserveMB())}
@@ -141,6 +148,63 @@ func NewEncodeDeviceResolver(cfg func() config.MediaLinkFeature, budget *gpubudg
 		return d.LUID, d.Index
 	}
 }
+
+// benchIdleThreshold: the machine must be idle at least this long before a GPU micro-benchmark runs.
+const benchIdleThreshold = 30 * time.Second
+
+// NewBenchRunner builds the throughput micro-benchmark Runner for the media child: encode timer
+// (mfenc), gate (headroom above reserve + idle + no protected OBS/Parsec encode + room for the bench's
+// own cost), and RouteLive (skip the lazy sweep while any route is live). routeLive=nil => never live.
+func NewBenchRunner(budget *gpubudget.Budget, sampler gpumem.Sampler, routeLive func() bool, log *logbus.Bus) *gpubench.Runner {
+	obsEnc := func() (stream, record string, active bool, err error) {
+		s, r, ok := encoderscan.OBSConfigEncoder()
+		if !ok {
+			return "", "", false, nil
+		}
+		return s, r, false, nil
+	}
+	act := sysactivity.New()
+	benchCost := uint64(gpubudget.EstimateCostMB(gpubudget.OpEncode, gpubudget.Geom{W: 3840, H: 2160, FPS: 60, Codec: "h264"}))
+	gate := func() encoderscan.BenchGate {
+		h := gpumem.ReadHeadroom(sampler)
+		idle := false
+		if d, ok := act.IdleDuration(); ok && d >= benchIdleThreshold {
+			idle = true
+		}
+		protected := false
+		for _, p := range encoderscan.Detect(obsEnc).ProtectedAdapter {
+			if p {
+				protected = true
+				break
+			}
+		}
+		return encoderscan.BenchGate{HeadroomPresent: h.Present, FreeMB: h.FreeMB,
+			ReserveMB: budget.ReserveFloorMB(), BenchCostMB: benchCost,
+			MachineIdle: idle, ProtectedBusy: protected}
+	}
+	return gpubench.New(gpubench.Options{
+		Budget: budget, Gate: gate, Encode: encodeBenchTimer,
+		RouteLive: func(string) bool { return routeLive != nil && routeLive() },
+		Log: func(m string, kv map[string]any) {
+			if log != nil {
+				log.Info("gpubench", m, kv)
+			}
+		},
+	})
+}
+
+// FirstHWEncoder returns the first working hardware encoder in the list (ok=false if none).
+func FirstHWEncoder(encoders []string) (string, bool) {
+	for _, e := range encoders {
+		if encoderscan.FamilyFromOBSID(e).IsHardware() {
+			return e, true
+		}
+	}
+	return "", false
+}
+
+// EncCodec maps an encoder name to the throughput-cache codec (exported for feat_media's lazy Want).
+func EncCodec(encoder string) string { return encCodec(encoder) }
 
 // VramCostPath is the shared learned-cost file path (daemon + media child use the same file).
 func VramCostPath() string {

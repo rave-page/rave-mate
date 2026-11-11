@@ -106,6 +106,10 @@ func (b *Budget) ObserveThroughput(op Op, g Geom, pps float64) bool {
 	return b.store.ObserveThroughput(b.adapterID(), op, g, pps)
 }
 
+// ReloadStore re-reads the shared cost file so this budget sees measurements written by another
+// process (the daemon's ctl view picks up the media child's benchmark results).
+func (b *Budget) ReloadStore() { b.store.Reload() }
+
 // ReserveFloorMB is the configured/default reserve floor (for the rate governor's ladder floor).
 func (b *Budget) ReserveFloorMB() uint64 {
 	floor := b.pol.ReserveFloorMB
@@ -144,6 +148,12 @@ func (b *Budget) Report() string {
 		sb.WriteString("  learned costs (adapter|driver|op|codec|bucket = MB xN):\n")
 		for _, c := range lc {
 			fmt.Fprintf(&sb, "    %s = %.0fMB x%d\n", c.Key, c.MB, c.Samples)
+		}
+	}
+	if lt := b.store.ThroughputSnapshot(); len(lt) > 0 {
+		sb.WriteString("  measured throughput (adapter|driver|op|codec|bucket = Mpps xN):\n")
+		for _, c := range lt {
+			fmt.Fprintf(&sb, "    %s = %.0f Mpps x%d\n", c.Key, c.MB/1e6, c.Samples)
 		}
 	}
 	return strings.TrimRight(sb.String(), "\n")
