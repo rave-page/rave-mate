@@ -1,13 +1,13 @@
 {
-  "version": "nightly-043966d",
-  "build": 411,
-  "commit": "043966d",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-411-20261111-043966d.exe",
-  "sha256": "cc4918b8d06dd21ee5040d237402b46fcac4e9457ff55f5ef2b5742574769cee",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-411-20261111-043966d.exe",
-  "installer_sha256": "784ef165d9aa6d84e0c02d5a0edceee207b23e943f8ec306603b3f8cc52ff353",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-411-20261111-043966d",
-  "linux_sha256": "377f3f6b4cb913143d7eab0a87fb03962ab1d21ebdf7c65933bc52af2e566262",
+  "version": "nightly-c4274a8",
+  "build": 413,
+  "commit": "c4274a8",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-413-20261111-c4274a8.exe",
+  "sha256": "cef425327aa42f5cf047cc467be6b4b31dc700538437f536182ada998c935634",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-413-20261111-c4274a8.exe",
+  "installer_sha256": "2dda95d74f4f5f964268cd7e012c6df52fd9ff833a3ab863d109a63e933031e5",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-413-20261111-c4274a8",
+  "linux_sha256": "4906973dc95936e24f1b701b22c88c0505e0ec34f730268f6ff3a9e6790de51e",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-11-11T23:15:27Z",
-  "notes": "mfenc: non-windows stub for NoteDecodeResizeGrace (linux build broke after merge)"
+  "released": "2026-11-11T23:55:04Z",
+  "notes": "Merge feat/native-livecap: native encoder live resolution cap, decoder in-place resize, ffmpeg decode upscale"
 }
