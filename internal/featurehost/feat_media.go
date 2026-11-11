@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"rave.page/mate/internal/config"
-	"rave.page/mate/internal/encoderscan"
 	"rave.page/mate/internal/eventbus"
 	"rave.page/mate/internal/gpumem"
 	"rave.page/mate/internal/medialink"
@@ -104,7 +103,9 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 	// Resolution-cap changes grant the local decoder a re-init grace so a coded-size switch is not
 	// mistaken for a frozen-destination wedge (the destination geometry stays nominal regardless).
 	medialink.OnResolutionCapChange = mfenc.NoteDecodeResizeGrace
-	devSel := encoderscan.NewDeviceSelector(func() (string, string) { return liveCfg().DevicePref() }, nil)
+	// Plan-driven AUTO device selection (throughput-aware; pin/avoid unchanged; unmeasured => engine
+	// default). The sender-side CPU% is not sampled here (a HW encoder is the common case); nil.
+	encDevResolver := NewEncodeDeviceResolver(liveCfg, f.vram.Budget, nil, rt.Log)
 	f.router = medialink.New(medialink.Options{
 		Self: in.Self, Bus: mediaBusAdapter{f.bus}, Secrets: f.secrets, Clock: f.clock,
 		Log: rt.Log, Encoder: encFac, Decoder: decFac,
@@ -113,7 +114,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 			c := liveCfg()
 			return c.PreferCodec, c.PinnedEncoder()
 		},
-		EncodeDevice:     func() (string, int) { d := devSel(); return d.LUID, d.Index },
+		EncodeDevice:     encDevResolver,
 		Headroom:         func() (uint64, bool) { h := gpumem.ReadHeadroom(gpuSampler); return h.FreeMB, h.Present },
 		GovernorEnabled:  func() bool { return liveCfg().VramGovernorEnabled() },
 		GovernorFloorMB:  uint64(liveCfg().ResolvedVramReserveMB()),

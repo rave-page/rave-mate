@@ -749,7 +749,7 @@ func run(parent context.Context, serviceMode bool) error {
 		Encoder: encFac, Decoder: decFac,
 		EncodeMaxHeight:  cfg.Features.MediaLink.MaxHeight,
 		EncodePolicy:     mediaEncodePolicy(mediaLinkCfg),
-		EncodeDevice:     mediaEncodeDevice(log, mediaLinkCfg),
+		EncodeDevice:     featurehost.NewEncodeDeviceResolver(mediaLinkCfg, vramBudget.Budget, nil, log),
 		Headroom:         func() (uint64, bool) { h := gpumem.ReadHeadroom(gpuGovSampler); return h.FreeMB, h.Present },
 		GovernorEnabled:  func() bool { return mediaLinkCfg().VramGovernorEnabled() },
 		GovernorFloorMB:  uint64(mediaLinkCfg().ResolvedVramReserveMB()),
