@@ -96,6 +96,16 @@ func (b *Budget) Observe(op Op, g Geom, mb float64) bool {
 	return b.store.Observe(b.adapterID(), op, g, mb)
 }
 
+// Throughput returns the measured pixels/sec for (op,g) against the live adapter (ok=false unmeasured).
+func (b *Budget) Throughput(op Op, g Geom) (float64, bool) {
+	return b.store.Throughput(b.adapterID(), op, g)
+}
+
+// ObserveThroughput records a measured throughput (pixels/sec) from the micro-benchmark.
+func (b *Budget) ObserveThroughput(op Op, g Geom, pps float64) bool {
+	return b.store.ObserveThroughput(b.adapterID(), op, g, pps)
+}
+
 // ReserveFloorMB is the configured/default reserve floor (for the rate governor's ladder floor).
 func (b *Budget) ReserveFloorMB() uint64 {
 	floor := b.pol.ReserveFloorMB

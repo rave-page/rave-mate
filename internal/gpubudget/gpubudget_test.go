@@ -170,6 +170,32 @@ func TestCostStoreBounded(t *testing.T) {
 	}
 }
 
+func TestThroughputStore(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gpucost.json")
+	a := Adapter{Vendor: "nvidia", Driver: "x"}
+	g := Geom{W: 3840, H: 2160, Codec: "h264"}
+	s := NewCostStore(path, nil)
+	if _, ok := s.Throughput(a, OpEncode, g); ok {
+		t.Fatal("unmeasured throughput must be absent")
+	}
+	if !s.ObserveThroughput(a, OpEncode, g, 900e6) {
+		t.Fatal("sane throughput must be accepted")
+	}
+	if s.ObserveThroughput(a, OpEncode, g, 1) { // < 1 Mpps rejected
+		t.Fatal("absurd throughput must be rejected")
+	}
+	// Survives reload AND does not clobber costs.
+	s.Observe(a, OpEncode, g, 300)
+	s2 := NewCostStore(path, nil)
+	if v, ok := s2.Throughput(a, OpEncode, g); !ok || v != 900e6 {
+		t.Fatalf("reloaded throughput = %v ok=%v", v, ok)
+	}
+	if c := s2.Cost(a, OpEncode, g); !c.Measured || c.MB != 300 {
+		t.Fatalf("cost clobbered by throughput: %+v", c)
+	}
+}
+
 func TestMeasureDelta(t *testing.T) {
 	if mb, ok := MeasureDeltaMB(1000, 1420); !ok || mb != 420 {
 		t.Fatalf("delta = %.0f ok=%v, want 420 true", mb, ok)

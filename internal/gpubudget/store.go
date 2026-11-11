@@ -17,7 +17,8 @@ type CostStore struct {
 	mu   sync.Mutex
 	path string
 	logf func(string)
-	data map[string]costEntry // key -> learned cost
+	data map[string]costEntry // key -> learned VRAM cost (MB)
+	tput map[string]costEntry // key -> measured throughput (pixels/sec), from the micro-benchmark
 }
 
 // costEntry is one learned cost (EMA-smoothed MB + the sample count behind it).
@@ -28,8 +29,9 @@ type costEntry struct {
 
 // costFile is the on-disk shape (versioned for forward migration).
 type costFile struct {
-	Version int                  `json:"version"`
-	Costs   map[string]costEntry `json:"costs"`
+	Version     int                  `json:"version"`
+	Costs       map[string]costEntry `json:"costs"`
+	Throughputs map[string]costEntry `json:"throughputs,omitempty"` // measured pixels/sec per key
 }
 
 const (
@@ -38,11 +40,13 @@ const (
 	costEMAWeight      = 0.3 // new sample weight (smooth driver/measurement jitter)
 	costSaneMinMB      = 2   // reject absurd measurements (noise / negative deltas)
 	costSaneMaxMB      = 8192
+	tputSaneMinPPS     = 1e6  // reject absurd throughput (< 1 Mpps ~ sub-1-fps at any useful size)
+	tputSaneMaxPPS     = 2e10 // ~ 8K240 ceiling; above this is a measurement artefact
 )
 
 // NewCostStore loads path (safe on corrupt/absent). logf (nil-safe) reports a corrupt file once.
 func NewCostStore(path string, logf func(string)) *CostStore {
-	s := &CostStore{path: path, logf: logf, data: map[string]costEntry{}}
+	s := &CostStore{path: path, logf: logf, data: map[string]costEntry{}, tput: map[string]costEntry{}}
 	s.load()
 	return s
 }
@@ -123,23 +127,63 @@ type LearnedCost struct {
 	Samples int
 }
 
-// evictLocked bounds the table to costFileMaxEntries, dropping the fewest-sampled keys first.
-func (s *CostStore) evictLocked() {
-	if len(s.data) <= costFileMaxEntries {
+// evictLocked bounds the cost table to costFileMaxEntries.
+func (s *CostStore) evictLocked() { evictFewest(s.data) }
+
+// evictFewest bounds m to costFileMaxEntries, dropping the fewest-sampled keys first.
+func evictFewest(m map[string]costEntry) {
+	if len(m) <= costFileMaxEntries {
 		return
 	}
 	type kv struct {
 		k string
 		n int
 	}
-	ks := make([]kv, 0, len(s.data))
-	for k, e := range s.data {
+	ks := make([]kv, 0, len(m))
+	for k, e := range m {
 		ks = append(ks, kv{k, e.Samples})
 	}
 	sort.Slice(ks, func(i, j int) bool { return ks[i].n < ks[j].n })
-	for i := 0; i < len(ks) && len(s.data) > costFileMaxEntries; i++ {
-		delete(s.data, ks[i].k)
+	for i := 0; i < len(ks) && len(m) > costFileMaxEntries; i++ {
+		delete(m, ks[i].k)
 	}
+}
+
+// Throughput returns the measured pixels/sec for (a,op,g), ok=false when unmeasured.
+func (s *CostStore) Throughput(a Adapter, op Op, g Geom) (float64, bool) {
+	if s == nil {
+		return 0, false
+	}
+	s.mu.Lock()
+	e, ok := s.tput[costKey(a, op, g)]
+	s.mu.Unlock()
+	if ok && e.MB > 0 {
+		return e.MB, true
+	}
+	return 0, false
+}
+
+// ObserveThroughput records a measured throughput (pixels/sec) for (a,op,g). EMA-folds + persists.
+// Rejects absurd rates. Returns true if the table changed.
+func (s *CostStore) ObserveThroughput(a Adapter, op Op, g Geom, pps float64) bool {
+	if s == nil || pps < tputSaneMinPPS || pps > tputSaneMaxPPS {
+		return false
+	}
+	key := costKey(a, op, g)
+	s.mu.Lock()
+	e, ok := s.tput[key]
+	if !ok {
+		e = costEntry{MB: pps, Samples: 1}
+	} else {
+		e.MB = e.MB*(1-costEMAWeight) + pps*costEMAWeight
+		e.Samples++
+	}
+	s.tput[key] = e
+	evictFewest(s.tput)
+	snap := s.snapshotLocked()
+	s.mu.Unlock()
+	s.save(snap)
+	return true
 }
 
 func (s *CostStore) snapshotLocked() costFile {
@@ -147,7 +191,14 @@ func (s *CostStore) snapshotLocked() costFile {
 	for k, v := range s.data {
 		cp[k] = v
 	}
-	return costFile{Version: costFileVersion, Costs: cp}
+	var tp map[string]costEntry
+	if len(s.tput) > 0 {
+		tp = make(map[string]costEntry, len(s.tput))
+		for k, v := range s.tput {
+			tp[k] = v
+		}
+	}
+	return costFile{Version: costFileVersion, Costs: cp, Throughputs: tp}
 }
 
 // load reads the file; a missing/corrupt/overflowing file leaves an empty table (safe).
@@ -171,6 +222,14 @@ func (s *CostStore) load() {
 			s.data[k] = e
 		}
 		if len(s.data) >= costFileMaxEntries {
+			break
+		}
+	}
+	for k, e := range cf.Throughputs {
+		if e.MB >= tputSaneMinPPS && e.MB <= tputSaneMaxPPS {
+			s.tput[k] = e
+		}
+		if len(s.tput) >= costFileMaxEntries {
 			break
 		}
 	}
