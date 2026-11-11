@@ -36,6 +36,10 @@ const MFMediaType_Video = g(0x73646976, 0x0000, 0x0010, .{ 0x80, 0x00, 0x00, 0xa
 const MF_MT_MAJOR_TYPE = g(0x48eba18e, 0xf8c9, 0x4687, .{ 0xbf, 0x11, 0x0a, 0x74, 0xc9, 0xf9, 0x6a, 0x8f });
 const MF_MT_SUBTYPE = g(0xf7e34c9a, 0x42e8, 0x4714, .{ 0xb7, 0x4b, 0xcb, 0x29, 0xd7, 0x2c, 0x35, 0xe5 });
 const MF_MT_FRAME_SIZE = g(0x1652c33d, 0xd6b2, 0x4012, .{ 0xb8, 0x34, 0x72, 0x03, 0x08, 0x49, 0xa3, 0x7d });
+// MF_MT_MINIMUM_DISPLAY_APERTURE {d7388766-18fe-48c6-a177-ee894867c8c4}: the DISPLAY rect a decoder
+// reports when its coded surface is 16-row-aligned (1088 for a 1080 stream). FRAME_SIZE is the
+// aligned size, so the decode src rect must come from HERE or the picture is squashed into the output.
+const MF_MT_MINIMUM_DISPLAY_APERTURE = g(0xd7388766, 0x18fe, 0x48c6, .{ 0xa1, 0x77, 0xee, 0x89, 0x48, 0x67, 0xc8, 0xc4 });
 const MF_MT_FRAME_RATE = g(0xc459a2e8, 0x3d2c, 0x4e44, .{ 0xb1, 0x32, 0xfe, 0xe5, 0x15, 0x6c, 0x7b, 0xb0 });
 const MF_MT_PIXEL_ASPECT_RATIO = g(0xc6376a1e, 0x8d0a, 0x4027, .{ 0xbe, 0x45, 0x6d, 0x9a, 0x0a, 0xd3, 0x9b, 0xb6 });
 const MF_MT_AVG_BITRATE = g(0x20332624, 0xfb0d, 0x4d9e, .{ 0xbd, 0x0d, 0xcb, 0xf6, 0x78, 0x6c, 0x10, 0x2e });
@@ -155,11 +159,14 @@ const AttrVtbl = extern struct {
     _iunk: [3]VOP,
     _get0: [4]VOP, // GetItem GetItemType CompareItem Compare
     GetUINT32: *const fn (*anyopaque, *const GUID, *u32) callconv(.winapi) HRESULT,
-    _get1: [2]VOP, // GetUINT64 GetDouble
+    GetUINT64: *const fn (*anyopaque, *const GUID, *u64) callconv(.winapi) HRESULT,
+    _get1: [1]VOP, // GetDouble
     GetGUID: *const fn (*anyopaque, *const GUID, *GUID) callconv(.winapi) HRESULT,
     _get2: [1]VOP, // GetStringLength
     GetString: *const fn (*anyopaque, *const GUID, [*]u16, u32, ?*u32) callconv(.winapi) HRESULT,
-    _get3: [5]VOP, // GetAllocatedString GetBlobSize GetBlob GetAllocatedBlob GetUnknown
+    _get3a: [2]VOP, // GetAllocatedString GetBlobSize
+    GetBlob: *const fn (*anyopaque, *const GUID, [*]u8, u32, ?*u32) callconv(.winapi) HRESULT,
+    _get3b: [2]VOP, // GetAllocatedBlob GetUnknown
     _set0: [3]VOP, // SetItem DeleteItem DeleteAllItems
     SetUINT32: *const fn (*anyopaque, *const GUID, u32) callconv(.winapi) HRESULT,
     SetUINT64: *const fn (*anyopaque, *const GUID, u64) callconv(.winapi) HRESULT,
@@ -409,6 +416,29 @@ fn attrGetGUID(p: anytype, key: *const GUID) ?GUID {
     return v;
 }
 
+fn attrGetU64(p: anytype, key: *const GUID) ?u64 {
+    const a: *const AttrVtbl = @ptrCast(@alignCast(p.v));
+    var v: u64 = 0;
+    if (failed(a.GetUINT64(@ptrCast(p), key, &v))) return null;
+    return v;
+}
+
+// VideoArea is the display size (cx, cy) read from an MFVideoArea blob.
+pub const VideoArea = struct { cx: i32, cy: i32 };
+
+// attrGetDisplayArea reads MF_MT_MINIMUM_DISPLAY_APERTURE (a 16-byte MFVideoArea: OffsetX(4),
+// OffsetY(4), Area{cx:i32, cy:i32}). Returns the DISPLAY size, or null when the key is absent.
+fn attrGetDisplayArea(p: anytype, key: *const GUID) ?VideoArea {
+    const a: *const AttrVtbl = @ptrCast(@alignCast(p.v));
+    var buf: [16]u8 = @splat(0);
+    var got: u32 = 0;
+    if (failed(a.GetBlob(@ptrCast(p), key, &buf, 16, &got)) or got < 16) return null;
+    const cx = std.mem.readInt(i32, buf[8..12], .little);
+    const cy = std.mem.readInt(i32, buf[12..16], .little);
+    if (cx <= 0 or cy <= 0) return null;
+    return .{ .cx = cx, .cy = cy };
+}
+
 fn guidEq(a: GUID, b: GUID) bool {
     return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
 }
@@ -625,6 +655,14 @@ pub const Enc = struct {
     fps_n: i32,
     fps_d: i32,
     dur100: i64,
+    // Live-reconfigure (resolution cap) inputs, captured at open so reconfigureOutput can rebuild the
+    // encoder MFT + NV12 pool at a new coded size on the SAME device + video processor. kbps/gop are
+    // the configured rate; allow_sw/force_sw pin the tier the rebuild uses (software stays software).
+    kbps_cfg: i32 = 0,
+    gop_cfg: i32 = 0,
+    allow_sw_cfg: bool = false,
+    force_sw_cfg: bool = false,
+    has_enc: bool = false, // e.enc holds a bound MFT: guards releaseEncoder/close after a teardown
     bgra_in: bool = true,
     zero_copy: bool = false, // pixels come from a foreign shared texture: no in_tex/in_view/swz
     enc_provides: bool = false,
@@ -1053,6 +1091,7 @@ pub const Enc = struct {
                 }
                 e.enc = t;
                 e.act = a;
+                e.has_enc = true;
                 bound = a;
                 @memcpy(e.name_buf[0..fn_name.len], fn_name);
                 e.name_len = fn_name.len;
@@ -1194,8 +1233,11 @@ pub const Enc = struct {
     }
 
     // releaseEncoder undoes a partial encoder bind so another tier can be tried on the SAME
-    // device + video processor. Mirrors close()'s MFT half, minus the pool and the device.
+    // device + video processor. Mirrors close()'s MFT half, minus the pool and the device. No-op
+    // when no MFT is bound (a failed reconfigure may call it twice).
     fn releaseEncoder(e: *Enc) void {
+        if (!e.has_enc) return;
+        e.has_enc = false;
         _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_COMMAND_FLUSH, 0);
         if (!e.sw) _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_SET_D3D_MANAGER, 0);
         if (e.capi) |c| {
@@ -1243,6 +1285,12 @@ pub const Enc = struct {
 
         const allow_sw = sw_policy != .off;
         const force_sw = sw_policy == .force or (sw_req and allow_sw);
+        // Capture the rate + tier so a live resolution-cap reconfigure can rebuild the encoder MFT at
+        // a new coded size (force_sw_cfg is finalised below once the actual tier is known).
+        e.kbps_cfg = kbps_in;
+        e.gop_cfg = gop;
+        e.allow_sw_cfg = allow_sw;
+        e.force_sw_cfg = force_sw;
         try e.acquireDevice(adapter_luid, allow_sw);
         try e.createEnumerator();
         // The whole encoder CONFIGURATION is retryable, not just the bind. A hardware MFT that
@@ -1303,11 +1351,33 @@ pub const Enc = struct {
             e.in_view = iv.?;
         }
 
+        try e.buildNV12Pool();
+        // Finalise the rebuild tier: if configuration fell back to the software MFT, a live
+        // reconfigure must stay on software (not retry a hardware bind that just failed here).
+        e.force_sw_cfg = e.force_sw_cfg or e.sw;
+
+        e.st(.begin_streaming);
+        trace("BEGIN_STREAMING/START_OF_STREAM", .{});
+        _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
+        _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
+        e.st(.open_done);
+        trace("open complete ({s})", .{e.name()});
+        return e;
+    }
+
+    // buildNV12Pool creates the NV12 round-robin pool (textures + VP output views + - on the
+    // hardware tier - DXGI surface samples) at the CURRENT e.out_w/e.out_h, plus the software-tier
+    // host input when e.sw. Factored out of open() so reconfigureOutput rebuilds it at a new coded
+    // size against the SAME video-processor enumerator (e.vpe), which scales its input to whatever
+    // output-view size it is handed. Call with the OLD pool already released (never two pools at once).
+    fn buildNV12Pool(e: *Enc) OpenErr!void {
+        e.st(.create_textures);
+        e.nv_idx = 0;
         var i: usize = 0;
         while (i < NVPOOL) : (i += 1) {
-            td = .{
-                .Width = @intCast(out_w),
-                .Height = @intCast(out_h),
+            var td = D3D11_TEXTURE2D_DESC{
+                .Width = @intCast(e.out_w),
+                .Height = @intCast(e.out_h),
                 .MipLevels = 1,
                 .ArraySize = 1,
                 .Format = DXGI_FORMAT_NV12,
@@ -1324,7 +1394,7 @@ pub const Enc = struct {
                 .MiscFlags = 0,
             };
             var nt: ?*anyopaque = null;
-            hr = e.dev.v.CreateTexture2D(@ptrCast(e.dev), &td, null, &nt);
+            var hr = e.dev.v.CreateTexture2D(@ptrCast(e.dev), &td, null, &nt);
             if (failed(hr) or nt == null) {
                 // Some drivers refuse NV12+SHADER_RESOURCE. Retry render-target-only rather than
                 // fail the route: the bind flag is a portability fix, not a requirement.
@@ -1362,14 +1432,26 @@ pub const Enc = struct {
             e.nv_sample[i] = smp.?;
         }
         if (e.sw) try e.openSoftwareInput();
+    }
 
-        e.st(.begin_streaming);
-        trace("BEGIN_STREAMING/START_OF_STREAM", .{});
-        _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
-        _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
-        e.st(.open_done);
-        trace("open complete ({s})", .{e.name()});
-        return e;
+    // releaseNV12Pool releases every NV12 pool slot (textures, views, samples) + the software staging
+    // texture, and NULLS each entry so it is safe to call repeatedly (reconfigure + close). Does NOT
+    // touch the VP, the input texture/view or the device - only the per-output-geometry pool.
+    fn releaseNV12Pool(e: *Enc) void {
+        for (0..NVPOOL) |i| {
+            if (e.nv_sample[i]) |s| release(s);
+            if (e.sw_sample[i]) |s| release(s);
+            if (e.sw_buf[i]) |b| release(b);
+            if (e.nv_view[i]) |v_| release(@as(*IUnk, @ptrCast(@alignCast(v_))));
+            if (e.nv_tex[i]) |t| release(@as(*IUnk, @ptrCast(@alignCast(t))));
+            e.nv_sample[i] = null;
+            e.sw_sample[i] = null;
+            e.sw_buf[i] = null;
+            e.nv_view[i] = null;
+            e.nv_tex[i] = null;
+        }
+        if (e.sw_stage_tex) |t| release(@as(*IUnk, @ptrCast(@alignCast(t))));
+        e.sw_stage_tex = null;
     }
 
     // swNV12Bytes is the packed NV12 payload for the output geometry (Y plane + interleaved UV).
@@ -1688,8 +1770,60 @@ pub const Enc = struct {
         return !failed(c.v.SetValue(@ptrCast(c), &CODECAPI_AVEncCommonMeanBitRate, &v));
     }
 
+    // rebuildAt re-creates the encoder MFT + NV12 pool at (ow, oh) on the SAME device + video
+    // processor, then starts streaming. Caller has already released the previous encoder + pool.
+    // Resets the in-flight accounting (a fresh MFT has nothing queued). false = build failed.
+    fn rebuildAt(e: *Enc, ow: i32, oh: i32) bool {
+        e.out_w = ow;
+        e.out_h = oh;
+        e.configureEncoder(ow, oh, e.fps_n, e.kbps_cfg, e.gop_cfg, e.allow_sw_cfg, e.force_sw_cfg) catch return false;
+        e.buildNV12Pool() catch return false;
+        e.fed_n = 0;
+        e.out_n = 0;
+        e.need_input = 0;
+        e.drain_done = false;
+        e.st(.begin_streaming);
+        _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
+        _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
+        return true;
+    }
+
+    /// reconfigureOutput changes the CODED output size LIVE (the receiver's VRAM resolution cap). The
+    /// caller passes the already-computed even target dims (aspect-exact, never above source). It
+    /// drains the current encoder tail, drops the encoder MFT + NV12 pool, and re-creates both at the
+    /// new size against the SAME device + video processor - the "drain + re-create the MFT in place"
+    /// path. The VP already scales its input to whatever output-view size it is given, so the input
+    /// side (a zero-copy session's cap view, or the readback in_tex/in_view) is untouched and both
+    /// capture paths keep working. Never holds the old and new NV12 pools at once. The first frame
+    /// after the switch is an IDR with fresh SPS/PPS (a freshly-streaming MFT keyframes; forceIDR is
+    /// belt-and-braces). Returns 0 on success; -1 if the new size failed but the OLD size was restored
+    /// (route keeps encoding, cap not applied - never tear the route down for a failed cap); -2 if the
+    /// device is lost and neither size could rebuild (the session ends; the parent re-establishes).
+    pub fn reconfigureOutput(e: *Enc, new_out_w: i32, new_out_h: i32, sink: AuSink) i32 {
+        if (new_out_w <= 0 or new_out_h <= 0) return -1;
+        if (new_out_w == e.out_w and new_out_h == e.out_h) return 0;
+        const ow = e.out_w;
+        const oh = e.out_h;
+        _ = e.drain(sink); // flush the old tail so no in-flight sample references the pool we drop
+        e.releaseEncoder();
+        e.releaseNV12Pool();
+        if (e.rebuildAt(new_out_w, new_out_h)) {
+            e.forceIDR();
+            return 0;
+        }
+        trace("reconfigureOutput {d}x{d} failed - restoring {d}x{d}", .{ new_out_w, new_out_h, ow, oh });
+        e.releaseEncoder(); // drop whatever the failed attempt half-built (no-op if nothing bound)
+        e.releaseNV12Pool();
+        if (e.rebuildAt(ow, oh)) {
+            e.forceIDR();
+            return -1;
+        }
+        return -2;
+    }
+
     /// drain flushes the encoder tail into the sink (bounded). Returns 0 done, 1 timeout, <0 error.
     pub fn drain(e: *Enc, sink: AuSink) i32 {
+        if (!e.has_enc) return 1; // no bound MFT (a failed reconfigure left none): nothing to drain
         e.st(.drain_msg);
         _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
         _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_COMMAND_DRAIN, 0);
@@ -1719,33 +1853,31 @@ pub const Enc = struct {
     //   FLUSH (drop queued samples) -> END_STREAMING -> SET_D3D_MANAGER(0) (MFT drops the
     //   manager) -> Release MFT -> ShutdownObject the activate -> pool -> VP -> device.
     pub fn close(e: *Enc) void {
-        e.st(.close_flush);
-        _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_COMMAND_FLUSH, 0);
-        e.st(.close_end_streaming);
-        _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
-        if (!e.sw) { // the software tier never took a device manager
-            e.st(.close_clear_d3d_manager);
-            _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_SET_D3D_MANAGER, 0);
-        }
-        if (e.capi) |c| release(c);
-        if (e.evgen) |ev| release(ev);
-        e.st(.close_release_mft);
-        release(e.enc);
-        if (e.act) |a| {
-            e.st(.close_shutdown_activate);
-            _ = a.v.ShutdownObject(@ptrCast(a));
-            release(a);
-            e.act = null;
+        // A failed reconfigure can leave the session with no bound MFT (has_enc == false): the
+        // encoder teardown is then skipped, but the VP, input texture and device are still released.
+        if (e.has_enc) {
+            e.st(.close_flush);
+            _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_COMMAND_FLUSH, 0);
+            e.st(.close_end_streaming);
+            _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
+            if (!e.sw) { // the software tier never took a device manager
+                e.st(.close_clear_d3d_manager);
+                _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_SET_D3D_MANAGER, 0);
+            }
+            if (e.capi) |c| release(c);
+            if (e.evgen) |ev| release(ev);
+            e.st(.close_release_mft);
+            release(e.enc);
+            if (e.act) |a| {
+                e.st(.close_shutdown_activate);
+                _ = a.v.ShutdownObject(@ptrCast(a));
+                release(a);
+                e.act = null;
+            }
+            e.has_enc = false;
         }
         e.st(.close_release_pool);
-        for (0..NVPOOL) |i| {
-            if (e.nv_sample[i]) |s| release(s);
-            if (e.sw_sample[i]) |s| release(s);
-            if (e.sw_buf[i]) |b| release(b);
-            if (e.nv_view[i]) |v_| release(@as(*IUnk, @ptrCast(@alignCast(v_))));
-            if (e.nv_tex[i]) |t| release(@as(*IUnk, @ptrCast(@alignCast(t))));
-        }
-        if (e.sw_stage_tex) |t| release(@as(*IUnk, @ptrCast(@alignCast(t))));
+        e.releaseNV12Pool();
         if (!e.zero_copy) release(@as(*IUnk, @ptrCast(@alignCast(e.in_view))));
         e.st(.close_release_vp);
         release(@as(*IUnk, @ptrCast(@alignCast(e.vproc))));
@@ -1848,6 +1980,9 @@ pub const api = struct {
     pub const setU64 = attrSetU64;
     pub const setGUID = attrSetGUID;
     pub const getU32 = attrGetU32;
+    pub const getU64 = attrGetU64;
+    pub const getDisplayArea = attrGetDisplayArea;
+    pub const DisplayArea = VideoArea;
     pub const getGUID = attrGetGUID;
     pub const guidsEqual = guidEq;
     pub const mediaType = mtVideo;
@@ -1862,6 +1997,7 @@ pub const api = struct {
     pub const A_MAJOR_TYPE = MF_MT_MAJOR_TYPE;
     pub const A_SUBTYPE = MF_MT_SUBTYPE;
     pub const A_FRAME_SIZE = MF_MT_FRAME_SIZE;
+    pub const A_MIN_DISPLAY_APERTURE = MF_MT_MINIMUM_DISPLAY_APERTURE;
     pub const A_FRAME_RATE = MF_MT_FRAME_RATE;
     pub const A_D3D11_AWARE = MF_SA_D3D11_AWARE;
     pub const A_ASYNC_UNLOCK = MF_TRANSFORM_ASYNC_UNLOCK;

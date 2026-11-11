@@ -42,6 +42,8 @@ const (
 	offDecFlags     = 184
 	offDecDropped   = 192
 	offDecMtxTimeo  = 200
+	offDecResizes   = 208             // in-band coded-resizes handled (receiver VRAM cap engaged/lifted)
+	offDecCoded     = 216             // current decoder coded size (w<<32 | h) - confirms the capped size, no squash
 	decRingRecovery = 3 * time.Second // publish silence that trips the frozen-destination oracle
 	decWatchEvery   = 2 * time.Second
 	decMaxRecycles  = 3 // then the sender is pinned to the ffmpeg decode path
@@ -93,6 +95,9 @@ type ProcDecStats struct {
 	Restarts    int
 	ChildCPUPct float64
 	Downgrades  int
+	DecResizes  uint64 // in-band coded-resizes the decoder handled in place (cap engaged/lifted)
+	DecCodedW   int    // current decoder coded size - confirms the cap engaged at the right size
+	DecCodedH   int    // (no 16-row-alignment squash: 1080 not 1088)
 }
 
 // ProcDecSession is one decode+publish session (medialink-facing surface).
@@ -312,6 +317,11 @@ func (d *ProcDecSession) Stats() ProcDecStats {
 		MtxTimeouts: atomic.LoadUint64(d.shm.u64(offDecMtxTimeo)),
 		DecFlags:    atomic.LoadUint32((*uint32)(unsafe.Add(d.shm.base, offDecFlags))),
 		Downgrades:  int(d.downgrades.Load()),
+		DecResizes:  atomic.LoadUint64(d.shm.u64(offDecResizes)),
+	}
+	if coded := atomic.LoadUint64(d.shm.u64(offDecCoded)); coded != 0 {
+		st.DecCodedW = int(coded >> 32)
+		st.DecCodedH = int(uint32(coded & 0xFFFFFFFF))
 	}
 	st.DecFPS = d.decRate.sample(st.DecFrames, time.Now())
 	st.DecBusyMs = d.busyRate.mean(atomic.LoadUint64(d.shm.u64(offDecBusy)), st.DecFrames)

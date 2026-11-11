@@ -78,9 +78,10 @@ const (
 	// Header v2 (additive; v1 used 0-63 only). Parent stamps magic+ver; the child refuses a
 	// zero-copy session on anything below ver 2, because that is the one layout where it would
 	// otherwise size the mapping from in_w*in_h*4 and map past the parent's smaller mapping.
-	shmMagic      = 0x32464D52 // 'RMF2'
-	shmVer        = 2
-	protoVerZeroC = 2 // minimum child hello.ver that may be asked for src:"spout"
+	shmMagic          = 0x32464D52 // 'RMF2'
+	shmVer            = 2
+	protoVerZeroC     = 2 // minimum child hello.ver that may be asked for src:"spout"
+	protoVerCapHeight = 4 // minimum child hello.ver that understands the "capheight" live-cap op
 
 	// Zero-copy capture counters, child-written (design §3.2).
 	offCapFrames  = 64
@@ -1036,6 +1037,7 @@ type ProcSession struct {
 	// the route panel so a silently-degraded rig is visible instead of just slow.
 	degradeMu sync.Mutex
 	degrade   string
+	capOnce   sync.Once // one-shot warn when a live resolution cap hits an older child protocol
 	encFails  atomic.Uint32
 	healthy   atomic.Bool // an AU really came out (ledger proof-of-health)
 
@@ -1619,6 +1621,26 @@ func (s *ProcSession) SetBitrate(kbps int) {
 	if kbps > 0 {
 		_ = s.child.send(map[string]any{"op": "bitrate", "sid": s.sid, "kbps": kbps})
 	}
+}
+
+// SetCapHeight applies a LIVE coded-resolution cap: the child re-types its encoder MFT + NV12 pool to
+// (w,h) in place, no reopen (proto v4). The caller passes the even, aspect-exact target dims. Returns
+// true if the op was sent. On an older child it logs ONCE and returns false, so the cap stays as
+// applied at open (the version gate: an old child silently ignores the op, a new one honours it).
+func (s *ProcSession) SetCapHeight(w, h int) bool {
+	if w <= 0 || h <= 0 {
+		return false
+	}
+	s.child.mu.Lock()
+	ver := s.child.protoVer
+	s.child.mu.Unlock()
+	if ver < protoVerCapHeight {
+		s.capOnce.Do(func() {
+			Warnf("mfenc: encoder child protocol v%d < v%d - live resolution cap applied at open only", ver, protoVerCapHeight)
+		})
+		return false
+	}
+	return s.child.send(map[string]any{"op": "capheight", "sid": s.sid, "out_w": w, "out_h": h}) == nil
 }
 
 // counterRate turns a monotone child-side counter (SHM header) into a per-second rate over

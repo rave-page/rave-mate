@@ -293,7 +293,11 @@ func encodeArgs(spec medialink.EncodeSpec, forceSW bool) []string {
 }
 
 // decodeArgs builds the bitstream-stdin → raw-RGBA-stdout child argv. hwaccel "" = software.
-// The explicit output size pins the rawvideo pipe framing (advert dims == coded dims → no-op).
+// A scale filter pins EVERY decoded frame to the nominal (SourceDesc) size: under a receiver VRAM
+// cap the coded size shrinks mid-stream (in-band SPS), but the sink frames a FIXED nominal W*H*4,
+// so the raw CPU-decode path must upscale back to nominal or the pipe desyncs and the picture
+// freezes (the destination-geometry invariant on the ffmpeg fallback path). The scale folds into
+// the mandatory yuv->rgba CSC swscale, so it is one pass either way and a no-op when coded == nominal.
 func decodeArgs(spec medialink.DecodeSpec, hwaccel string) []string {
 	// probesize 32 (the minimum) + analyzeduration 0: the format is forced (-f), so probing
 	// must not stall waiting for pipe bytes - stream params come from the in-band SPS/PPS.
@@ -314,7 +318,8 @@ func decodeArgs(spec medialink.DecodeSpec, hwaccel string) []string {
 		args = append(args, "-f", "mjpeg")
 	}
 	args = append(args, "-i", "-", "-an",
-		"-pix_fmt", "rgba", "-s", fmt.Sprintf("%dx%d", spec.Width, spec.Height),
+		"-vf", fmt.Sprintf("scale=%d:%d", spec.Width, spec.Height),
+		"-pix_fmt", "rgba",
 		"-f", "rawvideo", "-flush_packets", "1", "-")
 	return args
 }

@@ -180,6 +180,9 @@ pub const Dec = struct {
     fed_n: u64 = 0,
     pub_n: u64 = 0,
     mtx_timeouts: u64 = 0, // destination-texture acquire timeouts (receiver/DWM contention)
+    resizes: u64 = 0, // in-band coded-resize handled (receiver VRAM cap engaged/lifted); telemetry
+    coded_w: i32 = 0, // current decoder coded size (= src rect); the parent reads it to confirm the
+    coded_h: i32 = 0, // cap engaged at the right size (no 16-row-alignment squash)
     drain_done: bool = false,
     reason: Reason = .decoder_failed,
     name_buf: [128]u8 = @splat(0),
@@ -229,6 +232,8 @@ pub const Dec = struct {
             .share = share,
             .au_cap = auCapFor(ring_bytes),
             .src_rect = .{ .left = 0, .top = 0, .right = in_w, .bottom = in_h },
+            .coded_w = in_w,
+            .coded_h = in_h,
         };
         if (in_w <= 0 or in_h <= 0 or out_w <= 0 or out_h <= 0 or fps_n <= 0 or share == 0) {
             gpa.destroy(d);
@@ -488,14 +493,34 @@ pub const Dec = struct {
         api.traceStage("dec async={} provides={} outSize={d}", .{ d.evgen != null, d.dec_provides, d.dec_out_size });
     }
 
-    // setNV12Output picks the decoder's own NV12 output candidate (also used on a stream change).
+    // setNV12Output picks the decoder's own NV12 output candidate (open path; size not needed).
     fn setNV12Output(d: *Dec) bool {
+        var w: i32 = d.in_w;
+        var h: i32 = d.in_h;
+        return d.setNV12OutputSized(&w, &h);
+    }
+
+    // setNV12OutputSized is setNV12Output that also reports the chosen output type's coded frame size
+    // (MF_MT_FRAME_SIZE) - the signal a stream change carries a new resolution. On the built-type
+    // fallback nw/nh keep the caller's defaults (no size info = treat as unchanged).
+    fn setNV12OutputSized(d: *Dec, nw: *i32, nh: *i32) bool {
         var i: u32 = 0;
         while (true) : (i += 1) {
             var c: ?*mf.IMFMediaType = null;
             if (mf.failed(d.dec.v.GetOutputAvailableType(@ptrCast(d.dec), 0, i, &c)) or c == null) break;
             const s = api.getGUID(c.?, &api.A_SUBTYPE);
             if (s != null and api.guidsEqual(s.?, api.FMT_NV12)) {
+                // Prefer the DISPLAY aperture: a decoder's coded surface is 16-row aligned (1088 for a
+                // 1080 stream) and MF_MT_FRAME_SIZE reports that aligned size, so a src rect taken from
+                // it squashes the picture. MF_MT_MINIMUM_DISPLAY_APERTURE is the true display size.
+                if (api.getDisplayArea(c.?, &api.A_MIN_DISPLAY_APERTURE)) |area| {
+                    nw.* = area.cx;
+                    nh.* = area.cy;
+                } else if (api.getU64(c.?, &api.A_FRAME_SIZE)) |fs| {
+                    const sz = unpackFrameSize(fs);
+                    nw.* = sz.w;
+                    nh.* = sz.h;
+                }
                 const hr = d.dec.v.SetOutputType(@ptrCast(d.dec), 0, c.?, 0);
                 mf.release(c.?);
                 return !mf.failed(hr);
@@ -507,6 +532,46 @@ pub const Dec = struct {
         const hr = d.dec.v.SetOutputType(@ptrCast(d.dec), 0, mt, 0);
         mf.release(mt);
         return !mf.failed(hr);
+    }
+
+    // onCodedResize handles an in-band SPS resolution change WITHOUT touching the destination: the
+    // decoder's DPB/surfaces re-allocate at the new (smaller, capped) coded size on their own - that
+    // is where the decode-side VRAM actually drops - and here the video processor is rebuilt so the
+    // smaller decoded frame is scaled back into the UNCHANGED nominal-size destination texture
+    // (aspect preserved - the cap is aspect-exact by construction). The destination handle, its sync,
+    // the decoder MFT and the device are all KEPT: no recycle, no reopen, no wedge report.
+    fn onCodedResize(d: *Dec, nw: i32, nh: i32) bool {
+        d.in_w = nw;
+        d.in_h = nh;
+        d.coded_w = nw;
+        d.coded_h = nh;
+        d.resizes += 1;
+        d.src_rect = .{ .left = 0, .top = 0, .right = nw, .bottom = nh };
+        // Flush the bounded input-view cache: every entry is bound to the OLD enumerator AND the
+        // pre-resize DPB surfaces. inputView() rebuilds against the new enumerator on the next publish
+        // (no stale views, no leak across repeated toggles).
+        for (0..VIEWCACHE) |i| {
+            if (d.views[i].view) |v| mf.release(@as(*mf.IUnk, @ptrCast(@alignCast(v))));
+            d.views[i] = .{};
+        }
+        d.view_idx = 0;
+        // Release the OLD VP (output view, processor, enumerator) BEFORE building the new one - never
+        // hold two VPs on the card at once. The destination texture + its mutex are untouched.
+        if (d.has_view) {
+            mf.release(@as(*mf.IUnk, @ptrCast(@alignCast(d.dst_view))));
+            d.has_view = false;
+        }
+        if (d.has_vproc) {
+            mf.release(@as(*mf.IUnk, @ptrCast(@alignCast(d.vproc))));
+            d.has_vproc = false;
+        }
+        if (d.has_vpe) {
+            mf.release(@as(*mf.IUnk, @ptrCast(@alignCast(d.vpe))));
+            d.has_vpe = false;
+        }
+        var reason: Reason = .view_failed;
+        d.openVideoProcessor(&reason) catch return false;
+        return true;
     }
 
     // buildInputPool allocates AUPOOL fixed-capacity sample/buffer pairs (see AUPOOL).
@@ -621,7 +686,17 @@ pub const Dec = struct {
             var status: u32 = 0;
             const hr = d.dec.v.ProcessOutput(@ptrCast(d.dec), 0, 1, &ob, &status);
             if (hr == api.E_STREAM_CHANGE) {
-                if (!d.setNV12Output()) return -1;
+                // A new SPS: renegotiate the NV12 output and learn the new coded size. A SIZE change
+                // (the receiver's VRAM resolution cap engaging/lifting on the sender) rebuilds the VP
+                // in place - the destination texture is kept, so this is NOT a wedge and must never
+                // recycle the pipeline. A format-only change just renegotiates the output type.
+                var nw: i32 = d.in_w;
+                var nh: i32 = d.in_h;
+                if (!d.setNV12OutputSized(&nw, &nh)) return -1;
+                if (nw > 0 and nh > 0 and (nw != d.in_w or nh != d.in_h)) {
+                    api.traceStage("dec in-band coded resize {d}x{d} -> {d}x{d} (dest kept {d}x{d})", .{ d.in_w, d.in_h, nw, nh, d.out_w, d.out_h });
+                    if (!d.onCodedResize(nw, nh)) return -1;
+                }
                 continue;
             }
             if (hr == api.E_NEED_MORE_INPUT) return 0;
@@ -864,6 +939,12 @@ pub const Dec = struct {
     }
 };
 
+// unpackFrameSize splits MF_MT_FRAME_SIZE (packed width<<32 | height) into signed dims, matching
+// mtVideo's packing on the encode side. Pure - the device-free half of the stream-change handler.
+fn unpackFrameSize(fs: u64) struct { w: i32, h: i32 } {
+    return .{ .w = @intCast(fs >> 32), .h = @intCast(fs & 0xFFFFFFFF) };
+}
+
 // fillBuffer copies au into an MF memory buffer (bounded by its capacity).
 fn fillBuffer(mb: *mf.IMFMediaBuffer, au: []const u8) bool {
     var p: ?[*]u8 = null;
@@ -905,6 +986,16 @@ test "reason strings match the wire contract" {
     try std.testing.expectEqualStrings("dim_mismatch", Reason.dim_mismatch.text());
     try std.testing.expectEqualStrings("blt_failed", Reason.blt_failed.text());
     try std.testing.expectEqualStrings("sw_decode_unsupported", Reason.sw_decode_unsupported.text());
+}
+
+test "frame-size unpack matches the MF_MT_FRAME_SIZE packing" {
+    // 1920x1080 and the capped 1280x720, packed width<<32 | height.
+    const a = unpackFrameSize((@as(u64, 1920) << 32) | 1080);
+    try std.testing.expectEqual(@as(i32, 1920), a.w);
+    try std.testing.expectEqual(@as(i32, 1080), a.h);
+    const b = unpackFrameSize((@as(u64, 1280) << 32) | 720);
+    try std.testing.expectEqual(@as(i32, 1280), b.w);
+    try std.testing.expectEqual(@as(i32, 720), b.h);
 }
 
 test "au pool capacity is ring-derived and clamped" {

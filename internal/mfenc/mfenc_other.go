@@ -98,6 +98,7 @@ func (s *ProcSession) Encode(_ []byte, _ int64) error { return ErrUnsupported }
 func (s *ProcSession) Output() <-chan AU              { return nil }
 func (s *ProcSession) ForceKeyframe()                 {}
 func (s *ProcSession) SetBitrate(int)                 {}
+func (s *ProcSession) SetCapHeight(int, int) bool     { return false }
 func (s *ProcSession) Close()                         {}
 func (s *ProcSession) Name() string                   { return "" }
 func (s *ProcSession) InputIsBGRA() bool              { return false }
@@ -160,6 +161,9 @@ type ProcDecStats struct {
 	Restarts    int
 	ChildCPUPct float64
 	Downgrades  int
+	DecResizes  uint64
+	DecCodedW   int
+	DecCodedH   int
 }
 
 // ProcDecSession is unavailable on this platform (no Zig MF decode child).
