@@ -139,18 +139,19 @@ func newDgRing(maxFrames, maxBytes int) *dgRing {
 	return &dgRing{items: map[uint64]*ringItem{}, maxFrames: maxFrames, maxBytes: maxBytes}
 }
 
-// add stores a copy of the datagram bytes under key with a retransmit deadline. The input buffer is
-// the live send datagram, so it is copied (the caller may recycle it).
+// add stores the datagram bytes under key with a retransmit deadline. The caller (WriteFrame)
+// passes a FRESH, never-mutated encode buffer that it also hands to the pacer read-only, so the ring
+// shares it rather than copying (both uses are read-only after encode - no per-datagram copy on the
+// hot path).
 func (r *dgRing) add(key uint64, buf []byte, deadline int64) {
-	cp := append([]byte(nil), buf...)
 	r.mu.Lock()
 	if old, ok := r.items[key]; ok {
 		r.bytes -= len(old.buf)
 	} else {
 		r.order = append(r.order, key)
 	}
-	r.items[key] = &ringItem{buf: cp, deadline: deadline}
-	r.bytes += len(cp)
+	r.items[key] = &ringItem{buf: buf, deadline: deadline}
+	r.bytes += len(buf)
 	for (len(r.items) > r.maxFrames || r.bytes > r.maxBytes) && len(r.order) > 0 {
 		k := r.order[0]
 		r.order = r.order[1:]

@@ -556,7 +556,9 @@ func decodeBody(h dgHeader, body []byte, token uint32, crypto *dgCrypto, hdr []b
 		return nil, errDgToken // cheap off-path/cross-route rejection (and AAD-covered under AEAD)
 	}
 	if crypto != nil {
-		return crypto.open(nil, hdr, body, h.Seq)
+		return crypto.open(nil, hdr, body, h.Seq) // open allocates a fresh plaintext
 	}
-	return append([]byte(nil), body...), nil
+	// Clear path: return the body sub-slice directly. The sole caller (recvLoop) feeds it straight
+	// into reassembler.accept, which copies it out before the next ReadFrom reuses the buffer.
+	return body, nil
 }
