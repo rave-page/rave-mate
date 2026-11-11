@@ -1,11 +1,12 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package sysexec
 
 import "os"
 
-// JobClass mirrors the Windows job classes so callers compile everywhere; off Windows there is no
-// job object, so the class only documents intent. See job_windows.go for the CPU discipline.
+// JobClass mirrors the Windows job classes so callers compile everywhere; on darwin/bsd there is
+// no job object, so the class only documents intent. See job_windows.go for the CPU discipline and
+// job_linux.go for the pgroup/nice/cgroup implementation.
 type JobClass int
 
 const (
