@@ -1,5 +1,13 @@
 package medialink
 
+import (
+	"context"
+	"time"
+)
+
+// defaultCongestCeilKbps is the controller ceiling when the route carries no bitrate budget.
+const defaultCongestCeilKbps = 20000
+
 // congest.go is the §-congestion controller (Unit 4): a receiver-side AIMD controller driven by
 // datagram LOSS + a simplified GCC-style DELAY-GRADIENT over-use detector, producing a target
 // bitrate bounded by the negotiated [floor, ceiling]. Bitrate is cut first, framerate only when
@@ -117,6 +125,52 @@ func minRateHint(a, b RateHint) RateHint {
 	out.MaxFPS = minCap(a.MaxFPS, b.MaxFPS)
 	out.MaxHeight = minCap(a.MaxHeight, b.MaxHeight)
 	return out
+}
+
+// congestGovernor is the recv-side rate emitter for a UDP route (Unit 4 wiring): each report tick it
+// feeds the udpConn's datagram loss + one-way-delay into the controller and emits the resulting
+// RateHint, min()-combined with the VRAM governor's ladder (bitrate first, then fps; resolution is
+// the VRAM governor's last resort). Emits only on a change (dedup). The sender applies it through
+// SetRateHint (RateControlSource) exactly like the VRAM backpressure.
+func (rm *RouteManager) congestGovernor(ctx context.Context, rio *routeIO, udp *udpConn, stream uint16, baseKbps, baseFPS int) {
+	ceil := baseKbps
+	if ceil <= 0 {
+		ceil = defaultCongestCeilKbps
+	}
+	cc := newCongestController(congestConfig{CeilKbps: ceil, BaseFPS: baseFPS, Stream: stream})
+	t := time.NewTicker(rm.reportEvery)
+	defer t.Stop()
+	var last RateHint
+	var sent bool
+	prev := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		now := time.Now()
+		dt := now.Sub(prev).Seconds()
+		prev = now
+		s := udp.Stats()
+		h := cc.update(dt, s.LossPct/100, s.OwdNs)
+		// Fold in the VRAM governor (when present + enabled) by taking the more restrictive cap.
+		if rm.headroom != nil && (rm.governorOn == nil || rm.governorOn()) {
+			if free, ok := rm.headroom(); ok {
+				h = minRateHint(h, rateLadder(free, rm.govFloorMB, ceil, baseFPS, stream))
+			}
+		}
+		h.Type, h.Stream = MetaRate, stream
+		if sent && h == last {
+			continue
+		}
+		if rio.writeMeta(h, rm.clock.Now()) != nil {
+			return
+		}
+		last, sent = h, true
+		rm.infof("congestion governor", map[string]any{"stream": stream, "lossPct": s.LossPct,
+			"owdMs": s.OwdNs / 1e6, "maxKbps": h.MaxBitrateKbps, "maxFPS": h.MaxFPS, "ceilKbps": ceil})
+	}
 }
 
 // minCap returns the smaller positive value; 0 = "no cap" so it never wins unless both are 0.

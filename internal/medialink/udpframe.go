@@ -176,6 +176,17 @@ func parseDatagramHeader(buf []byte) (dgHeader, int, error) {
 	return h, dgHeaderLen, nil
 }
 
+// routeToken derives the per-route UDP demux + anti-injection token from the peerlink media secret
+// and the session id (both ends share both), so both ends compute the same token with no extra wire
+// exchange. Used to demux the shared UDP socket and to reject off-path / cross-route datagrams.
+func routeToken(secret []byte, session string) uint32 {
+	k, err := wirecrypto.HkdfSha256(secret, []byte(session), []byte("medialink-udp-token"), 4)
+	if err != nil || len(k) < 4 {
+		return 0
+	}
+	return binary.BigEndian.Uint32(k)
+}
+
 // tokenOK is a constant-time token compare (brief req 5: reject blind/off-path injection + cross-
 // route confusion at zero crypto cost, cleartext routes included).
 func tokenOK(got, want uint32) bool {

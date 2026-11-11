@@ -125,6 +125,7 @@ type routeStat struct {
 	encoder   string // §3.2 negotiated encoder ("" = raw/echo route)
 	tier      int
 	software  bool
+	transport string // negotiated media transport ("tcp"/"udp")
 	encrypted bool   // AEAD media plane (default); false = both peers opted out (plaintext)
 	keyframes uint64 // video keyframes seen (sent or received)
 	// rate is the sliding window's sample ring (see rateSpan): appended by count() only,
@@ -205,6 +206,13 @@ func (st *routeStat) setCodec(encoder string, tier int, software bool) {
 func (st *routeStat) setEncrypted(on bool) {
 	st.mu.Lock()
 	st.encrypted = on
+	st.mu.Unlock()
+}
+
+// setTransport records the negotiated media transport ("tcp"/"udp").
+func (st *routeStat) setTransport(t string) {
+	st.mu.Lock()
+	st.transport = t
 	st.mu.Unlock()
 }
 
@@ -355,8 +363,8 @@ func (st *routeStat) snapshot() RouteStat {
 		Session: st.session, Peer: st.peer, Stream: st.stream, Direction: st.direction,
 		Frames: st.frames, Bytes: st.bytes,
 		Encoder: st.encoder, Tier: st.tier, Software: st.software, Encrypted: st.encrypted,
-		Keyframes: st.keyframes,
-		SeqGaps:   st.seqGaps, LostEst: st.lostEst, Recovered: st.recovered,
+		Transport: st.transport, Keyframes: st.keyframes,
+		SeqGaps: st.seqGaps, LostEst: st.lostEst, Recovered: st.recovered,
 		NACKsSent: st.nacksSent, Retransmits: st.retransmits, PLIRequests: st.pliReqs,
 		ReportsSent: st.reportsSent, ReportsRecv: st.reportsRecv,
 		LatUnsynced: st.latBad, RemoteAt: st.remoteAt,
@@ -398,7 +406,8 @@ type RouteStat struct {
 	Tier     int
 	Software bool // tier-4 software encode - surface the CPU warning
 
-	Encrypted bool // media plane AEAD-sealed (default); false = both peers opted out (plaintext)
+	Transport string // negotiated media transport ("tcp"/"udp"; "" = legacy/tcp)
+	Encrypted bool   // media plane AEAD-sealed (default); false = both peers opted out (plaintext)
 
 	Keyframes uint64  // video keyframes (send: emitted; recv: seen)
 	RateBps   float64 // rolling media bitrate, bits/s (0 = no frame within rateStale)
@@ -441,4 +450,5 @@ type RouteStat struct {
 
 	JB   *JitterStats   // recv video routes: adaptive buffer state (§3.3); nil = no buffer
 	Pipe *PipelineStats // encode/decode child telemetry; nil = passthrough route
+	UDP  *UDPStats      // §2.5 UDP transport telemetry (loss/NACK/retransmit/pacer/owd); nil = TCP route
 }

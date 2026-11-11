@@ -146,7 +146,7 @@ func grantCaps(o Offer) sessionCaps {
 // routeIO bundles one live route's conn + counters + granted caps. metaSeq is the stream-0 seq
 // allocator shared by every goroutine that writes meta frames on this route.
 type routeIO struct {
-	conn    *Conn
+	conn    frameConn // *Conn (TCP) or *udpConn (UDP datagram profile)
 	st      *routeStat
 	caps    sessionCaps
 	rebuf   *retransmitBuf // send side, nil unless nack negotiated (§2.5)
@@ -166,34 +166,41 @@ func (r *routeIO) writeMeta(payload any, pts int64) error {
 
 // pendingAnswer is a route we accepted and are waiting to be dialed on (source side).
 type pendingAnswer struct {
-	peer    string // offerer node id (will dial us)
-	offer   Offer
-	open    SourceOpen
-	srcDesc SourceDesc
-	choice  *CodecChoice // §3.2 negotiated encode (nil = raw echo, no encode child)
-	stream  uint16
-	caps    sessionCaps
-	encrypt bool // resolved media-plane AEAD decision (default true; false = both peers opted out)
-	timer   *time.Timer
+	peer      string // offerer node id (will dial us)
+	offer     Offer
+	open      SourceOpen
+	srcDesc   SourceDesc
+	choice    *CodecChoice // §3.2 negotiated encode (nil = raw echo, no encode child)
+	stream    uint16
+	caps      sessionCaps
+	encrypt   bool   // resolved media-plane AEAD decision (default true; false = both peers opted out)
+	transport string // negotiated media transport (TransportTCP/TransportUDP)
+	token     uint32 // §2.5 UDP route token (demux + anti-injection); 0 on TCP
+	timer     *time.Timer
 }
 
 // pendingOffer is a route we offered and are waiting for an Answer on (sink side).
 type pendingOffer struct {
 	target   string
 	sourceID string
+	sinkID   string
 	sinkKind Kind
 	open     SinkOpen
 	enc      string // our advertised media-plane pref (EncAuto/EncOn/EncOff), for the answer-time decision
 	local    bool   // we see the target on a directly-connected private subnet (enc=auto input)
+	noUDP    bool   // this offer forced TCP (blackout re-offer) - don't fall back again
+	bitrate  int    // original bitrate budget (for a TCP-fallback re-offer)
+	decoders []string
 	timer    *time.Timer
 }
 
 type activeRoute struct {
 	cancel context.CancelFunc
-	conn   *Conn
+	conn   frameConn
 	stat   *routeStat
 	jb     *jitterBuffer    // recv video routes (§3.3); nil otherwise
 	pipe   PipelineReporter // encode/decode child telemetry; nil = passthrough
+	udp    *udpConn         // non-nil on a UDP route (transport telemetry + congestion input)
 }
 
 // Options configures a RouteManager. Bus, Secrets, Self are required.
@@ -206,6 +213,12 @@ type Options struct {
 	AdvertHost string      // host placed in Answer.Addr; default: autodetected LAN IPv4, else 127.0.0.1
 	BindHost   string      // listener bind host; default 0.0.0.0, or AdvertHost when it is loopback
 	Ports      []int       // listener candidates; default mediaPortRange; []int{0} = ephemeral (tests)
+
+	// UDP enables the §2.5 UDP datagram media profile: offers list udp first, and a route uses UDP
+	// when both peers support it AND a short reachability handshake succeeds, else it falls back to
+	// the TCP path unchanged. Same port range as TCP (47641-5). Default false (TCP-only) to keep
+	// older call sites + tests on the proven path; the app sets it true.
+	UDP bool
 
 	// SyncPeer pins the clock-sync master (§2.3 tier 2, D6): sync samples from this peer
 	// discipline Clock when it implements DisciplinedClock. "" = measure-only (telemetry).
@@ -288,6 +301,9 @@ type RouteManager struct {
 
 	sampler procstat.Sampler // daemon RSS sampler for the media memory watchdog
 
+	udp bool    // §2.5 UDP datagram profile enabled (Options.UDP)
+	mux *udpMux // shared answerer UDP socket + token demux (nil until Start when udp)
+
 	mu           sync.Mutex
 	ln           net.Listener
 	addr         string
@@ -338,6 +354,7 @@ func New(opts Options) *RouteManager {
 		encPolicy: opts.EncodePolicy, encDevice: opts.EncodeDevice,
 		headroom: opts.Headroom, governorOn: opts.GovernorEnabled,
 		govFloorMB: opts.GovernorFloorMB, govBaseKbps: opts.GovernorBaseKbps,
+		udp:     opts.UDP,
 		sources: map[string]sourceReg{}, sinks: map[string]sinkReg{},
 		remoteAdvert: map[string]Advert{}, pendingAns: map[string]*pendingAnswer{},
 		pendingOff: map[string]*pendingOffer{}, active: map[string]*activeRoute{},
@@ -416,6 +433,21 @@ func (rm *RouteManager) Start(ctx context.Context) error {
 	// Advertise the bound port with the configured/auto host (ephemeral port for tests).
 	_, portStr, _ := net.SplitHostPort(ln.Addr().String())
 	rm.addr = net.JoinHostPort(rm.host, portStr)
+	// §2.5 UDP profile: bind the shared answerer UDP socket on the SAME port the TCP listener took
+	// (brief req 4) + start the token demux. Best-effort: a UDP bind failure leaves udp off (routes
+	// use TCP), never blocks the plane.
+	if rm.udp {
+		if tcpAddr, ok := ln.Addr().(*net.TCPAddr); ok {
+			if upc, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP(rm.bindHost), Port: tcpAddr.Port}); err == nil {
+				rm.mux = newUDPMux(upc, rm.serveUDPFirst)
+			} else {
+				rm.udp = false
+				rm.warnf("udp media socket bind failed - routes will use TCP", map[string]any{"error": err.Error()})
+			}
+		} else {
+			rm.udp = false
+		}
+	}
 	rm.unsub = []func(){
 		rm.bus.Subscribe(TopicOffer, rm.onOffer),
 		rm.bus.Subscribe(TopicAnswer, rm.onAnswer),
@@ -521,6 +553,7 @@ func (rm *RouteManager) Stop() {
 		rm.cancel()
 	}
 	ln := rm.ln
+	mux := rm.mux
 	unsub := rm.unsub
 	active := make([]*activeRoute, 0, len(rm.active))
 	for _, r := range rm.active {
@@ -539,7 +572,7 @@ func (rm *RouteManager) Stop() {
 	}
 	rm.pendingAns = map[string]*pendingAnswer{}
 	rm.pendingOff = map[string]*pendingOffer{}
-	rm.ln, rm.unsub = nil, nil
+	rm.ln, rm.unsub, rm.mux = nil, nil, nil
 	rm.mu.Unlock()
 
 	for _, u := range unsub {
@@ -551,6 +584,9 @@ func (rm *RouteManager) Stop() {
 	}
 	if ln != nil {
 		_ = ln.Close()
+	}
+	if mux != nil {
+		mux.Close()
 	}
 }
 
@@ -591,6 +627,7 @@ type OfferOptions struct {
 	Codec       Codec    // explicit codec (raw/audio echo); CodecNone on video = matrix negotiation
 	BitrateKbps int      // video bitrate budget (Offer.Bitrate; 0 = sender default)
 	Decoders    []string // per-offer decode-cap override (preferred-codec filter); nil = node set
+	ForceTCP    bool     // offer TCP only (the §2.5 mid-route UDP-blackout fallback re-offer)
 }
 
 // Offer requests to receive target's SourceID into local SinkID (must be a registered sink). Codec
@@ -636,15 +673,16 @@ func (rm *RouteManager) OfferRoute(target, sourceID, sinkID string, opt OfferOpt
 	session := newSession()
 	enc := rm.mediaPref(target)
 	local := rm.sameSubnet(target)
-	po := &pendingOffer{target: target, sourceID: sourceID, sinkKind: sink.desc.Kind, open: sink.open, enc: enc, local: local}
+	po := &pendingOffer{target: target, sourceID: sourceID, sinkID: sinkID, sinkKind: sink.desc.Kind,
+		open: sink.open, enc: enc, local: local, noUDP: opt.ForceTCP, bitrate: opt.BitrateKbps, decoders: opt.Decoders}
 	po.timer = time.AfterFunc(pendingTTL, func() { rm.expireOffer(session) })
 	rm.mu.Lock()
 	rm.pendingOff[session] = po
 	rm.mu.Unlock()
 
 	off := Offer{Session: session, Target: target, SourceID: sourceID, SinkID: sinkID, Codec: opt.Codec,
-		Transport: TransportTCP, NACK: true, Bitrate: opt.BitrateKbps, Enc: enc, Local: local,
-		Caps: &Caps{Report: true, Sync: true, Decoders: decoders}}
+		Transport: TransportTCP, Transports: rm.offerTransports(opt.ForceTCP), NACK: true, Bitrate: opt.BitrateKbps,
+		Enc: enc, Local: local, Caps: &Caps{Report: true, Sync: true, Decoders: decoders}}
 	if raw, err := json.Marshal(off); err == nil {
 		rm.bus.Publish(TopicOffer, raw)
 	}
@@ -730,16 +768,30 @@ func (rm *RouteManager) onOffer(ev Event) {
 	granted := grantCaps(off)
 	ourEnc := rm.mediaPref(ev.Origin)
 	ourLocal := rm.sameSubnet(ev.Origin)
+	// §2.5 transport selection: UDP only when both ends support it AND we can derive the route token
+	// (needs the peerlink media secret). The dialer still runs a reachability handshake before
+	// committing; on failure it falls back to TCP on the SAME addr (we keep both pendings ready).
+	transport := TransportTCP
+	var token uint32
+	if rm.udp && rm.mux != nil && containsStr(off.Transports, TransportUDP) {
+		if sec, ok := rm.secrets.MediaSecret(ev.Origin); ok {
+			transport, token = TransportUDP, routeToken(sec, off.Session)
+		}
+	}
 	pa := &pendingAnswer{peer: ev.Origin, offer: off, open: src.open, srcDesc: src.desc,
-		choice: choice, stream: stream, caps: granted, encrypt: resolveEnc(off.Enc, ourEnc, off.Local && ourLocal)}
+		choice: choice, stream: stream, caps: granted, encrypt: resolveEnc(off.Enc, ourEnc, off.Local && ourLocal),
+		transport: transport, token: token}
 	pa.timer = time.AfterFunc(pendingTTL, func() { rm.expireAnswer(off.Session) })
 	rm.mu.Lock()
 	rm.pendingAns[off.Session] = pa
 	rm.mu.Unlock()
+	if transport == TransportUDP {
+		rm.mux.expect(token, off.Session) // first datagram for this token starts the UDP source pump
+	}
 	addr := rm.answerAddr(ev.Origin)
 
 	ans := Answer{Session: off.Session, Accept: true, Addr: addr, Codec: codec, Stream: stream,
-		Transport: TransportTCP, NACK: granted.nack, Enc: ourEnc, Local: ourLocal}
+		Transport: transport, NACK: granted.nack, Enc: ourEnc, Local: ourLocal}
 	if granted.report || granted.sync || choice != nil {
 		ans.Caps = &Caps{Report: granted.report, Sync: granted.sync}
 		if choice != nil {
@@ -861,8 +913,9 @@ func (rm *RouteManager) acceptLoop(ctx context.Context, ln net.Listener) {
 	}
 }
 
-// serveInbound handles a dialed-in media socket (source side): read the session preamble, correlate
-// to a pending answer, derive the AEAD key, open the source, and pump source→conn.
+// serveInbound handles a dialed-in TCP media socket (source side): read the session preamble, claim
+// the pending answer, derive the AEAD key, and run the source pump. The UDP equivalent is
+// serveUDPFirst (mux-driven); both share pumpSource.
 func (rm *RouteManager) serveInbound(ctx context.Context, c net.Conn) {
 	setNoDelay(c)
 	session, err := readPreamble(c)
@@ -870,17 +923,9 @@ func (rm *RouteManager) serveInbound(ctx context.Context, c net.Conn) {
 		_ = c.Close()
 		return
 	}
-	rm.mu.Lock()
-	pa := rm.pendingAns[session]
-	if pa != nil {
-		delete(rm.pendingAns, session)
-		if pa.timer != nil {
-			pa.timer.Stop()
-		}
-	}
-	rm.mu.Unlock()
+	pa := rm.claimPendingAnswer(session)
 	if pa == nil {
-		_ = c.Close()
+		_ = c.Close() // not our pending answer, or already claimed by the UDP path
 		return
 	}
 	conn, err := rm.mediaConn(c, pa.peer, pa.encrypt, false) // accepting end = responder
@@ -889,6 +934,32 @@ func (rm *RouteManager) serveInbound(ctx context.Context, c net.Conn) {
 		_ = c.Close()
 		return
 	}
+	rm.pumpSource(ctx, session, pa, conn, nil)
+}
+
+// claimPendingAnswer atomically removes + returns the pending answer for a session (whichever
+// transport connects first wins), stopping its TTL timer and clearing any UDP mux registration.
+func (rm *RouteManager) claimPendingAnswer(session string) *pendingAnswer {
+	rm.mu.Lock()
+	pa := rm.pendingAns[session]
+	if pa != nil {
+		delete(rm.pendingAns, session)
+		if pa.timer != nil {
+			pa.timer.Stop()
+		}
+	}
+	mux := rm.mux
+	rm.mu.Unlock()
+	if pa != nil && mux != nil && pa.transport == TransportUDP {
+		mux.unexpect(pa.token)
+	}
+	return pa
+}
+
+// pumpSource opens the source for a claimed pending answer and pumps source→conn (encode child +
+// NACK window + reports). Shared by the TCP (serveInbound) and UDP (serveUDPFirst) source sides;
+// udp is the *udpConn when the route is UDP (for telemetry), nil on TCP.
+func (rm *RouteManager) pumpSource(ctx context.Context, session string, pa *pendingAnswer, conn frameConn, udp *udpConn) {
 	// belt-and-braces for the onOffer raw-video guard: never open capture for a raw route
 	// above the pixel cap, whatever path produced the pending answer.
 	if pa.choice == nil && pa.srcDesc.Kind == KindVideo && !rawVideoOK(pa.srcDesc) {
@@ -941,6 +1012,7 @@ func (rm *RouteManager) serveInbound(ctx context.Context, c net.Conn) {
 	}
 	st := newRouteStat(session, pa.peer, pa.stream, "send")
 	st.setEncrypted(pa.encrypt)
+	st.setTransport(transportName(udp))
 	if pa.choice != nil {
 		st.setCodec(pa.choice.Encoder, pa.choice.Tier, pa.choice.Software)
 	}
@@ -948,12 +1020,13 @@ func (rm *RouteManager) serveInbound(ctx context.Context, c net.Conn) {
 	if pa.caps.nack {
 		rio.rebuf = newRetransmitBuf(0, 0)
 	}
-	ar := &activeRoute{cancel: cancel, conn: conn, stat: st}
+	ar := &activeRoute{cancel: cancel, conn: conn, stat: st, udp: udp}
 	if pr, ok := src.(PipelineReporter); ok {
 		ar.pipe = pr
 	}
 	rm.trackRoute(session, ar)
-	rm.infof("route up (send)", map[string]any{"session": session, "peer": pa.peer, "source": pa.offer.SourceID, "stream": pa.stream})
+	rm.infof("route up (send)", map[string]any{"session": session, "peer": pa.peer, "source": pa.offer.SourceID,
+		"stream": pa.stream, "transport": transportName(udp)})
 	go rm.guard("sendControl", func() { rm.sendControl(cancel, rio, src) })
 	if pa.caps.report {
 		go rm.guard("senderReports", func() { rm.senderReports(rctx, rio) })
@@ -1139,21 +1212,9 @@ func (rm *RouteManager) peerSyncEstimate(peer string) (SyncEstimate, bool) {
 // the AEAD key, open the sink, and pump conn→(jitter buffer→decode child→)sink.
 func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Answer, po *pendingOffer) {
 	encrypt := resolveEnc(po.enc, ans.Enc, po.local && ans.Local)
-	d := net.Dialer{Timeout: dialTimeout}
-	c, err := d.DialContext(ctx, "tcp", ans.Addr)
+	conn, udp, err := rm.dialConn(ctx, peer, ans, encrypt) // UDP (reachable) else TCP fallback
 	if err != nil {
-		rm.warnf("media dial failed", map[string]any{"addr": ans.Addr, "error": err.Error()})
-		return
-	}
-	setNoDelay(c)
-	if err := writePreamble(c, ans.Session); err != nil {
-		_ = c.Close()
-		return
-	}
-	conn, err := rm.mediaConn(c, peer, encrypt, true) // dialing end = initiator
-	if err != nil {
-		rm.warnf("media conn setup failed", map[string]any{"peer": peer, "error": err.Error()})
-		_ = c.Close()
+		rm.warnf("media dial failed", map[string]any{"addr": ans.Addr, "transport": ans.Transport, "error": err.Error()})
 		return
 	}
 	sink, err := po.open(ctx, ans)
@@ -1165,6 +1226,7 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 	rctx, cancel := context.WithCancel(ctx)
 	st := newRouteStat(ans.Session, peer, ans.Stream, "recv")
 	st.setEncrypted(encrypt)
+	st.setTransport(transportName(udp))
 	// §3.2: the answered encode choice drives the recv-side stat tier + decode spec.
 	if ans.Caps != nil && len(ans.Caps.Encoders) == 1 {
 		if tier, sw, ok := EncoderTier(ans.Caps.Encoders[0]); ok {
@@ -1191,7 +1253,7 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 		}
 	}
 	rio := &routeIO{conn: conn, st: st, caps: capsFromAnswer(ans)}
-	ar := &activeRoute{cancel: cancel, conn: conn, stat: st}
+	ar := &activeRoute{cancel: cancel, conn: conn, stat: st, udp: udp}
 	if pr, ok := final.(PipelineReporter); ok {
 		ar.pipe = pr
 	}
@@ -1218,15 +1280,21 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 	if rio.caps.sync {
 		go rm.guard("syncProbe", func() { rm.syncProbe(rctx, rio, peer) })
 	}
-	// Recv-side VRAM congestion governor: emit MetaRate backpressure (bitrate first, then fps) when
-	// the DJ-PC card fills, so the sender trims output before the decode/publish pipeline is forced
-	// to hold/freeze. Compressed video only, and only with a known base bitrate + headroom seam.
-	if ans.Codec.CompressedVideo() && rm.headroom != nil {
+	// Recv-side rate backpressure (MetaRate; bitrate first, then fps). On a UDP route the §-congestion
+	// controller (loss + delay-gradient) drives it, min()-combined with the VRAM governor so the two
+	// compose. On a TCP route (no per-datagram loss/delay signal) only the VRAM governor runs.
+	// Compressed video only.
+	if ans.Codec.CompressedVideo() {
 		base := 0
 		if rm.govBaseKbps != nil {
 			base = rm.govBaseKbps()
 		}
-		go rm.guard("rateGovernor", func() { rm.rateGovernor(rctx, rio, ans.Stream, base, int(srcDesc.FPS)) })
+		switch {
+		case udp != nil:
+			go rm.guard("congestGovernor", func() { rm.congestGovernor(rctx, rio, udp, ans.Stream, base, int(srcDesc.FPS)) })
+		case rm.headroom != nil:
+			go rm.guard("rateGovernor", func() { rm.rateGovernor(rctx, rio, ans.Stream, base, int(srcDesc.FPS)) })
+		}
 	}
 	if jb != nil {
 		done := make(chan struct{})
@@ -1242,6 +1310,13 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 	}
 	_ = final.Close()
 	rm.endRoute(ans.Session, conn, err, "recv")
+	// §2.5 mid-route UDP blackout: no datagrams within the liveness window while we are otherwise up.
+	// Renegotiate ONCE onto TCP (the control plane re-answers if the peer is still reachable).
+	if udp != nil && errors.Is(err, errUDPDead) && !po.noUDP {
+		rm.warnf("udp route blackout - renegotiating once on TCP", map[string]any{"session": ans.Session, "peer": peer})
+		_, _ = rm.OfferRoute(po.target, po.sourceID, po.sinkID, OfferOptions{
+			Codec: CodecNone, BitrateKbps: po.bitrate, Decoders: po.decoders, ForceTCP: true})
+	}
 }
 
 // remoteSourceDesc looks a peer's advertised source up (decode dims + fps).
@@ -1271,7 +1346,7 @@ func (s jbSink) Close() error         { return nil }
 
 // runJitter drains the §3.3 buffer into the sink at release pace. A sink error tears the route
 // down (conn close unblocks the recv loop).
-func (rm *RouteManager) runJitter(ctx context.Context, conn *Conn, jb *jitterBuffer, sink Sink, st *routeStat) {
+func (rm *RouteManager) runJitter(ctx context.Context, conn frameConn, jb *jitterBuffer, sink Sink, st *routeStat) {
 	for {
 		if ctx.Err() != nil {
 			return
@@ -1412,7 +1487,7 @@ func (rm *RouteManager) trackRoute(session string, r *activeRoute) {
 	rm.mu.Unlock()
 }
 
-func (rm *RouteManager) endRoute(session string, conn *Conn, err error, dir string) {
+func (rm *RouteManager) endRoute(session string, conn frameConn, err error, dir string) {
 	rm.mu.Lock()
 	if r := rm.active[session]; r != nil && r.conn == conn {
 		delete(rm.active, session)
@@ -1434,8 +1509,13 @@ func (rm *RouteManager) expireOffer(session string) {
 
 func (rm *RouteManager) expireAnswer(session string) {
 	rm.mu.Lock()
+	pa := rm.pendingAns[session]
 	delete(rm.pendingAns, session)
+	mux := rm.mux
 	rm.mu.Unlock()
+	if pa != nil && mux != nil && pa.transport == TransportUDP {
+		mux.unexpect(pa.token)
+	}
 }
 
 // ── telemetry (§7; counters live in telemetry.go) ─────────────────────────────
@@ -1454,6 +1534,10 @@ func (rm *RouteManager) Stats() []RouteStat {
 		if r.pipe != nil {
 			ps := r.pipe.PipeStats()
 			s.Pipe = &ps
+		}
+		if r.udp != nil {
+			us := r.udp.Stats()
+			s.UDP = &us
 		}
 		out = append(out, s)
 	}

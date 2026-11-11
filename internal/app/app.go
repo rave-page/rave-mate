@@ -740,7 +740,7 @@ func run(parent context.Context, serviceMode bool) error {
 	}
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,
-		Encoder: encFac, Decoder: decFac,
+		Encoder: encFac, Decoder: decFac, UDP: true, // §2.5 UDP datagram profile (reachability-gated, TCP fallback)
 		EncodeMaxHeight:  cfg.Features.MediaLink.MaxHeight,
 		EncodePolicy:     mediaEncodePolicy(mediaLinkCfg),
 		EncodeDevice:     mediaEncodeDevice(log, mediaLinkCfg),

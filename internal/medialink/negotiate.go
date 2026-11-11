@@ -117,13 +117,16 @@ type Offer struct {
 	SourceID  string `json:"source,omitempty"`
 	SinkID    string `json:"sink,omitempty"`
 	Codec     Codec  `json:"codec"`
-	Transport string `json:"transport,omitempty"` // "" = tcp (§2.1)
-	NACK      bool   `json:"nack,omitempty"`      // requester supports NACK/retransmit (§2.5)
-	FEC       *FEC   `json:"fec,omitempty"`       // reserved (§2.5)
-	Caps      *Caps  `json:"caps,omitempty"`      // requester session caps (P2+; absent = P1 peer)
-	Bitrate   int    `json:"br,omitempty"`        // video bitrate budget, kbps (P4 additive; 0 = sender default)
-	Enc       string `json:"enc,omitempty"`       // requester's media-plane enc pref (EncAuto/EncOn/EncOff; "" = ON)
-	Local     bool   `json:"local,omitempty"`     // requester sees Target on a directly-connected private subnet (enc=auto input)
+	Transport string `json:"transport,omitempty"` // "" = tcp (§2.1; kept for old-peer compat)
+	// Transports lists the requester's supported media transports in PREFERENCE ORDER (e.g.
+	// ["udp","tcp"], §2.5). Absent = an old peer → TCP only (reads Transport). Additive, omitempty.
+	Transports []string `json:"transports,omitempty"`
+	NACK       bool     `json:"nack,omitempty"`  // requester supports NACK/retransmit (§2.5)
+	FEC        *FEC     `json:"fec,omitempty"`   // reserved (§2.5)
+	Caps       *Caps    `json:"caps,omitempty"`  // requester session caps (P2+; absent = P1 peer)
+	Bitrate    int      `json:"br,omitempty"`    // video bitrate budget, kbps (P4 additive; 0 = sender default)
+	Enc        string   `json:"enc,omitempty"`   // requester's media-plane enc pref (EncAuto/EncOn/EncOff; "" = ON)
+	Local      bool     `json:"local,omitempty"` // requester sees Target on a directly-connected private subnet (enc=auto input)
 }
 
 // Answer responds to an Offer. On accept, Addr is the "host:port" of the media listener to dial and

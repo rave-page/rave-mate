@@ -74,23 +74,23 @@ const (
 	udpReadBufBytes     = 1 << 20              // SO_RCVBUF/SO_SNDBUF best-effort target
 )
 
-// udpStats is a UDP-transport telemetry snapshot (feeds §7 + the Unit-4 congestion controller).
-type udpStats struct {
-	Transport     string
-	Encrypted     bool
-	LossPct       float64 // datagram loss over the last interval (congestion input)
-	RTTns         int64   // smoothed round-trip (keepalive ping/pong)
-	OwdJitterNs   int64   // one-way-delay jitter estimate (datagram arrival)
-	OwdNs         int64   // smoothed signed one-way delay (congestion delay-gradient input)
-	NacksSent     uint64
-	NacksRecv     uint64
-	Retransmits   uint64 // datagrams re-sent on a fragment NACK
-	RetransBytes  uint64
-	ReasmDrops    uint64 // frames dropped at reassembly (cap/deadline)
-	PacerDepth    int    // datagrams queued in the pacer
-	PacerDrops    uint64 // datagrams dropped on pacer overflow (keyframe-aware)
-	RejectedDgram uint64 // mode/token/open failures (never update liveness)
-	DupDgram      uint64 // replay-window duplicates
+// UDPStats is a UDP-transport telemetry snapshot (§7 + the Unit-4 congestion controller). Crosses
+// the featurehost telemetry wire (JSON), so fields are tagged + exported.
+type UDPStats struct {
+	Encrypted     bool    `json:"encrypted,omitempty"`
+	LossPct       float64 `json:"lossPct,omitempty"`     // datagram loss over the last interval (congestion input)
+	RTTns         int64   `json:"rttNs,omitempty"`       // smoothed round-trip (keepalive ping/pong)
+	OwdJitterNs   int64   `json:"owdJitterNs,omitempty"` // one-way-delay jitter estimate (datagram arrival)
+	OwdNs         int64   `json:"owdNs,omitempty"`       // smoothed signed one-way delay (delay-gradient input)
+	NacksSent     uint64  `json:"nacksSent,omitempty"`
+	NacksRecv     uint64  `json:"nacksRecv,omitempty"`
+	Retransmits   uint64  `json:"retransmits,omitempty"`   // datagrams re-sent on a fragment NACK
+	RetransBytes  uint64  `json:"retransBytes,omitempty"`  //
+	ReasmDrops    uint64  `json:"reasmDrops,omitempty"`    // frames dropped at reassembly (cap/deadline)
+	PacerDepth    int     `json:"pacerDepth,omitempty"`    // datagrams queued in the pacer
+	PacerDrops    uint64  `json:"pacerDrops,omitempty"`    // datagrams dropped on pacer overflow (keyframe-aware)
+	RejectedDgram uint64  `json:"rejectedDgram,omitempty"` // mode/token/open failures (never update liveness)
+	DupDgram      uint64  `json:"dupDgram,omitempty"`      // replay-window duplicates
 }
 
 // udpConn is one peer-to-peer UDP media route. Safe for concurrent WriteFrame callers (router runs
@@ -132,6 +132,9 @@ type udpConn struct {
 	done      chan struct{}
 	deadErr   atomic.Pointer[error]
 	wg        sync.WaitGroup
+
+	reachOnce   sync.Once
+	reachableCh chan struct{} // closed on the first authenticated datagram (reachability handshake)
 }
 
 // dgram pairs a datagram's bytes with its priority class (keyframe groups survive pacer overflow).
@@ -172,17 +175,18 @@ func newUDPConn(pc packetConn, remote net.Addr, cfg udpConfig) (*udpConn, error)
 	u := &udpConn{
 		pc: pc, remote: remote, clock: cfg.Clock, cfg: cfg, crypto: crypto, token: cfg.Token,
 		deadline: deadline, logf: cfg.Log,
-		enc:     newDgEncoder(cfg.Token, crypto, cfg.BodyMax),
-		ring:    newDgRing(udpRingFrames, udpRingBytes),
-		pacer:   newSendPacer(cfg.PacingRate, now),
-		retr:    newSendPacer(cfg.PacingRate*udpRetransFrac, now),
-		sendCh:  make(chan []dgram, 64),
-		ctrlCh:  make(chan []byte, 64),
-		recvCh:  make(chan *Frame, udpRecvQueue),
-		reasm:   newReassembler(64, 32<<20),
-		seqTrk:  newReplayWin(),
-		lastRTx: map[uint16]int64{},
-		done:    make(chan struct{}),
+		enc:         newDgEncoder(cfg.Token, crypto, cfg.BodyMax),
+		ring:        newDgRing(udpRingFrames, udpRingBytes),
+		pacer:       newSendPacer(cfg.PacingRate, now),
+		retr:        newSendPacer(cfg.PacingRate*udpRetransFrac, now),
+		sendCh:      make(chan []dgram, 64),
+		ctrlCh:      make(chan []byte, 64),
+		recvCh:      make(chan *Frame, udpRecvQueue),
+		reasm:       newReassembler(64, 32<<20),
+		seqTrk:      newReplayWin(),
+		lastRTx:     map[uint16]int64{},
+		done:        make(chan struct{}),
+		reachableCh: make(chan struct{}),
 	}
 	u.lastRecvNs.Store(cfg.Clock.Now())
 	bestEffortUDPBuffers(pc)
@@ -275,6 +279,22 @@ func (u *udpConn) Close() error {
 	return nil
 }
 
+// waitReachable blocks until the first authenticated datagram arrives (the §-reachability handshake:
+// the peer answered our keepalive ping), the conn dies, or timeout. Returns whether the peer is
+// reachable - the dialer's UDP-vs-TCP decision (brief req 4).
+func (u *udpConn) waitReachable(timeout time.Duration) bool {
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	select {
+	case <-u.reachableCh:
+		return true
+	case <-u.done:
+		return false
+	case <-t.C:
+		return false
+	}
+}
+
 func (u *udpConn) isDead() bool { return u.deadErr.Load() != nil }
 
 func (u *udpConn) setErr(err error) { u.deadErr.CompareAndSwap(nil, &err) }
@@ -287,16 +307,15 @@ func (u *udpConn) err() error {
 }
 
 // Stats snapshots the UDP transport counters (§7 + congestion controller input).
-func (u *udpConn) Stats() udpStats {
+func (u *udpConn) Stats() UDPStats {
 	u.st.mu.Lock()
-	s := udpStats{
+	s := UDPStats{
 		NacksSent: u.st.nacksSent, NacksRecv: u.st.nacksRecv,
 		Retransmits: u.st.retransmits, RetransBytes: u.st.retransBytes,
 		ReasmDrops: u.st.reasmDrops, PacerDrops: u.st.pacerDrops,
 		RejectedDgram: u.st.rejected, DupDgram: u.st.dup,
 	}
 	u.st.mu.Unlock()
-	s.Transport = TransportUDP
 	s.Encrypted = u.crypto != nil
 	s.RTTns = u.rttNs.Load()
 	s.OwdJitterNs = u.owdJitter.Load()
@@ -389,6 +408,7 @@ func (u *udpConn) handleDatagram(dg []byte) {
 	}
 	// Authenticated (on AEAD routes) and token-valid (on clear routes): the route is alive.
 	u.lastRecvNs.Store(u.clock.Now())
+	u.reachOnce.Do(func() { close(u.reachableCh) }) // reachability handshake: first good datagram
 	switch u.seqTrk.accept(h.Seq) {
 	case stDup:
 		u.bump(&u.st.dup)
