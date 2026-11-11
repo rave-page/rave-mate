@@ -198,6 +198,94 @@ func TestDatagramAEADTamper(t *testing.T) {
 	}
 }
 
+// TestDatagramModeMismatch pins the route-authoritative enc rule: a clear datagram on an AEAD route
+// and an AEAD datagram on a clear route are both rejected (downgrade / auth-bypass guard).
+func TestDatagramModeMismatch(t *testing.T) {
+	const token = 0xABCD
+	send, recv := newCryptoPair(t)
+
+	// Clear media datagram presented on an AEAD route → errDgMode.
+	clearEnc := newDgEncoder(token, nil, 1200)
+	cdgs, _, _, _ := clearEnc.encodeFrame(nil, sampleFrame(1, 1, 100))
+	h, off, err := parseDatagramHeader(cdgs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeBody(h, cdgs[0][off:], token, recv, cdgs[0][:off]); err != errDgMode {
+		t.Fatalf("clear datagram on AEAD route: got %v want errDgMode", err)
+	}
+	// Flipping the AEAD flag on to fake authentication must still fail (no real tag).
+	forged := append([]byte(nil), cdgs[0]...)
+	forged[1] |= dgFlagAEAD
+	hf, offf, err := parseDatagramHeader(forged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeBody(hf, forged[offf:], token, recv, forged[:offf]); err == nil {
+		t.Fatal("forged AEAD flag with no tag was accepted")
+	}
+
+	// AEAD media datagram presented on a clear route → errDgMode.
+	aeadEnc := newDgEncoder(token, send, 1200)
+	adgs, _, _, _ := aeadEnc.encodeFrame(nil, sampleFrame(2, 1, 100))
+	ha, offa, err := parseDatagramHeader(adgs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeBody(ha, adgs[0][offa:], token, nil, adgs[0][:offa]); err != errDgMode {
+		t.Fatalf("AEAD datagram on clear route: got %v want errDgMode", err)
+	}
+}
+
+// TestControlDatagramAuth pins that control datagrams (ping/pong/NACK) are authenticated on AEAD
+// routes: a sealed control round-trips, a forged cleartext control is rejected, a tampered sealed
+// control fails open.
+func TestControlDatagramAuth(t *testing.T) {
+	const token = 0x55AA
+	send, recv := newCryptoPair(t)
+	enc := newDgEncoder(token, send, 1200)
+
+	// Sealed NACK round-trips and decodes.
+	items := []nackItem{{Stream: 1, FrameSeq: 7, FragIdx: 2}, {Stream: 1, FrameSeq: 7, FragIdx: 5}}
+	dg := enc.control(dgTypeNack, appendNackPayload(nil, items))
+	if dg[1]&dgFlagAEAD == 0 {
+		t.Fatal("control datagram not sealed on AEAD route")
+	}
+	h, off, err := parseDatagramHeader(dg)
+	if err != nil || h.Typ != dgTypeNack {
+		t.Fatalf("parse control: %v typ=%d", err, h.Typ)
+	}
+	body, err := decodeBody(h, dg[off:], token, recv, dg[:off])
+	if err != nil {
+		t.Fatalf("open control: %v", err)
+	}
+	got := parseNackPayload(body)
+	if len(got) != 2 || got[0] != items[0] || got[1] != items[1] {
+		t.Fatalf("nack payload round-trip: %v", got)
+	}
+
+	// Forged CLEARTEXT ping with the right token on an AEAD route → dropped (errDgMode).
+	clearEnc := newDgEncoder(token, nil, 1200)
+	ping := clearEnc.control(dgTypePing, []byte{1, 2, 3, 4})
+	hp, offp, err := parseDatagramHeader(ping)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeBody(hp, ping[offp:], token, recv, ping[:offp]); err != errDgMode {
+		t.Fatalf("forged cleartext ping on AEAD route: got %v want errDgMode", err)
+	}
+
+	// Tampered sealed control fails open.
+	dg[len(dg)-1] ^= 0xFF
+	ht, offt, err := parseDatagramHeader(dg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeBody(ht, dg[offt:], token, recv, dg[:offt]); err == nil {
+		t.Fatal("tampered sealed control opened")
+	}
+}
+
 func TestParseDatagramHeaderHostile(t *testing.T) {
 	good := dgHeader{Typ: dgTypeMedia, Token: 1, Stream: 1, FrameSeq: 1, FragIdx: 0, FragCount: 2}.appendHeader(nil)
 	cases := []struct {
@@ -258,7 +346,7 @@ func TestReassemblerSweepExpired(t *testing.T) {
 	f := sampleFrame(1, 1, 500)
 	dgs, _, _, _ := enc.encodeFrame(nil, f)
 	decodeOne(t, r, dgs[0], token, nil, 1000) // addedAt = 1000ns, incomplete
-	dropped := r.sweepExpired(2000)            // cutoff after addedAt
+	dropped := r.sweepExpired(2000)           // cutoff after addedAt
 	if len(dropped) != 1 || dropped[0] != [2]uint32{1, 1} {
 		t.Fatalf("sweepExpired=%v want [[1 1]]", dropped)
 	}

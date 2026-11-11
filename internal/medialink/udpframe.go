@@ -38,7 +38,62 @@ const (
 	dgTypeMedia = 0 // a media/meta Frame fragment
 	dgTypePing  = 1 // keepalive / reachability probe (cleartext, token-gated)
 	dgTypePong  = 2 // keepalive / reachability reply
+	dgTypeNack  = 3 // transport-level fragment NACK (cleartext, token-gated): resend these fragments
 )
+
+// dgNackMax caps entries in one fragment-NACK datagram (hostile-length + bounded-work guard).
+const dgNackMax = 85 // 85×6 + 2 ≈ 512 B body
+
+// nackItem identifies one missing fragment to retransmit.
+type nackItem struct {
+	Stream   uint16
+	FrameSeq uint32
+	// FragIdx is omitted on the wire: a NACK lists missing fragments as separate items, but the
+	// common case re-sends a whole small frame, so the wire carries (stream,frameSeq,fragIdx).
+	FragIdx uint16
+}
+
+// appendNackPayload encodes up to dgNackMax items: [2B count][count × (2B stream,4B frameSeq,2B
+// fragIdx)]. Caller truncates to dgNackMax.
+func appendNackPayload(dst []byte, items []nackItem) []byte {
+	if len(items) > dgNackMax {
+		items = items[:dgNackMax]
+	}
+	var cnt [2]byte
+	binary.BigEndian.PutUint16(cnt[:], uint16(len(items)))
+	dst = append(dst, cnt[:]...)
+	var rec [8]byte
+	for _, it := range items {
+		binary.BigEndian.PutUint16(rec[0:], it.Stream)
+		binary.BigEndian.PutUint32(rec[2:], it.FrameSeq)
+		binary.BigEndian.PutUint16(rec[6:], it.FragIdx)
+		dst = append(dst, rec[:]...)
+	}
+	return dst
+}
+
+// parseNackPayload decodes a fragment-NACK body. Every field is hostile input: a bad count or a
+// short body yields what fits, never a panic.
+func parseNackPayload(body []byte) []nackItem {
+	if len(body) < 2 {
+		return nil
+	}
+	n := int(binary.BigEndian.Uint16(body))
+	if n > dgNackMax {
+		n = dgNackMax
+	}
+	body = body[2:]
+	out := make([]nackItem, 0, n)
+	for i := 0; i < n && len(body) >= 8; i++ {
+		out = append(out, nackItem{
+			Stream:   binary.BigEndian.Uint16(body[0:]),
+			FrameSeq: binary.BigEndian.Uint32(body[2:]),
+			FragIdx:  binary.BigEndian.Uint16(body[6:]),
+		})
+		body = body[8:]
+	}
+	return out
+}
 
 const dgFlagAEAD = 1 << 0 // body is AES-256-GCM sealed (AAD = the 24 B header)
 
@@ -56,12 +111,12 @@ const (
 )
 
 var (
-	errDgShort    = errors.New("medialink: short datagram")
-	errDgVersion  = errors.New("medialink: bad datagram version")
-	errDgFrag     = errors.New("medialink: bad fragment index/count")
-	errDgToken    = errors.New("medialink: datagram token mismatch")
-	errDgBig      = errors.New("medialink: frame too large for the UDP profile")
-	errReasmLimit = errors.New("medialink: reassembly size cap")
+	errDgShort   = errors.New("medialink: short datagram")
+	errDgVersion = errors.New("medialink: bad datagram version")
+	errDgFrag    = errors.New("medialink: bad fragment index/count")
+	errDgToken   = errors.New("medialink: datagram token mismatch")
+	errDgMode    = errors.New("medialink: datagram enc mode mismatch (route-authoritative)")
+	errDgBig     = errors.New("medialink: frame too large for the UDP profile")
 )
 
 // dgHeader is the parsed outer datagram header.
@@ -446,26 +501,38 @@ func (e *dgEncoder) encodeFrame(out [][]byte, f *Frame) ([][]byte, uint64, uint1
 	return out, first, uint16(count), nil
 }
 
-// control builds a cleartext ping/pong datagram (keepalive + reachability; token-gated). payload is
-// an opaque echo (a probe nonce / timestamp). These ride the media socket on any route, AEAD or not.
+// control builds a ping/pong/NACK control datagram, sealed on AEAD routes (the route's mode is
+// authoritative: an AEAD route authenticates EVERY datagram type, so a forged keepalive/NACK is
+// rejected). payload is the control body. These ride the media socket on any route.
 func (e *dgEncoder) control(typ uint8, payload []byte) []byte {
-	h := dgHeader{Typ: typ, Token: e.token, Seq: e.seq}
+	flags := uint8(0)
+	if e.crypto != nil {
+		flags = dgFlagAEAD
+	}
+	seq := e.seq
 	e.seq++
-	dg := h.appendHeader(make([]byte, 0, dgHeaderLen+len(payload)))
+	h := dgHeader{Typ: typ, Flags: flags, Token: e.token, Seq: seq}
+	dg := h.appendHeader(make([]byte, 0, dgHeaderLen+len(payload)+16))
+	if e.crypto != nil {
+		return e.crypto.seal(dg, dg[:dgHeaderLen], payload, seq)
+	}
 	return append(dg, payload...)
 }
 
-// decodeBody extracts a datagram's fragment plaintext: it verifies the token, then (AEAD) opens the
-// body with the explicit-seq nonce, or (clear) returns it directly. crypto must be non-nil iff the
-// datagram's AEAD flag is set - a mode mismatch is rejected. Returns the plaintext chunk.
+// decodeBody extracts a datagram's authenticated plaintext body. The ROUTE's negotiated mode
+// (crypto != nil) is authoritative, NEVER the per-datagram flag: an AEAD route rejects a
+// clear-flagged datagram and a clear route rejects an AEAD-flagged one (errDgMode), BEFORE the
+// token check or any AEAD work - this closes the downgrade / auth-bypass where an attacker who
+// observed the token injects a cleartext body on an AEAD route. On AEAD routes the 24 B header
+// (seq, stream, frag idx/count, flags, token) is bound as AAD, so a tampered header fails the open.
 func decodeBody(h dgHeader, body []byte, token uint32, crypto *dgCrypto, hdr []byte) ([]byte, error) {
-	if !tokenOK(h.Token, token) {
-		return nil, errDgToken
+	if (crypto != nil) != h.aead() {
+		return nil, errDgMode
 	}
-	if h.aead() {
-		if crypto == nil {
-			return nil, errDgToken
-		}
+	if !tokenOK(h.Token, token) {
+		return nil, errDgToken // cheap off-path/cross-route rejection (and AAD-covered under AEAD)
+	}
+	if crypto != nil {
 		return crypto.open(nil, hdr, body, h.Seq)
 	}
 	return append([]byte(nil), body...), nil
