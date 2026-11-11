@@ -182,3 +182,6 @@ func (d *ProcDecSession) Stats() ProcDecStats                    { return ProcDe
 func (d *ProcDecSession) Name() string                           { return "" }
 func (d *ProcDecSession) IsHardware() bool                       { return false }
 func (d *ProcDecSession) Close()                                 {}
+
+// NoteDecodeResizeGrace: no native decode destination to protect off Windows.
+func NoteDecodeResizeGrace() {}
