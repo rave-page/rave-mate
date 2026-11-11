@@ -65,6 +65,10 @@ type Options struct {
 	// Headroom reports primary-adapter VRAM headroom for the sender-creation gate (governor). nil =
 	// no gating (fail open). Same wiring as the mfenc.DecHeadroom seam.
 	Headroom func() gpumem.Headroom
+	// AdmitSender gates a NEW Spout sender through the UNIFIED VRAM budget (geometry-aware cost +
+	// reserve + self-cap). nil => the static-floor senderCreateGate below. allow=false => the sender
+	// is not created (the source waits for VRAM), so one policy governs decode, sender and encode.
+	AdmitSender func(w, h int) (allow bool, reason string, freeMB, reserveMB uint64)
 
 	// Test seams (default: videoshare Spout backend).
 	ListSenders func() []string
@@ -97,11 +101,12 @@ type Receive struct {
 
 // Manager owns the share scanner + receive bookkeeping. Safe for concurrent use.
 type Manager struct {
-	log      *logbus.Bus
-	router   Router
-	cfg      func() config.MediaLinkFeature
-	sameHost func(string) bool
-	headroom func() gpumem.Headroom
+	log       *logbus.Bus
+	router    Router
+	cfg       func() config.MediaLinkFeature
+	sameHost  func(string) bool
+	headroom  func() gpumem.Headroom
+	admitSndr func(w, h int) (allow bool, reason string, freeMB, reserveMB uint64)
 
 	listSenders  func() []string
 	senderSize   func(string) (int, int, bool)
@@ -133,7 +138,7 @@ type Manager struct {
 // New builds the manager (inert until Start).
 func New(o Options) *Manager {
 	m := &Manager{
-		log: o.Log, router: o.Router, cfg: o.Cfg, sameHost: o.SameHost, headroom: o.Headroom,
+		log: o.Log, router: o.Router, cfg: o.Cfg, sameHost: o.SameHost, headroom: o.Headroom, admitSndr: o.AdmitSender,
 		listSenders: o.ListSenders, senderSize: o.SenderSize, senderShare: o.SenderShare,
 		grabFrame: o.GrabFrame, newFrameSnd: o.NewFrameSender,
 		newSharedSnd: o.NewSharedSender, openSource: o.OpenSource, openSink: o.OpenSink,
@@ -529,10 +534,10 @@ func (m *Manager) openReceiveSink(name string, w, h int) (medialink.Sink, error)
 	// On a saturated card that registration FAILS and can wedge Resolume. Under low free VRAM refuse
 	// the new sender - the source does not appear (missing beats a crash) and the route retries when
 	// headroom returns. Existing routes (the parked-reuse path above) are never gated.
-	if h, floor, blocked := m.senderCreateGate(); blocked {
-		m.log.Warn(source, "receive sink NOT opened - free VRAM below floor; refusing a new Spout sender (a fresh GL/DX interop registration would fail on a full card and can crash Resolume). Source appears when VRAM recovers.",
-			map[string]any{"sender": name, "freeMB": h.FreeMB, "floorMB": floor})
-		return nil, fmt.Errorf("mediaroute: refusing new sender %q under VRAM pressure (free %d MB < floor %d MB)", name, h.FreeMB, floor)
+	if reason, freeMB, floorMB, blocked := m.senderCreateGate(w, h); blocked {
+		m.log.Warn(source, "receive sink NOT opened - VRAM budget refuses a new Spout sender (a fresh GL/DX interop registration would fail on a full card and can crash Resolume). Source appears when VRAM recovers.",
+			map[string]any{"sender": name, "freeMB": freeMB, "reserveMB": floorMB, "reason": reason})
+		return nil, fmt.Errorf("mediaroute: refusing new sender %q under VRAM pressure (%s)", name, reason)
 	}
 	inner, err := m.openSink(name, w, h)
 	if err != nil {
@@ -546,18 +551,28 @@ func (m *Manager) openReceiveSink(name string, w, h int) (medialink.Sink, error)
 // headroom to come up.
 const senderCreateFloorMB = 768
 
-// senderCreateGate reports whether a NEW sender creation must be refused for lack of VRAM. Fails
-// open: no headroom seam, governor disabled, or headroom unknown => never blocks.
-func (m *Manager) senderCreateGate() (gpumem.Headroom, uint64, bool) {
-	if m.headroom == nil || m.cfg == nil || !m.cfg().VramGovernorEnabled() {
-		return gpumem.Headroom{}, 0, false
+// senderCreateGate reports whether a NEW sender creation (w x h) must be refused for lack of VRAM,
+// with the reason + numbers. Prefers the UNIFIED budget seam (geometry-aware cost + reserve +
+// self-cap); falls back to the static floor when the budget is not wired. Fails open: governor
+// disabled, no seam, or headroom unknown => never blocks.
+func (m *Manager) senderCreateGate(w, h int) (reason string, freeMB, reserveMB uint64, blocked bool) {
+	if m.cfg == nil || !m.cfg().VramGovernorEnabled() {
+		return "", 0, 0, false
+	}
+	if m.admitSndr != nil {
+		allow, reason, free, reserve := m.admitSndr(w, h)
+		return reason, free, reserve, !allow
+	}
+	if m.headroom == nil {
+		return "", 0, 0, false
 	}
 	floor := uint64(senderCreateFloorMB)
 	if r := m.cfg().ResolvedVramReserveMB(); r > 0 {
 		floor = uint64(r)
 	}
-	h := m.headroom()
-	return h, floor, h.Present && h.FreeMB < floor
+	hr := m.headroom()
+	blocked = hr.Present && hr.FreeMB < floor
+	return fmt.Sprintf("free %d MB < floor %d MB", hr.FreeMB, floor), hr.FreeMB, floor, blocked
 }
 
 // closeKept is keptSink.Close: destroy on an explicit stop, else publish ONE transparent frame and

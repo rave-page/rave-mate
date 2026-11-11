@@ -6,6 +6,7 @@ package mfenc
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -166,6 +167,10 @@ type ProcDecSession struct{}
 
 // ErrDecodeRefused never fires here (no native decode path off Windows).
 var ErrDecodeRefused = errors.New("mfenc: native decode refused")
+
+// ErrDecodeHeldVRAM never fires here (no native decode path off Windows); declared for cross-platform
+// callers (mediapipe) that detect the VRAM-pressure hold.
+var ErrDecodeHeldVRAM = fmt.Errorf("%w: native decode held - VRAM pressure", ErrDecodeRefused)
 
 func OpenProcDecSession(ProcDecOpts) (*ProcDecSession, error) { return nil, ErrUnsupported }
 

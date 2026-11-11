@@ -57,11 +57,17 @@ func TestRateLadder(t *testing.T) {
 	if !(h3.MaxBitrateKbps <= h2.MaxBitrateKbps && h2.MaxBitrateKbps <= h1.MaxBitrateKbps && h1.MaxBitrateKbps <= base) {
 		t.Fatalf("bitrate not monotonic: base=%d t1=%d t2=%d t3=%d", base, h1.MaxBitrateKbps, h2.MaxBitrateKbps, h3.MaxBitrateKbps)
 	}
-	// OWNER RULE: resolution is the last resort and is NEVER cut by the ladder.
-	for i, h := range []RateHint{h1, h2, h3} {
+	// Decision 2026-11-11: resolution is the LAST resort - tiers 1 and 2 never cut it; only the
+	// deepest tier (tier 3) caps resolution, after bitrate + fps are already trimmed.
+	for i, h := range []RateHint{h1, h2} {
 		if h.MaxHeight != 0 {
-			t.Fatalf("tier%d cut resolution (forbidden): %+v", i+1, h)
+			t.Fatalf("tier%d cut resolution before the last resort (forbidden): %+v", i+1, h)
 		}
+	}
+	if h3.MaxHeight != govResolutionCapH {
+		t.Fatalf("tier3 must cap resolution to the last-resort height %d: %+v", govResolutionCapH, h3)
+	}
+	for i, h := range []RateHint{h1, h2, h3} {
 		if h.MaxBitrateKbps <= 0 || h.MaxFPS <= 0 {
 			t.Fatalf("tier%d zeroed a stream: %+v", i+1, h)
 		}

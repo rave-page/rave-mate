@@ -1,7 +1,6 @@
 package encoderscan
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 )
@@ -40,6 +39,11 @@ type Device struct {
 	LoadPct  float64       // current utilization %: GPU VideoEncode engine, or system CPU if IsCPU
 	VRAMFree float64       // free VRAM MB (<0 = unknown → VRAM ceiling skipped)
 	Sessions int           // remaining HW encode sessions (<0 = unknown → session ceiling skipped)
+	// ThroughputPPS is the MEASURED pixels/sec this device sustains for this encoder+codec (filled by
+	// the wiring layer from the gpubudget benchmark cache; <=0 = unmeasured → the sustain gate is
+	// skipped, so an unmeasured rig behaves exactly as before). OS-neutral: a Linux VAAPI device fills
+	// the same field.
+	ThroughputPPS float64
 }
 
 // Ceilings bound how loaded a device may become AFTER adding our encode without risking others.
@@ -78,24 +82,10 @@ type Plan struct {
 // PlanEncode places a source app-agnostically: at each quality tier (full, then reduced if the
 // policy allows) it finds the device with the MOST headroom that stays under every ceiling after
 // adding the (scaled) encode cost; if none is safe at any tier, it pauses. Never picks a device
-// that would breach a ceiling - that's the "don't crash another encoder" guarantee.
+// that would breach a ceiling - that's the "don't crash another encoder" guarantee. Equivalent to
+// PlanEncodeFor with no pixel-rate requirement (the measured-throughput sustain gate is skipped).
 func PlanEncode(devices []Device, cost EncodeCost, ceil Ceilings, policy ExhaustionPolicy) Plan {
-	if len(devices) == 0 {
-		return Plan{Action: ActionPause, Reason: "no usable encoders"}
-	}
-	if d := place(devices, cost, ceil); d != nil {
-		return Plan{Action: ActionEncode, Family: d.Family, Encoder: d.Encoder, Device: d.Key,
-			ScalePct: 100, Reason: fmt.Sprintf("%s has the most headroom (load %.0f%%+%.0f%% ≤ %.0f%%)",
-				devLabel(*d), d.LoadPct, cost.EnginePct, ceil.MaxLoadPct)}
-	}
-	if policy == ExhaustPause {
-		return Plan{Action: ActionPause, Reason: "no device has full-quality headroom; policy=pause"}
-	}
-	if d := place(devices, scaleCost(cost, reduceScalePct), ceil); d != nil {
-		return Plan{Action: ActionReduce, Family: d.Family, Encoder: d.Encoder, Device: d.Key,
-			ScalePct: reduceScalePct, Reason: fmt.Sprintf("reduced to %d%% to fit %s's headroom", reduceScalePct, devLabel(*d))}
-	}
-	return Plan{Action: ActionPause, Reason: "no device has headroom even reduced"}
+	return PlanEncodeFor(devices, cost, ceil, policy, 0)
 }
 
 // reduceScalePct is the resolution scale applied when downscaling to fit leftover headroom.

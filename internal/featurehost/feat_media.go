@@ -45,6 +45,7 @@ type mediaFeature struct {
 	routes  *mediaroute.Manager
 	cam     *webcam.Manager
 	secrets *mediaSecretStore
+	vram    *VramBudget // unified VRAM admission (decode/sender/encode); ctl explainability
 
 	mu       sync.Mutex
 	mediaCfg config.MediaLinkFeature
@@ -96,6 +97,10 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 	if r := liveCfg().ResolvedVramReserveMB(); r > 0 {
 		mfenc.DecRebuildFloorMB = uint64(r)
 	}
+	// Unified VRAM budget: ONE admission policy over decode, sender and encode (geometry-aware cost +
+	// reserve + self-cap), installed into the mfenc decode/encode seams. Its sender gate is handed to
+	// mediaroute below. DecHeadroom/DecRebuildFloorMB above stay as the static-floor fallback.
+	f.vram = WireVramBudget(liveCfg, gpuSampler, VramCostPath(), rt.Log)
 	devSel := encoderscan.NewDeviceSelector(func() (string, string) { return liveCfg().DevicePref() }, nil)
 	f.router = medialink.New(medialink.Options{
 		Self: in.Self, Bus: mediaBusAdapter{f.bus}, Secrets: f.secrets, Clock: f.clock,
@@ -126,6 +131,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 			}
 			return gpumem.ReadHeadroom(gpuSampler)
 		},
+		AdmitSender: f.vram.AdmitSender, // unified budget gate (static-floor fallback stays via Headroom)
 	})
 
 	f.cam = webcam.New(rt.Log, f.bus, in.Self, in.Label, func() config.WebcamFeature {

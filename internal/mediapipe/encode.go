@@ -38,11 +38,12 @@ type ptsEntry struct {
 var _ medialink.RateControlSource = (*encoder)(nil)
 
 type encoder struct {
-	log    *logbus.Bus
-	ffmpeg string
-	spec   medialink.EncodeSpec
-	src    medialink.Source
-	size   int // bytes per raw input frame
+	log           *logbus.Bus
+	ffmpeg        string
+	spec          medialink.EncodeSpec // live (SetRateHint lowers spec.MaxHeight under mu); read snapshotted
+	baseMaxHeight int                  // negotiated downscale ceiling; the hint never exceeds it (restore target)
+	src           medialink.Source
+	size          int // bytes per raw input frame
 
 	frames chan *medialink.Frame
 	cancel context.CancelFunc
@@ -69,7 +70,7 @@ func newEncoder(ctx context.Context, log *logbus.Bus, ffmpeg string, spec medial
 	}
 	cctx, cancel := context.WithCancel(ctx)
 	e := &encoder{
-		log: log, ffmpeg: ffmpeg, spec: spec, src: src,
+		log: log, ffmpeg: ffmpeg, spec: spec, baseMaxHeight: spec.MaxHeight, src: src,
 		size:   spec.Width * spec.Height * 4,
 		frames: make(chan *medialink.Frame, encFramesBuf),
 		cancel: cancel, done: make(chan struct{}),
@@ -115,13 +116,33 @@ func (e *encoder) RequestKeyframe() {
 }
 
 // SetRateHint implements medialink.RateControlSource for the ffmpeg substitute. ffmpeg's CLI has no
-// live bitrate/fps channel (both are spawn-time -b:v / -r), so honouring a hint means a child
-// respawn - deferred; the native encoder is the primary rate-control path. Logged so a hint reaching
-// the fallback is never silently dropped.
+// live bitrate/fps channel (both are spawn-time), but RESOLUTION is honoured: the governor's
+// last-resort VRAM step updates the downscale ceiling and respawns the child so the encode-args
+// scaler rebuilds (RequestKeyframe uses the same respawn mechanism). The target is the SMALLER of the
+// route's negotiated ceiling and the hint, and a cleared hint (MaxHeight 0) restores the ceiling, so
+// the state always converges when the governor dedups to a single hint. Bitrate/fps stay spawn-time
+// only (reserved); logged so a hint is never silently dropped.
 func (e *encoder) SetRateHint(h medialink.RateHint) {
-	if h.MaxBitrateKbps > 0 || h.MaxFPS > 0 || h.MaxHeight > 0 {
-		e.log.Debug(source, "rate hint on the ffmpeg substitute is reserved (live change needs a respawn) - ignored", map[string]any{
-			"maxBitrateKbps": h.MaxBitrateKbps, "maxFPS": h.MaxFPS, "maxHeight": h.MaxHeight})
+	want := e.baseMaxHeight
+	if h.MaxHeight > 0 && (want == 0 || h.MaxHeight < want) {
+		want = h.MaxHeight
+	}
+	e.mu.Lock()
+	changed := want != e.spec.MaxHeight
+	if changed {
+		e.spec.MaxHeight = want
+		if e.runStop != nil {
+			e.runStop() // respawn with the new downscale ceiling
+		}
+	}
+	e.mu.Unlock()
+	if changed {
+		e.log.Info(source, "rate hint: resolution cap applied via child respawn (VRAM last resort)",
+			map[string]any{"maxHeight": want, "hintHeight": h.MaxHeight, "base": e.baseMaxHeight})
+	}
+	if h.MaxBitrateKbps > 0 || h.MaxFPS > 0 {
+		e.log.Debug(source, "rate hint bitrate/fps on the ffmpeg substitute is reserved (spawn-time only) - ignored", map[string]any{
+			"maxBitrateKbps": h.MaxBitrateKbps, "maxFPS": h.MaxFPS})
 	}
 }
 
@@ -137,8 +158,10 @@ func (e *encoder) PipeStats() medialink.PipelineStats {
 
 // hwScaling reports whether the current argv puts a GPU scaler in the filter chain.
 func (e *encoder) hwScaling() bool {
-	return !e.swScale.Load() && e.spec.MaxHeight > 0 && e.spec.Height > e.spec.MaxHeight &&
-		hwScaleFamily(e.spec.Encoder)
+	e.mu.Lock()
+	maxH := e.spec.MaxHeight // mutable via SetRateHint
+	e.mu.Unlock()
+	return !e.swScale.Load() && maxH > 0 && e.spec.Height > maxH && hwScaleFamily(e.spec.Encoder)
 }
 
 // run supervises the child: spawn → pipe → restart with capped backoff until ctx or source EOF.
@@ -192,9 +215,10 @@ func (e *encoder) runOnce(ctx context.Context) error {
 	e.mu.Lock()
 	e.runStop = rcancel
 	e.ptsq = e.ptsq[:0]
+	spec := e.spec // snapshot: SetRateHint can lower spec.MaxHeight concurrently
 	e.mu.Unlock()
 
-	cmd := exec.CommandContext(rctx, e.ffmpeg, encodeArgs(e.spec, e.swScale.Load())...)
+	cmd := exec.CommandContext(rctx, e.ffmpeg, encodeArgs(spec, e.swScale.Load())...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err

@@ -1103,7 +1103,19 @@ func OpenProcSession(luid int64, inW, inH, outW, outH int, fps float64, kbps, go
 // ring only) and the caller must never call Encode. A child that refuses the source returns
 // ErrZeroCopyRefused so the caller can reopen on the readback path (§7.3, never a dead route).
 func OpenProcSessionOpts(o ProcOpts) (*ProcSession, error) {
+	// VRAM admission (the unified budget): a native encode session allocates a VP NV12 pool + MFT.
+	// On a full card the open fails and the ffmpeg substitute is no lighter (same GPU, or CPU-pegging
+	// x264). Refuse with ErrEncodeHeldVRAM so the caller HOLDS. Fails open (seam nil => no gating).
+	if EncAdmit != nil {
+		if allow, reason := EncAdmit(o.OutW, o.OutH, int(o.FPS), "h264"); !allow {
+			return nil, fmt.Errorf("%w: %s", ErrEncodeHeldVRAM, reason)
+		}
+	}
+	beforeH := DecHeadroom() // measurement baseline (same primary-adapter headroom seam as decode)
 	s, err := openProcSessionOn(o)
+	if err == nil && EncObserve != nil {
+		observeCost(beforeH, func(mb float64) { EncObserve(o.OutW, o.OutH, int(o.FPS), "h264", mb) })
+	}
 	if err == nil || o.Spout == nil || len(o.ZeroCopyAdapters) == 0 || !errors.Is(err, ErrZeroCopyRefused) {
 		return s, err
 	}
