@@ -25,6 +25,11 @@ type EncodeSpec struct {
 	// LUID as "engine default" and emit no device flags, so an unset spec behaves exactly as before.
 	DeviceLUID  string
 	DeviceIndex int
+	// VAAPIRenderNode is the Linux VA-API encode device: the /dev/dri/renderD* node whose driver
+	// exposes the encode entrypoint, picked deliberately by the probe (mediapipe.ensureVAAPINode).
+	// The Linux analog of DeviceLUID/DeviceIndex; "" = let encodeArgs fall back to the default node.
+	// Ignored by every non-*_vaapi encoder and off Linux.
+	VAAPIRenderNode string
 }
 
 // Device reports the resolved encode device, ok=false when the engine should use its own default.

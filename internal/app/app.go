@@ -3610,8 +3610,7 @@ func (c *appControl) EncoderScan() string {
 		hw := false
 		for _, e := range caps.Encoders {
 			working[e] = true
-			switch encoderscan.FamilyFromOBSID(e) {
-			case encoderscan.FamilyNVENC, encoderscan.FamilyAMF, encoderscan.FamilyQSV:
+			if encoderscan.FamilyFromOBSID(e).IsHardware() { // VA-API/V4L2/VideoToolbox count too, not just NVENC/AMF/QSV
 				hw = true
 			}
 		}
@@ -3635,6 +3634,9 @@ func (c *appControl) EncoderScan() string {
 		}
 		if len(caps.HWAccels) > 0 {
 			fmt.Fprintf(&b, "hwaccels: [%s]\n", strings.Join(caps.HWAccels, " "))
+		}
+		if caps.VAAPINode != "" {
+			fmt.Fprintf(&b, "vaapi render node: %s  (deliberate pick: first /dev/dri/renderD* whose driver has the encode entrypoint; override RAVE_VAAPI_DEVICE)\n", caps.VAAPINode)
 		}
 	} else {
 		b.WriteString("note: no VALIDATED codec probe yet - test encodes are deferred while a stream is live (they take a real encode session); the advertised set above is the ffmpeg build listing\n")

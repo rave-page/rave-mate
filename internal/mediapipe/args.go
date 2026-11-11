@@ -44,6 +44,43 @@ func gopFrames(fps float64) int {
 // is the ONLY reason the child needs one (AMF / Media Foundation: no per-encoder device option).
 const hwDeviceD3D11 = "rvd3d"
 
+// defaultVAAPINode is the render node encodeArgs falls back to when a *_vaapi spec carries no
+// probe-picked node. The discrete GPU is renderD128 on a single-GPU box; a machine where the
+// iGPU is renderD128 should rely on the probe's deliberate pick (EncodeSpec.VAAPIRenderNode).
+const defaultVAAPINode = "/dev/dri/renderD128"
+
+// planVAAPIDevice builds the VA-API hardware context for a *_vaapi encoder: the global
+// -vaapi_device render node plus a CPU->NV12->GPU upload filter (format=nv12,hwupload). A
+// MaxHeight downscale runs on the CPU (scale) BEFORE hwupload - radeonsi's scale_vaapi is a
+// 7.x-era filter we can't assume on a user's PATH ffmpeg, and swscaling one frame is cheap next
+// to the encode. node comes from the probe's deliberate render-node pick; empty falls back to
+// defaultVAAPINode so the argv is always well-formed.
+func planVAAPIDevice(spec medialink.EncodeSpec, scaled bool, outH int) encodeDevicePlan {
+	node := spec.VAAPIRenderNode
+	if node == "" {
+		node = defaultVAAPINode
+	}
+	vf := "format=nv12,hwupload"
+	if scaled {
+		vf = fmt.Sprintf("scale=-2:%d,format=nv12,hwupload", outH)
+	}
+	// -vaapi_device is a global option (before -i), same slot as -init_hw_device.
+	return encodeDevicePlan{init: []string{"-vaapi_device", node}, vf: vf}
+}
+
+// vaapiTestEncodeArgs builds a tiny 1280x720 VA-API test encode on a render node. The generic
+// test-encode argv carries no -vaapi_device/hwupload and so false-negatives every *_vaapi
+// encoder; this is the VA-API-specific form the probe + render-node pick use.
+func vaapiTestEncodeArgs(node, encoder string) []string {
+	return []string{
+		"-hide_banner", "-loglevel", "warning",
+		"-vaapi_device", node,
+		"-f", "lavfi", "-i", "color=c=black:s=1280x720:r=10",
+		"-frames:v", "3", "-vf", "format=nv12,hwupload",
+		"-c:v", encoder, "-f", "null", "-",
+	}
+}
+
 // scaleFilter builds the downscale chain for an explicit MaxHeight (outH = target height).
 //
 // Hardware encoder families with a stable GPU scaler get one: the CPU then only packs RGBA→NV12
@@ -165,7 +202,12 @@ func encodeArgs(spec medialink.EncodeSpec, forceSW bool) []string {
 	if kbps <= 0 {
 		kbps = defaultBitrateKbps(outW, outH, fps)
 	}
-	dev := planEncodeDevice(spec, scaled, forceSW, outH)
+	var dev encodeDevicePlan
+	if strings.HasSuffix(spec.Encoder, "_vaapi") {
+		dev = planVAAPIDevice(spec, scaled, outH) // VA-API owns its hw context (device + hwupload)
+	} else {
+		dev = planEncodeDevice(spec, scaled, forceSW, outH)
+	}
 	args := []string{"-hide_banner", "-loglevel", "error", "-fflags", "nobuffer"}
 	args = append(args, dev.init...) // the child's ONE hardware context - global, before the input
 	args = append(args,
@@ -195,6 +237,14 @@ func encodeArgs(spec medialink.EncodeSpec, forceSW bool) []string {
 		args = append(args, rc...)
 	case "h264_qsv", "hevc_qsv":
 		args = append(args, "-c:v", spec.Encoder, "-preset", "veryfast", "-async_depth", "1")
+		args = append(args, rc...)
+	case "h264_vaapi", "hevc_vaapi":
+		// VA-API low-latency: CBR (maxrate==b:v via rc), async_depth 1 (minimal encode
+		// pipelining), no B-frames (-bf 0 in rc). Parameter-set repetition + AUD come from the
+		// post framing below (vaapi is not _amf, so it takes the dump_extra + {codec}_metadata=aud
+		// path, which is exactly the Annex-B framing the AU splitter expects). Verified on an
+		// RX 7900 XTX (radeonsi, ffmpeg 9): 1080p60 ~7.5x, 4K60 ~2.5x, hevc 1080p60 ~7.7x realtime.
+		args = append(args, "-c:v", spec.Encoder, "-rc_mode", "CBR", "-async_depth", "1")
 		args = append(args, rc...)
 	case "h264_amf":
 		// AMF omits SPS/PPS in-band by default → the bitstream filter/decoder starves. header_spacing
