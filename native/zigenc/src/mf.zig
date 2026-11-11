@@ -155,7 +155,8 @@ const AttrVtbl = extern struct {
     _iunk: [3]VOP,
     _get0: [4]VOP, // GetItem GetItemType CompareItem Compare
     GetUINT32: *const fn (*anyopaque, *const GUID, *u32) callconv(.winapi) HRESULT,
-    _get1: [2]VOP, // GetUINT64 GetDouble
+    GetUINT64: *const fn (*anyopaque, *const GUID, *u64) callconv(.winapi) HRESULT,
+    _get1: [1]VOP, // GetDouble
     GetGUID: *const fn (*anyopaque, *const GUID, *GUID) callconv(.winapi) HRESULT,
     _get2: [1]VOP, // GetStringLength
     GetString: *const fn (*anyopaque, *const GUID, [*]u16, u32, ?*u32) callconv(.winapi) HRESULT,
@@ -406,6 +407,13 @@ fn attrGetGUID(p: anytype, key: *const GUID) ?GUID {
     const a: *const AttrVtbl = @ptrCast(@alignCast(p.v));
     var v: GUID = undefined;
     if (failed(a.GetGUID(@ptrCast(p), key, &v))) return null;
+    return v;
+}
+
+fn attrGetU64(p: anytype, key: *const GUID) ?u64 {
+    const a: *const AttrVtbl = @ptrCast(@alignCast(p.v));
+    var v: u64 = 0;
+    if (failed(a.GetUINT64(@ptrCast(p), key, &v))) return null;
     return v;
 }
 
@@ -1848,6 +1856,7 @@ pub const api = struct {
     pub const setU64 = attrSetU64;
     pub const setGUID = attrSetGUID;
     pub const getU32 = attrGetU32;
+    pub const getU64 = attrGetU64;
     pub const getGUID = attrGetGUID;
     pub const guidsEqual = guidEq;
     pub const mediaType = mtVideo;
