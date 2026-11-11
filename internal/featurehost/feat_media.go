@@ -177,7 +177,7 @@ func (f *mediaFeature) HandleEvent(event string, data json.RawMessage) {
 	case evMediaSecret:
 		var ps peerSecret
 		if json.Unmarshal(data, &ps) == nil {
-			f.secrets.set(ps.Node, ps.Secret)
+			f.secrets.set(ps)
 		}
 	case evMediaSyncPeer:
 		var sp syncPeerEvent
@@ -322,36 +322,66 @@ func (m mediaBusAdapter) Subscribe(topic string, fn func(medialink.Event)) func(
 }
 
 // mediaSecretStore is the child's SecretProvider, seeded at spawn + updated per-peer on connect/drop.
+// It also carries the enc-mode metadata (Addr/EncMode) so the child evaluates the media-plane
+// auto-encryption decision locally (PeerAddr + MediaEncMode, consulted by the medialink router).
 type mediaSecretStore struct {
 	mu sync.Mutex
-	m  map[string][]byte
+	m  map[string]peerMeta
+}
+
+type peerMeta struct {
+	secret  []byte
+	addr    string
+	encMode string
 }
 
 func newMediaSecretStore(seed []peerSecret) *mediaSecretStore {
-	s := &mediaSecretStore{m: map[string][]byte{}}
+	s := &mediaSecretStore{m: map[string]peerMeta{}}
 	for _, ps := range seed {
 		if ps.Secret != nil {
-			s.m[ps.Node] = ps.Secret
+			s.m[ps.Node] = peerMeta{secret: ps.Secret, addr: ps.Addr, encMode: ps.EncMode}
 		}
 	}
 	return s
 }
 
-func (s *mediaSecretStore) set(node string, secret []byte) {
+// set upserts (secret!=nil) or drops (secret==nil) one peer's media key + enc metadata.
+func (s *mediaSecretStore) set(ps peerSecret) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if secret == nil {
-		delete(s.m, node)
+	if ps.Secret == nil {
+		delete(s.m, ps.Node)
 		return
 	}
-	s.m[node] = secret
+	s.m[ps.Node] = peerMeta{secret: ps.Secret, addr: ps.Addr, encMode: ps.EncMode}
 }
 
 func (s *mediaSecretStore) MediaSecret(node string) ([]byte, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	b, ok := s.m[node]
-	return b, ok
+	p, ok := s.m[node]
+	return p.secret, ok
+}
+
+// PeerAddr yields a peer's link address (same-subnet input for the enc=auto decision).
+func (s *mediaSecretStore) PeerAddr(node string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.m[node]
+	if !ok || p.addr == "" {
+		return "", false
+	}
+	return p.addr, true
+}
+
+// MediaEncMode yields a peer's three-state media-plane enc preference ("" → "auto").
+func (s *mediaSecretStore) MediaEncMode(node string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p, ok := s.m[node]; ok && p.encMode != "" {
+		return p.encMode
+	}
+	return "auto"
 }
 
 // childMemSoftPct is how much of the child's hard job-object RAM cap the Go soft limit sits at. The

@@ -46,10 +46,14 @@ type mediaInit struct {
 	MemLimitMB int `json:"memLimitMb,omitempty"`
 }
 
-// peerSecret is one peer's media AEAD key. Secret==nil drops the peer (disconnect).
+// peerSecret is one peer's media AEAD key + the metadata the enc-mode resolver needs. Secret==nil
+// drops the peer (disconnect). Addr/EncMode let the isolated child evaluate the §-auto media-plane
+// decision (same-subnet + preference) locally - it runs on the same host, so its interfaces match.
 type peerSecret struct {
-	Node   string `json:"node"`
-	Secret []byte `json:"secret,omitempty"`
+	Node    string `json:"node"`
+	Secret  []byte `json:"secret,omitempty"`
+	Addr    string `json:"addr,omitempty"`    // peer link "host:port" (same-subnet input for enc=auto)
+	EncMode string `json:"encMode,omitempty"` // "auto"/"on"/"off" ("" = auto)
 }
 
 // Parent→child event names.

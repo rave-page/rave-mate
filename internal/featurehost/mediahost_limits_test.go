@@ -17,7 +17,7 @@ func TestNewMediaHostWiresHeartbeatAndMemLimit(t *testing.T) {
 		Cfg: func() (config.MediaLinkFeature, config.WebcamFeature) {
 			return config.MediaLinkFeature{}, config.WebcamFeature{}
 		},
-		Secrets:    func() map[string][]byte { return map[string][]byte{"peer": {1, 2, 3}} },
+		Secrets:    func() []MediaPeerSecret { return []MediaPeerSecret{{Node: "peer", Secret: []byte{1, 2, 3}}} },
 		Codecs:     func() (enc, dec []string) { return []string{"h264_mf"}, []string{"h264"} },
 		SyncPeer:   func() string { return "" },
 		SameHost:   func(string) bool { return false },

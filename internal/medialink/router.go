@@ -183,7 +183,8 @@ type pendingOffer struct {
 	sourceID string
 	sinkKind Kind
 	open     SinkOpen
-	enc      string // our advertised media-plane pref (EncOn/EncOff), for the answer-time decision
+	enc      string // our advertised media-plane pref (EncAuto/EncOn/EncOff), for the answer-time decision
+	local    bool   // we see the target on a directly-connected private subnet (enc=auto input)
 	timer    *time.Timer
 }
 
@@ -634,14 +635,15 @@ func (rm *RouteManager) OfferRoute(target, sourceID, sinkID string, opt OfferOpt
 	}
 	session := newSession()
 	enc := rm.mediaPref(target)
-	po := &pendingOffer{target: target, sourceID: sourceID, sinkKind: sink.desc.Kind, open: sink.open, enc: enc}
+	local := rm.sameSubnet(target)
+	po := &pendingOffer{target: target, sourceID: sourceID, sinkKind: sink.desc.Kind, open: sink.open, enc: enc, local: local}
 	po.timer = time.AfterFunc(pendingTTL, func() { rm.expireOffer(session) })
 	rm.mu.Lock()
 	rm.pendingOff[session] = po
 	rm.mu.Unlock()
 
 	off := Offer{Session: session, Target: target, SourceID: sourceID, SinkID: sinkID, Codec: opt.Codec,
-		Transport: TransportTCP, NACK: true, Bitrate: opt.BitrateKbps, Enc: enc,
+		Transport: TransportTCP, NACK: true, Bitrate: opt.BitrateKbps, Enc: enc, Local: local,
 		Caps: &Caps{Report: true, Sync: true, Decoders: decoders}}
 	if raw, err := json.Marshal(off); err == nil {
 		rm.bus.Publish(TopicOffer, raw)
@@ -661,16 +663,6 @@ func (rm *RouteManager) CloseRoute(session string) {
 }
 
 // ── bus handlers ───────────────────────────────────────────────────────────────
-
-// mediaPref reports this node's media-plane encryption preference for a peer: EncOff only when the
-// peer's media-plane opt-out is set; EncOn (default) otherwise. Read via an OPTIONAL method on the
-// secret provider, so a test SecretProvider without it defaults to encrypted.
-func (rm *RouteManager) mediaPref(peer string) string {
-	if ep, ok := rm.secrets.(interface{ MediaEncOff(string) bool }); ok && ep.MediaEncOff(peer) {
-		return EncOff
-	}
-	return EncOn
-}
 
 // onOffer (source side): if we own the offered SourceID and are the target, accept + answer.
 func (rm *RouteManager) onOffer(ev Event) {
@@ -737,8 +729,9 @@ func (rm *RouteManager) onOffer(ev Event) {
 	stream := uint16(rm.streamSeq.Add(1))
 	granted := grantCaps(off)
 	ourEnc := rm.mediaPref(ev.Origin)
+	ourLocal := rm.sameSubnet(ev.Origin)
 	pa := &pendingAnswer{peer: ev.Origin, offer: off, open: src.open, srcDesc: src.desc,
-		choice: choice, stream: stream, caps: granted, encrypt: planeEncrypt(off.Enc, ourEnc)}
+		choice: choice, stream: stream, caps: granted, encrypt: resolveEnc(off.Enc, ourEnc, off.Local && ourLocal)}
 	pa.timer = time.AfterFunc(pendingTTL, func() { rm.expireAnswer(off.Session) })
 	rm.mu.Lock()
 	rm.pendingAns[off.Session] = pa
@@ -746,7 +739,7 @@ func (rm *RouteManager) onOffer(ev Event) {
 	addr := rm.answerAddr(ev.Origin)
 
 	ans := Answer{Session: off.Session, Accept: true, Addr: addr, Codec: codec, Stream: stream,
-		Transport: TransportTCP, NACK: granted.nack, Enc: ourEnc}
+		Transport: TransportTCP, NACK: granted.nack, Enc: ourEnc, Local: ourLocal}
 	if granted.report || granted.sync || choice != nil {
 		ans.Caps = &Caps{Report: granted.report, Sync: granted.sync}
 		if choice != nil {
@@ -1145,7 +1138,7 @@ func (rm *RouteManager) peerSyncEstimate(peer string) (SyncEstimate, bool) {
 // dialAndReceive handles the sink side: dial the answered addr, send the session preamble, derive
 // the AEAD key, open the sink, and pump conn→(jitter buffer→decode child→)sink.
 func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Answer, po *pendingOffer) {
-	encrypt := planeEncrypt(po.enc, ans.Enc)
+	encrypt := resolveEnc(po.enc, ans.Enc, po.local && ans.Local)
 	d := net.Dialer{Timeout: dialTimeout}
 	c, err := d.DialContext(ctx, "tcp", ans.Addr)
 	if err != nil {
