@@ -805,3 +805,37 @@ preferDecoders, webcam taps, UI formatters.
 counted, bitrate-within-budget check, buffer auto-grow under injected jitter, real NVENC/AMF
 probe results on both PCs, Spout receiver against OBS/Resolume senders (SDK ReceiveImage
 NULL-pixel connect contract verified live).
+
+---
+
+## 15. P8 transport (implemented 2026-11, feat/udp-transport)
+
+The §2.5 UDP+NACK datagram profile + congestion control + the §-LAN encryption default shipped.
+Full design, wire deviations, decisions + loopback measurements: **`.devnotes/UDP_TRANSPORT.md`**.
+Pure-Go stdlib, zero new deps; wire-compatible (old peers stay on TCP, compat-tested both ways).
+
+- **Transport (§2.5).** UDP datagram `frameConn` beside the TCP `*Conn`: user-space MTU-safe
+  fragmentation + bounded reassembly, per-datagram AES-256-GCM with an EXPLICIT per-direction
+  datagram-seq nonce + SRTP-style replay window, fragment NACK + budgeted retransmit ring, token-
+  bucket pacer, deadline drops (→ router PLI), keepalive/liveness (≤2 s). Offer lists transports in
+  preference order (udp,tcp); UDP chosen when both support it AND a reachability handshake succeeds,
+  else TCP fallback on the same port (47641-5). Mid-route blackout → renegotiate once on TCP.
+- **Congestion (§2.5 / brief req 3).** Receiver-side AIMD from datagram loss + a simplified GCC
+  delay-gradient over-use detector, bounded by the negotiated `br`; bitrate first then fps,
+  resolution untouched; min()-combined with the VRAM governor through the existing MetaRate /
+  SetRateHint path. Clean LAN holds the ceiling without oscillating; 2% loss stays on NACK.
+- **Encryption default (brief req 5).** Per-peer tri-state auto/on/off (supersedes the P1 both-
+  opted-out boolean; legacy opt-out migrates to `off`): `auto` = cleartext media only on a directly-
+  connected private subnet (ANDed Offer/Answer `local` flag), AEAD otherwise; `on` forces AEAD.
+  Applied to BOTH the TCP and UDP media paths. Cleartext still token-gated (off-path rejection), no
+  confidentiality/on-path integrity (documented). Resolves the §2.1 SRTP-UDP note + the D3 "UDP+NACK
+  implemented P8" item.
+
+**Security fix (post-review):** the per-datagram AEAD flag is NOT trusted - the route's negotiated
+mode is authoritative (errDgMode before any other work), control datagrams are authenticated on AEAD
+routes, and rejected datagrams never refresh liveness. See UDP_TRANSPORT.md D-UDP-3.
+
+**Still P8-open (not this change):** per-stream FEC (`KindRepair` reserved, D9), PTP + follow-master
+clock tiers, NVENC-direct zero-copy. **Needs the 2-PC rig:** real UDP-vs-TCP latency/throughput +
+the bandwidth claim, firewall fallback on a real blocked-UDP net, enc=auto engaging across two PCs,
+congestion convergence under a real cap (loopback is not representative).

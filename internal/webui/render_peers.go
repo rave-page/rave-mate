@@ -1332,6 +1332,17 @@ func fmtRouteStat(s medialink.RouteStat, resolve func(string) string) (title, de
 	if !s.Encrypted { // media plane opted out both ends - flag the plaintext route
 		title += " " + i18n.T("peers.planePlaintext")
 	}
+	if s.Transport == medialink.TransportUDP { // §2.5 UDP datagram profile (else the default TCP)
+		title += " [udp]"
+	}
+	// UDP transport telemetry (loss/owd/NACK/retransmit/pacer/reassembly) - a technical diagnostic
+	// suffix (no translation); the TCP path has no datagram-level counters.
+	udpDetail := ""
+	if u := s.UDP; u != nil {
+		udpDetail = fmt.Sprintf(" · udp loss %.1f%% owd %s rtt %s nack %d/%d retx %s pacerQ %d/%d reasmDrop %d",
+			u.LossPct, fmtMsNs(float64(u.OwdNs)), fmtMsNs(float64(u.RTTns)), u.NacksSent, u.NacksRecv,
+			humanBytes(u.RetransBytes), u.PacerDepth, u.PacerDrops, u.ReasmDrops)
+	}
 	if s.Direction == "recv" {
 		detail = i18n.T("peers.routeDetailRecv", i18n.A{
 			"loss":      fmt.Sprint(s.LostEst),
@@ -1341,7 +1352,7 @@ func fmtRouteStat(s medialink.RouteStat, resolve func(string) string) (title, de
 			"p95":       fmtLat(s, s.LatencyP95Ns),
 			"nack":      fmt.Sprint(s.NACKsSent),
 		})
-		return title, detail
+		return title, detail + udpDetail
 	}
 	if r := s.Remote; r != nil {
 		detail = i18n.T("peers.routeDetailRemote", i18n.A{
@@ -1357,7 +1368,7 @@ func fmtRouteStat(s medialink.RouteStat, resolve func(string) string) (title, de
 			"pli":  fmt.Sprint(s.PLIRequests),
 		})
 	}
-	return title, detail
+	return title, detail + udpDetail
 }
 
 func fmtRate(r medialink.Rate) string {
