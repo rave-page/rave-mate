@@ -17,11 +17,18 @@ const (
 	govDefaultFloorMB = 1024
 )
 
-// rateLadder maps free VRAM to an ABSOLUTE RateHint per the owner's ladder: trim BITRATE first,
-// then FRAMERATE. RESOLUTION is the last resort and is deliberately NOT touched here (its live op is
-// unwired and it is the most visible degradation - a resolution cut re-plans the encode pipeline).
-// base* are the route's negotiated ceilings (the healthy target the hint restores on recovery).
-// Pure, so the whole ladder is testable off-set.
+// govResolutionCapH is the last-resort resolution cap: at the DEEPEST pressure tier the governor
+// caps the sender to 1080p. A route already at/below 1080p is unaffected (the sender only scales a
+// taller source), so the most-visible degradation only ever hits the highest-res routes under the
+// worst pressure - exactly where the alternative is a held/frozen pipeline.
+const govResolutionCapH = 1080
+
+// rateLadder maps free VRAM to an ABSOLUTE RateHint: trim BITRATE first, then FRAMERATE, and - only
+// at the deepest tier - RESOLUTION as the last resort (Decision 2026-11-11, superseding the earlier
+// "never cut resolution" rule: under VRAM admission failure the lead chose a visible downscale over a
+// held/frozen pipeline; see .devnotes/VRAM_BUDGET_AND_PLANNER). base* are the route's negotiated
+// ceilings (the healthy target the hint restores on recovery). Pure, so the whole ladder is tested
+// off-set; MaxHeight is omitempty so old peers ignore it and the sender scales before encode.
 func rateLadder(freeMB, floorMB uint64, baseKbps, baseFPS int, stream uint16) RateHint {
 	if floorMB == 0 {
 		floorMB = govDefaultFloorMB
@@ -31,12 +38,13 @@ func rateLadder(freeMB, floorMB uint64, baseKbps, baseFPS int, stream uint16) Ra
 	case freeMB >= floorMB*govHealthyMult: // healthy: full quality (restore base)
 	case freeMB >= floorMB: // tier 1: trim bitrate only
 		h.MaxBitrateKbps = govKbps(baseKbps, 60)
-	case freeMB >= floorMB/2: // tier 2: bitrate + framerate
+	case freeMB >= floorMB/2: // tier 2: bitrate + framerate (resolution still untouched)
 		h.MaxBitrateKbps = govKbps(baseKbps, 35)
 		h.MaxFPS = govFPS(baseFPS, 2)
-	default: // tier 3: hard trim (resolution STILL untouched - last resort)
+	default: // tier 3: hard trim + resolution cap (last resort)
 		h.MaxBitrateKbps = govKbps(baseKbps, 20)
 		h.MaxFPS = govFPS(baseFPS, 3)
+		h.MaxHeight = govResolutionCapH
 	}
 	return h
 }
