@@ -117,6 +117,49 @@ native MFT code):
   HOLDS (sink geometry unchanged) but the picture freezes on that path. A decode-side scale filter
   belongs in `internal/mediapipe/args.go` (owned by another agent) - left as a small follow-up.
 
+## Live plan-driven `auto` + the throughput benchmark that feeds it (2026-11-11, follow-up)
+
+- **Benchmark runner** (`internal/gpubench`): OS-neutral, gated, serialized, wall-clock-bounded.
+  `Want`/`Tick` lazy path runs ONE bucket only when the adapter is idle (no live route) and
+  `BenchAllowed` passes (headroom above reserve, machine idle >=30s, no protected OBS/Parsec
+  encode, room for the bench's own cost); the GPU timing is an injected `Timer`
+  (`featurehost.encodeBenchTimer` = an mfenc ProcSession fed synthetic frames, admitted through
+  gpubudget, ctx/timeout-killed). The media child's telemetry loop enqueues the working HW
+  encoder's standard buckets (1080p/1440p/2160p) when idle and Ticks. `RunAll` is the explicit
+  path. Measured throughput persists per adapter+driver.
+- **Cache key**: `vendor | model@driverVersion | op | codec | bucket`. The model distinguishes
+  GPUs; the registry DriverVersion (display-adapter class key; "" fallback) distinguishes driver
+  updates. Justified fallback: when the registry read fails, the model name alone keys it.
+- **Live `auto`** (`encoderscan.ResolveDevicePlan` via `featurehost.NewEncodeDeviceResolver`):
+  once the candidate silicon is MEASURED, `auto` picks the encode adapter from `PlanEncodeFor`
+  (sustains the pixel rate + most headroom + VRAM); UNMEASURED stays at the engine default
+  (adapter 0 / native-first) so a fresh machine is exactly as before. `pin`/`avoid-busiest`
+  unchanged. Negotiated codec wins (the planner picks the adapter within what the peer accepted).
+  The decision is per open; a re-plan happens on reopen/renegotiation. A plan HOLD/pause degrades
+  to the engine default (the VRAM HOLD proper is already enforced by `mfenc.EncAdmit`).
+- **Explainability**: `ctl encoder-scan` reloads the shared cost file and the budget panel lists
+  measured throughput (Mpps) + learned costs + the last per-op admit decision; the per-route
+  chosen adapter/encoder + reqMpps + why is logged by the resolver (medialink log stream).
+
+Real benchmark + `TestMFBridgeHardware` NOT RUN: at execution the card had **Resolume Arena live
+at ~80% GPU (sm), encoder ~4%**, plus **OBS64 and parsecd** present (nvidia-smi pmon). That is
+exactly the protected/live condition the brief says to skip under - a GPU benchmark would contend
+with the user's live visuals and a possible live Parsec session. `native/zigenc` was therefore not
+built/run either (the exe only matters for a GPU run). `encodeBenchTimer` compiles against the
+Windows mfenc build but is GPU-unverified. The lead should run it on an idle card: close
+Resolume/OBS, leave the machine idle ~30s, then the media child's lazy sweep measures the HW
+encoder; `ctl encoder-scan` then shows the throughput table. Multi-GPU placement cannot be verified
+on this single-dGPU PC - on a two-adapter machine the lead should confirm `auto` picks the
+measured, least-busy, sustaining adapter and that non-primary throughput keys correctly (today
+non-primary throughput falls back to headroom-based selection; see the follow-up below).
+
+Follow-ups (bounded, documented): a forced synchronous `ctl encoder-bench` needs a daemon->child
+proxy (the lazy sweep + encoder-scan table cover the need today); the decode benchmark needs a
+throwaway GPU destination + pre-encoded AUs (encode is measured, decode throughput stays
+unmeasured => its sustain gate is skipped); multi-GPU per-adapter throughput keying (the budget
+resolves the PRIMARY adapter, so a non-primary encoder's measured rate is not retrieved - it
+degrades to headroom-based `auto`, no worse than before).
+
 ## Deliberate selection (`internal/encoderscan`, OS-neutral)
 
 - `PlanEncodeFor` adds a measured-throughput sustain gate (pixels/sec >= W*H*fps * 1.15); `auto`
