@@ -112,3 +112,50 @@ func TestNilStoreSafe(t *testing.T) {
 		t.Error("nil store should not return a trusted key")
 	}
 }
+
+// TestEncModeResolution pins the three-state media-plane enc preference + the legacy opt-out
+// migration (EncOff[plane]=true -> "off").
+func TestEncModeResolution(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "e.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	s := New(st)
+	if err := s.Save(Peer{NodeID: "n1", Trusted: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Default (no override) = auto.
+	if m := s.EncModeFor("n1", PlaneMedia); m != "auto" {
+		t.Fatalf("default enc mode = %q want auto", m)
+	}
+	// Legacy opt-out migrates to off.
+	if err := s.SetEncOff("n1", PlaneMedia, true); err != nil {
+		t.Fatal(err)
+	}
+	if m := s.EncModeFor("n1", PlaneMedia); m != "off" {
+		t.Fatalf("legacy EncOff -> %q want off", m)
+	}
+	// Explicit on wins and clears the legacy opt-out.
+	if err := s.SetEncMode("n1", PlaneMedia, "on"); err != nil {
+		t.Fatal(err)
+	}
+	if m := s.EncModeFor("n1", PlaneMedia); m != "on" {
+		t.Fatalf("explicit mode = %q want on", m)
+	}
+	if s.EncOff("n1", PlaneMedia) {
+		t.Fatal("SetEncMode did not clear the legacy opt-out")
+	}
+	// Back to auto clears the override.
+	if err := s.SetEncMode("n1", PlaneMedia, "auto"); err != nil {
+		t.Fatal(err)
+	}
+	if m := s.EncModeFor("n1", PlaneMedia); m != "auto" {
+		t.Fatalf("reset mode = %q want auto", m)
+	}
+	// Unknown peer = auto.
+	if m := s.EncModeFor("ghost", PlaneMedia); m != "auto" {
+		t.Fatalf("unknown peer enc mode = %q want auto", m)
+	}
+}

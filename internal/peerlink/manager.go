@@ -605,6 +605,13 @@ func (m *Manager) SetEncOff(nodeID, plane string, off bool) error {
 func (m *Manager) MediaEncOff(nodeID string) bool { return m.store.EncOff(nodeID, peers.PlaneMedia) }
 func (m *Manager) FilesEncOff(nodeID string) bool { return m.store.EncOff(nodeID, peers.PlaneFiles) }
 
+// MediaEncMode reports a peer's three-state media-plane encryption preference ("auto"/"on"/"off";
+// "auto" = cleartext only on a directly-connected private subnet). The medialink router consults
+// this via an optional interface on its SecretProvider (keeps the plane-string contract in peers).
+func (m *Manager) MediaEncMode(nodeID string) string {
+	return m.store.EncModeFor(nodeID, peers.PlaneMedia)
+}
+
 // Remembered returns all trusted/paired peers (for the UI's offline list).
 func (m *Manager) Remembered() []peers.Peer {
 	list, _ := m.store.List()

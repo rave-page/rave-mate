@@ -31,6 +31,11 @@ type Peer struct {
 	// PlaneMedia). Encryption is DEFAULT ON: a plane absent (or false) means encrypted. A wire
 	// opt-out takes effect only when BOTH ends set it, so a lone true here never downgrades.
 	EncOff map[string]bool `json:"encOff,omitempty"`
+	// EncMode is the per-plane THREE-STATE encryption preference ("auto"/"on"/"off"), superseding
+	// EncOff for a plane when present. "auto" (the media-plane default) = cleartext only on a
+	// directly-connected private subnet, AEAD otherwise. A legacy EncOff[plane]=true with no
+	// EncMode[plane] migrates to "off" (see EncModeFor).
+	EncMode map[string]string `json:"encMode,omitempty"`
 }
 
 // Store is the remembered-peers persistence facade over the bbolt store.
@@ -98,6 +103,52 @@ func (s *Store) EncOff(nodeID, plane string) bool {
 		return false
 	}
 	return p.EncOff[plane]
+}
+
+// EncModeFor resolves a peer's three-state encryption preference for a plane: an explicit
+// EncMode[plane] wins; else a legacy EncOff[plane]=true migrates to "off"; else "auto" (the new
+// default). Unknown peer → "auto".
+func (s *Store) EncModeFor(nodeID, plane string) string {
+	p, ok := s.Get(nodeID)
+	if !ok {
+		return "auto"
+	}
+	if m, ok := p.EncMode[plane]; ok && (m == "auto" || m == "on" || m == "off") {
+		return m
+	}
+	if p.EncOff[plane] {
+		return "off" // legacy opt-out
+	}
+	return "auto"
+}
+
+// SetEncMode records a peer's three-state encryption preference for a plane (read-modify-write).
+// mode "auto"/"on"/"off"; "auto" clears any stored override (back to default) + the legacy EncOff
+// entry. No-op on an unknown peer.
+func (s *Store) SetEncMode(nodeID, plane, mode string) error {
+	if s == nil || s.st == nil {
+		return nil
+	}
+	p, ok := s.Get(nodeID)
+	if !ok {
+		return nil
+	}
+	delete(p.EncOff, plane) // supersede any legacy opt-out
+	if len(p.EncOff) == 0 {
+		p.EncOff = nil
+	}
+	if mode == "auto" || mode == "" {
+		delete(p.EncMode, plane)
+		if len(p.EncMode) == 0 {
+			p.EncMode = nil
+		}
+		return s.Save(p)
+	}
+	if p.EncMode == nil {
+		p.EncMode = map[string]string{}
+	}
+	p.EncMode[plane] = mode
+	return s.Save(p)
 }
 
 // SetEncOff records a peer's opt-out for one plane (read-modify-write). No-op on an unknown peer

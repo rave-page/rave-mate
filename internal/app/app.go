@@ -746,7 +746,7 @@ func run(parent context.Context, serviceMode bool) error {
 	vramBudget := featurehost.WireVramBudget(mediaLinkCfg, gpuGovSampler, featurehost.VramCostPath(), log)
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,
-		Encoder: encFac, Decoder: decFac,
+		Encoder: encFac, Decoder: decFac, UDP: true, // §2.5 UDP datagram profile (reachability-gated, TCP fallback)
 		EncodeMaxHeight:  cfg.Features.MediaLink.MaxHeight,
 		EncodePolicy:     mediaEncodePolicy(mediaLinkCfg),
 		EncodeDevice:     mediaEncodeDevice(log, mediaLinkCfg),
@@ -779,7 +779,7 @@ func run(parent context.Context, serviceMode bool) error {
 			Cfg: func() (config.MediaLinkFeature, config.WebcamFeature) {
 				return cfg.Features.MediaLink, cfg.Features.Webcam
 			},
-			Secrets:    func() map[string][]byte { return connectedMediaSecrets(peerMgr) },
+			Secrets:    func() []featurehost.MediaPeerSecret { return connectedMediaSecrets(peerMgr) },
 			Codecs:     func() ([]string, []string) { mediaCapsMu.Lock(); defer mediaCapsMu.Unlock(); return mediaEnc, mediaDec },
 			SyncPeer:   func() string { mediaCapsMu.Lock(); defer mediaCapsMu.Unlock(); return mediaSyncPeer },
 			SameHost:   func(peer string) bool { return peerIsLocalhost(peerMgr, peer) },
@@ -2451,16 +2451,18 @@ func peersConnected(pm *peerlink.Manager) bool {
 	return false
 }
 
-// connectedMediaSecrets snapshots every connected peer's media AEAD key, for the media child spawn +
-// per-peer refresh (the child dials its own AEAD socket keyed off these).
-func connectedMediaSecrets(pm *peerlink.Manager) map[string][]byte {
-	out := map[string][]byte{}
+// connectedMediaSecrets snapshots every connected peer's media AEAD key + enc metadata (link
+// address + three-state enc preference), for the media child spawn + per-peer refresh. The child
+// evaluates the §-auto media-plane decision (same-subnet + preference) locally from Addr/EncMode.
+func connectedMediaSecrets(pm *peerlink.Manager) []featurehost.MediaPeerSecret {
+	var out []featurehost.MediaPeerSecret
 	for _, c := range pm.Connections() {
 		if c.Status != peerlink.StatusConnected {
 			continue
 		}
 		if sec, ok := pm.MediaSecret(c.NodeID); ok {
-			out[c.NodeID] = sec
+			out = append(out, featurehost.MediaPeerSecret{
+				Node: c.NodeID, Secret: sec, Addr: c.Address, EncMode: pm.MediaEncMode(c.NodeID)})
 		}
 	}
 	return out

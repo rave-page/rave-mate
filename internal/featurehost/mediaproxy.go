@@ -40,11 +40,20 @@ type MediaHost struct {
 type MediaHostDeps struct {
 	Self, Label string
 	Cfg         func() (config.MediaLinkFeature, config.WebcamFeature)
-	Secrets     func() map[string][]byte // ALL currently-connected peers' media AEAD keys
+	Secrets     func() []MediaPeerSecret // ALL currently-connected peers' media AEAD keys + enc metadata
 	Codecs      func() (enc, dec []string)
 	SyncPeer    func() string
 	SameHost    func(peer string) bool // same-host guard (peerMgr is daemon-side)
 	MemLimitMB  int                    // >0 caps the child's RAM (kill-on-close job)
+}
+
+// MediaPeerSecret is one connected peer's media AEAD key + the enc-mode metadata the child needs to
+// evaluate the §-auto media-plane decision (same-subnet + preference) locally.
+type MediaPeerSecret struct {
+	Node    string
+	Secret  []byte
+	Addr    string // peer link "host:port"
+	EncMode string // "auto"/"on"/"off" ("" = auto)
 }
 
 // NewMediaHost builds the media child host. deps.* are re-evaluated on every (re)spawn to seed the
@@ -66,8 +75,8 @@ func NewMediaHost(log *logbus.Bus, bus *eventbus.Bus, clock *medialink.SoftwareC
 			enc, dec := deps.Codecs()
 			in := mediaInit{Self: deps.Self, Label: deps.Label, MediaCfg: mcfg, CamCfg: ccfg,
 				Encoders: enc, Decoders: dec, SyncPeer: deps.SyncPeer(), MemLimitMB: deps.MemLimitMB}
-			for node, sec := range deps.Secrets() {
-				in.Secrets = append(in.Secrets, peerSecret{Node: node, Secret: sec})
+			for _, ps := range deps.Secrets() {
+				in.Secrets = append(in.Secrets, peerSecret{Node: ps.Node, Secret: ps.Secret, Addr: ps.Addr, EncMode: ps.EncMode})
 			}
 			return in
 		},
@@ -86,9 +95,9 @@ func NewMediaHost(log *logbus.Bus, bus *eventbus.Bus, clock *medialink.SoftwareC
 }
 
 // PushSecrets sends the full current peer-secret set to a running child (call on peer connect/disconnect).
-func (h *MediaHost) PushSecrets(secrets map[string][]byte) {
-	for node, sec := range secrets {
-		_ = h.host.Send(evMediaSecret, peerSecret{Node: node, Secret: sec})
+func (h *MediaHost) PushSecrets(secrets []MediaPeerSecret) {
+	for _, ps := range secrets {
+		_ = h.host.Send(evMediaSecret, peerSecret{Node: ps.Node, Secret: ps.Secret, Addr: ps.Addr, EncMode: ps.EncMode})
 	}
 }
 

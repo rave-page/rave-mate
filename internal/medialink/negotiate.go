@@ -19,18 +19,40 @@ const (
 	TransportUDP = "udp" // §2.5 datagram profile, implemented P8 (explicit nonce + replay window)
 )
 
-// Enc is the media-plane encryption preference on Offer/Answer. ABSENT ("") = ON: an older peer
-// sends no field and MUST stay encrypted (this plane is default-AEAD). AEAD is dropped only when
-// BOTH ends explicitly send EncOff for each other (peers.PlaneMedia).
+// Enc is the per-peer media-plane encryption preference carried on Offer/Answer (brief req 5). Three
+// states; ABSENT ("") = an OLDER peer, treated as EncOn so it never downgrades (wire compat).
+//
+//	EncAuto - NEW DEFAULT: cleartext media only when BOTH endpoints sit on the same directly-
+//	          connected private subnet (RFC1918 / link-local / ULA - the Local flag below, ANDed
+//	          across both ends), AEAD on any routed / public / VPN-looking path. Zero crypto cost on
+//	          the trusted LAN (the owner's ask), full AEAD off it.
+//	EncOn   - force AEAD regardless of path.
+//	EncOff  - prefer cleartext, but STILL gated by the same-subnet check (an opt-out never sends
+//	          cleartext over a routed/public path - a deliberate, documented tightening of the
+//	          legacy off+off=always-clear rule, for safety).
 const (
-	EncOn  = "on"
-	EncOff = "off"
+	EncOn   = "on"
+	EncOff  = "off"
+	EncAuto = "auto"
 )
 
-// planeEncrypt resolves the route's media-plane encryption: default ON, plaintext only when BOTH
-// ends opted out. A lone or absent opt-out keeps AEAD.
-func planeEncrypt(offerEnc, answerEnc string) bool {
-	return !(offerEnc == EncOff && answerEnc == EncOff)
+// resolveEnc decides a route's media-plane AEAD. `on` (or a legacy-absent peer) on EITHER side forces
+// AEAD. Otherwise (both auto/off) cleartext is used only when bothLocal (each end confirmed, via the
+// Offer/Answer Local flag, that the peer is on a directly-connected private subnet). Deterministic +
+// symmetric: both ends evaluate the SAME two prefs and the SAME bothLocal (the AND of the two wire
+// Local flags), so the AEAD decision never disagrees → no key mismatch.
+func resolveEnc(offerEnc, answerEnc string, bothLocal bool) bool {
+	norm := func(e string) string {
+		if e == "" {
+			return EncOn // legacy absent = encrypted (older peer never downgraded)
+		}
+		return e
+	}
+	a, b := norm(offerEnc), norm(answerEnc)
+	if a == EncOn || b == EncOn {
+		return true
+	}
+	return !bothLocal
 }
 
 // FEC is the reserved per-stream forward-error-correction descriptor (§2.5 / D9). Absent = off.
@@ -95,12 +117,16 @@ type Offer struct {
 	SourceID  string `json:"source,omitempty"`
 	SinkID    string `json:"sink,omitempty"`
 	Codec     Codec  `json:"codec"`
-	Transport string `json:"transport,omitempty"` // "" = tcp (§2.1)
-	NACK      bool   `json:"nack,omitempty"`      // requester supports NACK/retransmit (§2.5)
-	FEC       *FEC   `json:"fec,omitempty"`       // reserved (§2.5)
-	Caps      *Caps  `json:"caps,omitempty"`      // requester session caps (P2+; absent = P1 peer)
-	Bitrate   int    `json:"br,omitempty"`        // video bitrate budget, kbps (P4 additive; 0 = sender default)
-	Enc       string `json:"enc,omitempty"`       // requester's media-plane enc pref (EncOn/EncOff; "" = ON)
+	Transport string `json:"transport,omitempty"` // "" = tcp (§2.1; kept for old-peer compat)
+	// Transports lists the requester's supported media transports in PREFERENCE ORDER (e.g.
+	// ["udp","tcp"], §2.5). Absent = an old peer → TCP only (reads Transport). Additive, omitempty.
+	Transports []string `json:"transports,omitempty"`
+	NACK       bool     `json:"nack,omitempty"`  // requester supports NACK/retransmit (§2.5)
+	FEC        *FEC     `json:"fec,omitempty"`   // reserved (§2.5)
+	Caps       *Caps    `json:"caps,omitempty"`  // requester session caps (P2+; absent = P1 peer)
+	Bitrate    int      `json:"br,omitempty"`    // video bitrate budget, kbps (P4 additive; 0 = sender default)
+	Enc        string   `json:"enc,omitempty"`   // requester's media-plane enc pref (EncAuto/EncOn/EncOff; "" = ON)
+	Local      bool     `json:"local,omitempty"` // requester sees Target on a directly-connected private subnet (enc=auto input)
 }
 
 // Answer responds to an Offer. On accept, Addr is the "host:port" of the media listener to dial and
@@ -117,5 +143,6 @@ type Answer struct {
 	NACK      bool   `json:"nack,omitempty"`      // NACK/retransmit armed both ends (§2.5)
 	FEC       *FEC   `json:"fec,omitempty"`       // reserved (§2.5)
 	Caps      *Caps  `json:"caps,omitempty"`      // granted session caps (P2+; absent = P1 peer)
-	Enc       string `json:"enc,omitempty"`       // answerer's media-plane enc pref (EncOn/EncOff; "" = ON)
+	Enc       string `json:"enc,omitempty"`       // answerer's media-plane enc pref (EncAuto/EncOn/EncOff; "" = ON)
+	Local     bool   `json:"local,omitempty"`     // answerer sees the requester on a directly-connected private subnet (enc=auto input)
 }

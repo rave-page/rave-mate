@@ -31,6 +31,32 @@ below.
   (e.g. in VR).
 - **VRM avatars, library sync** and file transfer between paired boxes.
 
+## Media link: transport + encryption
+
+The LAN media plane (video/audio routes between instances) is built for live use - low latency,
+congestion-safe, encrypted off the LAN:
+
+- **Transport.** rave-mate prefers a realtime **UDP** datagram link (user-space fragmentation,
+  selective retransmit of only the lost pieces, send pacing, and a loss/delay congestion controller
+  that trims bitrate before it ever stalls the picture). If UDP can't get through (a firewall, a
+  network that blocks it), the route **falls back to TCP automatically** - you don't configure
+  anything. The Peers → Media panel tags each route `[udp]` or shows the TCP path, with live loss,
+  one-way delay, retransmit and pacer figures.
+- **Encryption is three-state, per peer** (Peers tab → the peer's encryption toggle):
+  - **Auto (default)** - media travels **in the clear on a trusted LAN** (both PCs on the same
+    directly-connected private network) for the lowest latency and CPU, and is **AES-256-GCM
+    encrypted automatically on any routed, public or VPN-looking path**. You get the LAN speed-up
+    with no exposure off it.
+  - **On** - always encrypt, even on the LAN. Choose this on a shared or untrusted LAN.
+  - **Off** - prefer cleartext; still never sends in the clear across a routed/public path (that
+    case is always encrypted, for safety).
+
+  Cleartext LAN media is **not confidential and has no on-path integrity** - anyone who can see
+  your LAN traffic can read or tamper with the video/audio while it is in the clear. It still
+  carries a per-route token so stray/off-path packets are rejected. Use **On** if your LAN is not
+  trusted. The peer-link **control** plane (now-playing, remote control, pairing) is always
+  encrypted regardless of this setting.
+
 ## Remote Library
 
 Library tab → "Controlling" switcher → pick a paired peer. The peer renders its own Library
