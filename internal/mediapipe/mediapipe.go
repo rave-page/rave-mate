@@ -49,13 +49,23 @@ func Factories(log *logbus.Bus) (medialink.EncoderFactory, medialink.DecoderFact
 	mfenc.Infof = func(format string, args ...any) {
 		log.Info(source, fmt.Sprintf(format, args...), nil)
 	}
-	var mfWarned bool
+	var mfWarned, mfEncHeldWarned bool
 	enc := func(ctx context.Context, spec medialink.EncodeSpec, src medialink.Source) (medialink.Source, error) {
 		if encodeEngine(spec) == engineMFNative {
 			if mfenc.ChildAvailable() {
 				s, err := newMFBridge(ctx, log, spec, src)
 				if err == nil {
 					return s, nil
+				}
+				// VRAM-pressure hold: the ffmpeg substitute is no lighter on one GPU (nvenc/amf use the
+				// same silicon; x264 pegs the CPU). HOLD the route - it re-establishes on renegotiation
+				// when headroom returns - instead of churning a heavier encoder on a full card.
+				if errors.Is(err, mfenc.ErrEncodeHeldVRAM) {
+					if !mfEncHeldWarned {
+						mfEncHeldWarned = true
+						log.Warn(source, "native MF encode HELD under VRAM pressure - not substituting ffmpeg on a full card; route waits for VRAM", map[string]any{"err": err.Error()})
+					}
+					return nil, err
 				}
 				if !mfWarned {
 					mfWarned = true
