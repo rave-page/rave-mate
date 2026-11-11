@@ -1029,6 +1029,17 @@ test "crash-attribution header slots stay in their gap" {
     try std.testing.expect(off_feed_fails + 4 <= hdr_size);
 }
 
+test "capheight control op decodes to the Cmd fields (proto v4 wire contract)" {
+    const line = "{\"op\":\"capheight\",\"sid\":7,\"out_w\":1920,\"out_h\":1080}";
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const cmd = try std.json.parseFromSliceLeaky(Cmd, arena.allocator(), line, .{ .ignore_unknown_fields = true });
+    try std.testing.expectEqualStrings("capheight", cmd.op);
+    try std.testing.expectEqual(@as(u32, 7), cmd.sid);
+    try std.testing.expectEqual(@as(i32, 1920), cmd.out_w);
+    try std.testing.expectEqual(@as(i32, 1080), cmd.out_h);
+}
+
 test "spout ring bounds are the bitrate-derived window, geometry-independent" {
     // 4K60 @ 50 Mbps → half a second of bitstream → the 4 MiB floor; 8K/200 Mbps stays under
     // the 16 MiB ceiling. Both ends clamp to the same constants (parent: ringKB in mfenc).
