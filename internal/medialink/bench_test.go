@@ -56,8 +56,8 @@ func tcpConnPair(b *testing.B, encrypt bool) (a, bb *Conn) {
 	setNoDelay(r.c)
 	master := testKey()
 	if encrypt {
-		a, _ = NewConn(dc, master, true)
-		bb, _ = NewConn(r.c, master, false)
+		a, _ = NewConn(dc, master, nil, true)
+		bb, _ = NewConn(r.c, master, nil, false)
 	} else {
 		a, bb = NewPlainConn(dc), NewPlainConn(r.c)
 	}
@@ -163,11 +163,11 @@ func BenchmarkDatagramCodec(b *testing.B) {
 
 func newCryptoPairB(b *testing.B) (send, recv *dgCrypto) {
 	master := testKey()
-	s, err := newDgCrypto(master, true)
+	s, err := newDgCrypto(master, nil, true)
 	if err != nil {
 		b.Fatal(err)
 	}
-	r, err := newDgCrypto(master, false)
+	r, err := newDgCrypto(master, nil, false)
 	if err != nil {
 		b.Fatal(err)
 	}

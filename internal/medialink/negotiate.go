@@ -127,22 +127,28 @@ type Offer struct {
 	Bitrate    int      `json:"br,omitempty"`    // video bitrate budget, kbps (P4 additive; 0 = sender default)
 	Enc        string   `json:"enc,omitempty"`   // requester's media-plane enc pref (EncAuto/EncOn/EncOff; "" = ON)
 	Local      bool     `json:"local,omitempty"` // requester sees Target on a directly-connected private subnet (enc=auto input)
+	// RouteNonce is the requester's ≥128-bit contribution to the PER-ROUTE key salt (§key-schedule).
+	// Both ends' nonces + the session id form the HKDF salt, so every route instance derives fresh
+	// AES-GCM keys + nonce prefix + token - no key/nonce reuse across routes, restarts or fallbacks.
+	// Absent = an old peer (no per-route keys possible; see resolveKeySalt). Additive, omitempty.
+	RouteNonce []byte `json:"rn,omitempty"`
 }
 
 // Answer responds to an Offer. On accept, Addr is the "host:port" of the media listener to dial and
 // Stream is the stream id to expect within that Conn. The dialer is the medialink initiator.
 // Transport/NACK/FEC echo the negotiated result (subset of what the offer asked, absent = default).
 type Answer struct {
-	Session   string `json:"session"`
-	Accept    bool   `json:"accept"`
-	Reason    string `json:"reason,omitempty"`
-	Addr      string `json:"addr,omitempty"`
-	Codec     Codec  `json:"codec"`
-	Stream    uint16 `json:"stream"`
-	Transport string `json:"transport,omitempty"` // "" = tcp (§2.1)
-	NACK      bool   `json:"nack,omitempty"`      // NACK/retransmit armed both ends (§2.5)
-	FEC       *FEC   `json:"fec,omitempty"`       // reserved (§2.5)
-	Caps      *Caps  `json:"caps,omitempty"`      // granted session caps (P2+; absent = P1 peer)
-	Enc       string `json:"enc,omitempty"`       // answerer's media-plane enc pref (EncAuto/EncOn/EncOff; "" = ON)
-	Local     bool   `json:"local,omitempty"`     // answerer sees the requester on a directly-connected private subnet (enc=auto input)
+	Session    string `json:"session"`
+	Accept     bool   `json:"accept"`
+	Reason     string `json:"reason,omitempty"`
+	Addr       string `json:"addr,omitempty"`
+	Codec      Codec  `json:"codec"`
+	Stream     uint16 `json:"stream"`
+	Transport  string `json:"transport,omitempty"` // "" = tcp (§2.1)
+	NACK       bool   `json:"nack,omitempty"`      // NACK/retransmit armed both ends (§2.5)
+	FEC        *FEC   `json:"fec,omitempty"`       // reserved (§2.5)
+	Caps       *Caps  `json:"caps,omitempty"`      // granted session caps (P2+; absent = P1 peer)
+	Enc        string `json:"enc,omitempty"`       // answerer's media-plane enc pref (EncAuto/EncOn/EncOff; "" = ON)
+	Local      bool   `json:"local,omitempty"`     // answerer sees the requester on a directly-connected private subnet (enc=auto input)
+	RouteNonce []byte `json:"rn,omitempty"`        // answerer's ≥128-bit contribution to the per-route key salt (see Offer.RouteNonce)
 }

@@ -64,11 +64,11 @@ func TestNACKRetransmitPipe(t *testing.T) {
 	key := testKey()
 	cR, cS := net.Pipe()
 	defer func() { _ = cR.Close(); _ = cS.Close() }()
-	connR, err := NewConn(cR, key, true) // receiver = dialer = initiator
+	connR, err := NewConn(cR, key, nil, true) // receiver = dialer = initiator
 	if err != nil {
 		t.Fatal(err)
 	}
-	connS, err := NewConn(cS, key, false)
+	connS, err := NewConn(cS, key, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -90,9 +90,10 @@ var errNoSource = errors.New("medialink: no such source")
 var errNoMediaSecret = errors.New("medialink: no media secret for peer (no live link)")
 
 // mediaConn builds the media transport for a route: AEAD (default) unless the route negotiated the
-// both-peers-opted-out plaintext media plane. Errors only when an ENCRYPTED route has no live
+// both-peers-opted-out plaintext media plane. salt is the PER-ROUTE key salt (nil = legacy, an old
+// peer that did not contribute a route nonce). Errors only when an ENCRYPTED route has no live
 // peerlink secret; the plaintext path needs none.
-func (rm *RouteManager) mediaConn(c io.ReadWriteCloser, peer string, encrypt, initiator bool) (*Conn, error) {
+func (rm *RouteManager) mediaConn(c io.ReadWriteCloser, peer string, salt []byte, encrypt, initiator bool) (*Conn, error) {
 	if !encrypt {
 		return NewPlainConn(c), nil
 	}
@@ -100,7 +101,14 @@ func (rm *RouteManager) mediaConn(c io.ReadWriteCloser, peer string, encrypt, in
 	if !ok {
 		return nil, errNoMediaSecret
 	}
-	return NewConn(c, secret, initiator)
+	if salt == nil {
+		// Pre-fix peer: legacy session-less key derivation. Safe for ONE non-restarting route to
+		// this peer; with >1 concurrent route or a reconnect in one peerlink session the key repeats
+		// with a counter-from-0 nonce (GCM reuse). New peers always send a route nonce (salt != nil).
+		rm.warnf("AEAD media with a pre-fix peer: legacy key derivation - key reuse risk if >1 route or a reconnect to this peer",
+			map[string]any{"peer": peer})
+	}
+	return NewConn(c, secret, salt, initiator)
 }
 
 // SourceOpen creates a live Source for an accepted offer (opened when the peer dials in).
@@ -177,22 +185,24 @@ type pendingAnswer struct {
 	encrypt   bool   // resolved media-plane AEAD decision (default true; false = both peers opted out)
 	transport string // negotiated media transport (TransportTCP/TransportUDP)
 	token     uint32 // §2.5 UDP route token (demux + anti-injection); 0 on TCP
+	salt      []byte // per-route key salt (routeKeySalt; nil = legacy/old-peer)
 	timer     *time.Timer
 }
 
 // pendingOffer is a route we offered and are waiting for an Answer on (sink side).
 type pendingOffer struct {
-	target   string
-	sourceID string
-	sinkID   string
-	sinkKind Kind
-	open     SinkOpen
-	enc      string // our advertised media-plane pref (EncAuto/EncOn/EncOff), for the answer-time decision
-	local    bool   // we see the target on a directly-connected private subnet (enc=auto input)
-	noUDP    bool   // this offer forced TCP (blackout re-offer) - don't fall back again
-	bitrate  int    // original bitrate budget (for a TCP-fallback re-offer)
-	decoders []string
-	timer    *time.Timer
+	target     string
+	sourceID   string
+	sinkID     string
+	sinkKind   Kind
+	open       SinkOpen
+	enc        string // our advertised media-plane pref (EncAuto/EncOn/EncOff), for the answer-time decision
+	local      bool   // we see the target on a directly-connected private subnet (enc=auto input)
+	noUDP      bool   // this offer forced TCP (blackout re-offer) - don't fall back again
+	bitrate    int    // original bitrate budget (for a TCP-fallback re-offer)
+	decoders   []string
+	routeNonce []byte // our ≥128-bit contribution to the per-route key salt (Offer.RouteNonce)
+	timer      *time.Timer
 }
 
 type activeRoute struct {
@@ -688,8 +698,10 @@ func (rm *RouteManager) OfferRoute(target, sourceID, sinkID string, opt OfferOpt
 	session := newSession()
 	enc := rm.mediaPref(target)
 	local := rm.sameSubnet(target)
+	offerNonce := newRouteNonce() // our ≥128-bit contribution to the per-route key salt
 	po := &pendingOffer{target: target, sourceID: sourceID, sinkID: sinkID, sinkKind: sink.desc.Kind,
-		open: sink.open, enc: enc, local: local, noUDP: opt.ForceTCP, bitrate: opt.BitrateKbps, decoders: opt.Decoders}
+		open: sink.open, enc: enc, local: local, noUDP: opt.ForceTCP, bitrate: opt.BitrateKbps,
+		decoders: opt.Decoders, routeNonce: offerNonce}
 	po.timer = time.AfterFunc(pendingTTL, func() { rm.expireOffer(session) })
 	rm.mu.Lock()
 	rm.pendingOff[session] = po
@@ -697,7 +709,7 @@ func (rm *RouteManager) OfferRoute(target, sourceID, sinkID string, opt OfferOpt
 
 	off := Offer{Session: session, Target: target, SourceID: sourceID, SinkID: sinkID, Codec: opt.Codec,
 		Transport: TransportTCP, Transports: rm.offerTransports(opt.ForceTCP), NACK: true, Bitrate: opt.BitrateKbps,
-		Enc: enc, Local: local, Caps: &Caps{Report: true, Sync: true, Decoders: decoders}}
+		Enc: enc, Local: local, RouteNonce: offerNonce, Caps: &Caps{Report: true, Sync: true, Decoders: decoders}}
 	if raw, err := json.Marshal(off); err == nil {
 		rm.bus.Publish(TopicOffer, raw)
 	}
@@ -783,30 +795,35 @@ func (rm *RouteManager) onOffer(ev Event) {
 	granted := grantCaps(off)
 	ourEnc := rm.mediaPref(ev.Origin)
 	ourLocal := rm.sameSubnet(ev.Origin)
+	// Per-route key salt: our fresh nonce + the offerer's (routeKeySalt returns nil for an old peer
+	// that sent none → legacy derivation on TCP). This makes every route's AES-GCM keys + nonce
+	// prefix + token UNIQUE, so no (key,nonce) reuse across routes/restarts/fallbacks.
+	answerNonce := newRouteNonce()
+	salt := routeKeySalt(off.RouteNonce, answerNonce, off.Session)
 	// §2.5 transport selection: UDP only when both ends support it AND we can derive the route token
-	// (needs the peerlink media secret). The dialer still runs a reachability handshake before
-	// committing; on failure it falls back to TCP on the SAME addr (we keep both pendings ready).
+	// (needs the peerlink media secret AND a per-route salt - old peers never reach here). The dialer
+	// still runs a reachability handshake; on failure it falls back to TCP on the SAME addr.
 	transport := TransportTCP
 	var token uint32
-	if rm.udp && rm.mux != nil && containsStr(off.Transports, TransportUDP) {
+	if rm.udp && rm.mux != nil && salt != nil && containsStr(off.Transports, TransportUDP) {
 		if sec, ok := rm.secrets.MediaSecret(ev.Origin); ok {
-			transport, token = TransportUDP, routeToken(sec, off.Session)
+			transport, token = TransportUDP, routeToken(sec, salt)
 		}
 	}
 	pa := &pendingAnswer{peer: ev.Origin, offer: off, open: src.open, srcDesc: src.desc,
 		choice: choice, stream: stream, caps: granted, encrypt: resolveEnc(off.Enc, ourEnc, off.Local && ourLocal),
-		transport: transport, token: token}
+		transport: transport, token: token, salt: salt}
 	pa.timer = time.AfterFunc(pendingTTL, func() { rm.expireAnswer(off.Session) })
 	rm.mu.Lock()
 	rm.pendingAns[off.Session] = pa
 	rm.mu.Unlock()
 	if transport == TransportUDP {
-		rm.mux.expect(token, off.Session) // first datagram for this token starts the UDP source pump
+		rm.mux.expect(token, off.Session) // first AUTHENTICATED datagram for this token starts the UDP source pump
 	}
 	addr := rm.answerAddr(ev.Origin)
 
 	ans := Answer{Session: off.Session, Accept: true, Addr: addr, Codec: codec, Stream: stream,
-		Transport: transport, NACK: granted.nack, Enc: ourEnc, Local: ourLocal}
+		Transport: transport, NACK: granted.nack, Enc: ourEnc, Local: ourLocal, RouteNonce: answerNonce}
 	if granted.report || granted.sync || choice != nil {
 		ans.Caps = &Caps{Report: granted.report, Sync: granted.sync}
 		if choice != nil {
@@ -943,13 +960,21 @@ func (rm *RouteManager) serveInbound(ctx context.Context, c net.Conn) {
 		_ = c.Close() // not our pending answer, or already claimed by the UDP path
 		return
 	}
-	conn, err := rm.mediaConn(c, pa.peer, pa.encrypt, false) // accepting end = responder
+	conn, err := rm.mediaConn(c, pa.peer, pa.salt, pa.encrypt, false) // accepting end = responder
 	if err != nil {
 		rm.warnf("media conn setup failed", map[string]any{"peer": pa.peer, "error": err.Error()})
 		_ = c.Close()
 		return
 	}
 	rm.pumpSource(ctx, session, pa, conn, nil)
+}
+
+// peekPendingAnswer returns the pending answer for a session WITHOUT claiming it (so a UDP first
+// datagram can be authenticated before the answer is consumed - finding 2).
+func (rm *RouteManager) peekPendingAnswer(session string) *pendingAnswer {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	return rm.pendingAns[session]
 }
 
 // claimPendingAnswer atomically removes + returns the pending answer for a session (whichever
@@ -1227,7 +1252,8 @@ func (rm *RouteManager) peerSyncEstimate(peer string) (SyncEstimate, bool) {
 // the AEAD key, open the sink, and pump conn→(jitter buffer→decode child→)sink.
 func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Answer, po *pendingOffer) {
 	encrypt := resolveEnc(po.enc, ans.Enc, po.local && ans.Local)
-	conn, udp, err := rm.dialConn(ctx, peer, ans, encrypt) // UDP (reachable) else TCP fallback
+	salt := routeKeySalt(po.routeNonce, ans.RouteNonce, ans.Session) // per-route keys (nil = old peer → legacy)
+	conn, udp, err := rm.dialConn(ctx, peer, ans, salt, encrypt)     // UDP (reachable) else TCP fallback
 	if err != nil {
 		rm.warnf("media dial failed", map[string]any{"addr": ans.Addr, "transport": ans.Transport, "error": err.Error()})
 		return
@@ -1603,6 +1629,13 @@ func newSession() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
+}
+
+// newRouteNonce returns a fresh ≥128-bit per-route key-salt contribution (crypto/rand).
+func newRouteNonce() []byte {
+	b := make([]byte, routeNonceLen)
+	_, _ = rand.Read(b)
+	return b
 }
 
 // writePreamble sends the plaintext session-id correlation header ([2B len][id]). It's not secret -

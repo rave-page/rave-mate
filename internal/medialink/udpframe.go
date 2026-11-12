@@ -112,13 +112,20 @@ const (
 )
 
 var (
-	errDgShort   = errors.New("medialink: short datagram")
-	errDgVersion = errors.New("medialink: bad datagram version")
-	errDgFrag    = errors.New("medialink: bad fragment index/count")
-	errDgToken   = errors.New("medialink: datagram token mismatch")
-	errDgMode    = errors.New("medialink: datagram enc mode mismatch (route-authoritative)")
-	errDgBig     = errors.New("medialink: frame too large for the UDP profile")
+	errDgShort        = errors.New("medialink: short datagram")
+	errDgVersion      = errors.New("medialink: bad datagram version")
+	errDgFrag         = errors.New("medialink: bad fragment index/count")
+	errDgToken        = errors.New("medialink: datagram token mismatch")
+	errDgMode         = errors.New("medialink: datagram enc mode mismatch (route-authoritative)")
+	errDgBig          = errors.New("medialink: frame too large for the UDP profile")
+	errDgSeqExhausted = errors.New("medialink: datagram sequence budget exhausted - renegotiate for fresh keys")
 )
+
+// dgSeqHardStop is the per-KEY datagram-sequence cap. At ~4300 dg/s (4K60 @ 40 Mbps) this is ~11
+// days; past it the route MUST tear down + renegotiate so a fresh route nonce gives fresh keys - a
+// (key,nonce) pair is NEVER reused, and the 64-bit counter never gets close to wrap. Aligns with the
+// MEDIALINK_DESIGN §2.1 7-day / 2^31-frame rekey budget + the NIST SP 800-38D GCM invocation margin.
+const dgSeqHardStop = 1 << 32
 
 // dgHeader is the parsed outer datagram header.
 type dgHeader struct {
@@ -176,11 +183,32 @@ func parseDatagramHeader(buf []byte) (dgHeader, int, error) {
 	return h, dgHeaderLen, nil
 }
 
+// routeNonceLen is each side's per-route key-salt contribution (128 bit).
+const routeNonceLen = 16
+
+// routeKeySalt builds the HKDF salt that makes every route instance's AES-GCM keys, nonce prefix and
+// token UNIQUE: offerNonce ‖ answerNonce ‖ session. Both sides contribute ≥128 bits of fresh
+// randomness, so neither side alone can force a (key,nonce) collision across routes / restarts /
+// transport fallbacks. Returns nil when either nonce is absent (an old peer that can't negotiate it)
+// - the caller then falls back to the legacy session-less derivation (TCP only; UDP is always
+// new↔new since old peers never negotiate it).
+func routeKeySalt(offerNonce, answerNonce []byte, session string) []byte {
+	if len(offerNonce) < routeNonceLen || len(answerNonce) < routeNonceLen {
+		return nil
+	}
+	salt := make([]byte, 0, len(offerNonce)+len(answerNonce)+len(session))
+	salt = append(salt, offerNonce...)
+	salt = append(salt, answerNonce...)
+	salt = append(salt, session...)
+	return salt
+}
+
 // routeToken derives the per-route UDP demux + anti-injection token from the peerlink media secret
-// and the session id (both ends share both), so both ends compute the same token with no extra wire
-// exchange. Used to demux the shared UDP socket and to reject off-path / cross-route datagrams.
-func routeToken(secret []byte, session string) uint32 {
-	k, err := wirecrypto.HkdfSha256(secret, []byte(session), []byte("medialink-udp-token"), 4)
+// and the per-route key salt (both ends share both), so both ends compute the same token and it is
+// UNIQUE per route instance. Used to demux the shared UDP socket + reject off-path/cross-route
+// datagrams.
+func routeToken(secret, salt []byte) uint32 {
+	k, err := wirecrypto.HkdfSha256(secret, salt, []byte("medialink-udp-token"), 4)
 	if err != nil || len(k) < 4 {
 		return 0
 	}
@@ -214,14 +242,15 @@ const (
 	dgLabelS2C = "medialink-udp s2c v1"
 )
 
-// newDgCrypto derives the per-direction GCM state from the shared peerlink media master. initiator
-// seals c2s / opens s2c; the responder mirrors - so the two ends never seal under the same key.
-func newDgCrypto(master []byte, initiator bool) (*dgCrypto, error) {
-	a, err := wirecrypto.HkdfSha256(master, nil, []byte(dgLabelC2S), 36) // 32 key + 4 nonce prefix
+// newDgCrypto derives the per-direction GCM state from the shared peerlink media master + the
+// PER-ROUTE salt (routeKeySalt). initiator seals c2s / opens s2c; the responder mirrors - so the two
+// ends never seal under the same key, and two routes never share a key (salt differs per route).
+func newDgCrypto(master, salt []byte, initiator bool) (*dgCrypto, error) {
+	a, err := wirecrypto.HkdfSha256(master, salt, []byte(dgLabelC2S), 36) // 32 key + 4 nonce prefix
 	if err != nil {
 		return nil, err
 	}
-	b, err := wirecrypto.HkdfSha256(master, nil, []byte(dgLabelS2C), 36)
+	b, err := wirecrypto.HkdfSha256(master, salt, []byte(dgLabelS2C), 36)
 	if err != nil {
 		return nil, err
 	}
@@ -510,6 +539,9 @@ func (e *dgEncoder) encodeFrame(out [][]byte, f *Frame) ([][]byte, uint64, uint1
 	if count > dgMaxFrags {
 		return out, 0, 0, errDgBig
 	}
+	if e.seq+uint64(count) > dgSeqHardStop { // hard stop before any nonce reuse/wrap - renegotiate
+		return out, 0, 0, errDgSeqExhausted
+	}
 	flags := uint8(0)
 	if e.crypto != nil {
 		flags = dgFlagAEAD
@@ -539,6 +571,9 @@ func (e *dgEncoder) encodeFrame(out [][]byte, f *Frame) ([][]byte, uint64, uint1
 // authoritative: an AEAD route authenticates EVERY datagram type, so a forged keepalive/NACK is
 // rejected). payload is the control body. These ride the media socket on any route.
 func (e *dgEncoder) control(typ uint8, payload []byte) []byte {
+	if e.seq >= dgSeqHardStop { // same per-key cap as media: stop before nonce reuse/wrap
+		return nil
+	}
 	flags := uint8(0)
 	if e.crypto != nil {
 		flags = dgFlagAEAD

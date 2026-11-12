@@ -44,11 +44,11 @@ func frameEqual(a, b *Frame) bool {
 func newCryptoPair(t *testing.T) (send, recv *dgCrypto) {
 	t.Helper()
 	master := testKey()
-	s, err := newDgCrypto(master, true)
+	s, err := newDgCrypto(master, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := newDgCrypto(master, false)
+	r, err := newDgCrypto(master, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

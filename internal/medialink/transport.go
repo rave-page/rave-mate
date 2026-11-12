@@ -37,10 +37,14 @@ type Conn struct {
 const maxCipher = headerLen + maxPayload + 64
 
 // NewConn wraps rw as an encrypted media connection. master is the shared peerlink session secret;
-// initiator must be true on the dialing end and false on the accepting end so the two directions
-// use distinct keys.
-func NewConn(rw io.ReadWriteCloser, master []byte, initiator bool) (*Conn, error) {
-	send, recv, err := wirecrypto.NewDuplexSealer(master, nil, initiator, "medialink c2s v1", "medialink s2c v1")
+// initiator must be true on the dialing end and false on the accepting end so the two directions use
+// distinct keys. salt is the PER-ROUTE key salt (routeKeySalt): it makes every route instance derive
+// distinct keys, so two concurrent media Conns to the same peer (or a reconnect) never share a key -
+// without it the implicit counter nonce (starting at 0 per Conn) would repeat under one key across
+// routes, a catastrophic GCM reuse. salt == nil is the LEGACY derivation (pre-fix / old peer): safe
+// ONLY for a single non-restarting route to that peer (see mediaConn's warning).
+func NewConn(rw io.ReadWriteCloser, master, salt []byte, initiator bool) (*Conn, error) {
+	send, recv, err := wirecrypto.NewDuplexSealer(master, salt, initiator, "medialink c2s v1", "medialink s2c v1")
 	if err != nil {
 		return nil, err
 	}
