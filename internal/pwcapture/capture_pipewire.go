@@ -477,7 +477,8 @@ func (s *pwSource) encTelemetry() {
 				"ringDepth": int(C.rpw_ring_depth(s.h)), "ringHiwater": int(C.rpw_ring_hiwater(s.h)),
 				"ringOverflow": int64(C.rpw_ring_overflow(s.h)), "capDrops": int64(C.rpw_cap_drops(s.h)),
 				"gridDrops":  int64(C.rpw_grid_drops(s.h)),
-				"reconnects": int64(C.rpw_reconnects(s.h))})
+				"reconnects": int64(C.rpw_reconnects(s.h)), "node": s.node,
+				"dmabufOffer": s.eglReady()}) // false = SHM-only offer: a dmabuf producer cannot link
 		}
 	}
 }
@@ -491,6 +492,13 @@ func (s *pwSource) ringStats() (depth, hiwater int, overflow, capDrops, gridDrop
 	return int(C.rpw_ring_depth(s.h)), int(C.rpw_ring_hiwater(s.h)),
 		int64(C.rpw_ring_overflow(s.h)), int64(C.rpw_cap_drops(s.h)), int64(C.rpw_grid_drops(s.h))
 }
+
+// eglReady reports whether this capture built the dmabuf (EGL modifier) offer; false = SHM-only, which
+// a dmabuf-only producer (libfunnel/Spout2PW) can never link.
+func (s *pwSource) eglReady() bool { return C.rpw_egl_ready(s.h) != 0 }
+
+// reconnectCount is the stream re-arm counter (tests).
+func (s *pwSource) reconnectCount() int64 { return int64(C.rpw_reconnects(s.h)) }
 
 // qpNext is the cgo seam for the pure constant-quality ceiling controller (rva_qp_next): cgo cannot
 // live in a _test.go file, so the controller unit test calls this wrapper with injected rates.

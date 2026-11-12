@@ -19,6 +19,7 @@
 #include <va/va_enc_hevc.h>
 #include <libdrm/drm_fourcc.h>
 #include <fcntl.h>
+#include <pthread.h>
 
 #define RVA_MAX_PLANES 4
 
@@ -57,11 +58,22 @@ struct va_api {
 };
 static struct va_api VA;
 static int va_loaded = -1;
+static pthread_mutex_t va_load_mu = PTHREAD_MUTEX_INITIALIZER;
 
+static int va_load_locked(void);
+
+/* va_load: one-time dlopen, serialized. Unguarded, a concurrent first caller (daemon restart = every
+ * route starts at once) read the in-progress 0 as "unavailable" and fell back for the route's life. */
 static int va_load(void) {
-	if (va_loaded != -1)
-		return va_loaded;
-	va_loaded = 0;
+	pthread_mutex_lock(&va_load_mu);
+	if (va_loaded == -1)
+		va_loaded = va_load_locked();
+	int r = va_loaded;
+	pthread_mutex_unlock(&va_load_mu);
+	return r;
+}
+
+static int va_load_locked(void) {
 	va_dbg = getenv("RPW_VA_DEBUG") != NULL || getenv("RPW_EGL_DEBUG") != NULL;
 	void *l = dlopen("libva.so.2", RTLD_NOW | RTLD_GLOBAL);
 	void *d = dlopen("libva-drm.so.2", RTLD_NOW | RTLD_GLOBAL);
@@ -105,7 +117,6 @@ static int va_load(void) {
 		*t[i].s = s;
 	}
 	VA.ok = 1;
-	va_loaded = 1;
 	return 1;
 }
 

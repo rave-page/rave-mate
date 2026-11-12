@@ -194,11 +194,23 @@ struct egl_api {
 };
 static struct egl_api E;
 static int egl_loaded = -1;
+static pthread_mutex_t egl_load_mu = PTHREAD_MUTEX_INITIALIZER;
 
+static int egl_load_locked(void);
+
+/* egl_load: one-time dlopen, serialized. Unguarded, a capture started concurrently with another
+ * (daemon restart = every route at once) read the in-progress 0 as "no EGL", built a SHM-only offer,
+ * and a dmabuf-only producer then failed every link ("no more input formats") forever. */
 static int egl_load(void) {
-	if (egl_loaded != -1)
-		return egl_loaded;
-	egl_loaded = 0;
+	pthread_mutex_lock(&egl_load_mu);
+	if (egl_loaded == -1)
+		egl_loaded = egl_load_locked();
+	int r = egl_loaded;
+	pthread_mutex_unlock(&egl_load_mu);
+	return r;
+}
+
+static int egl_load_locked(void) {
 	void *le = dlopen("libEGL.so.1", RTLD_NOW | RTLD_GLOBAL);
 	void *lg = dlopen("libGLESv2.so.2", RTLD_NOW | RTLD_GLOBAL);
 	void *lb = dlopen("libgbm.so.1", RTLD_NOW | RTLD_GLOBAL);
@@ -244,7 +256,6 @@ static int egl_load(void) {
 		return 0;
 	}
 	E.ok = 1;
-	egl_loaded = 1;
 	return 1;
 }
 
@@ -291,6 +302,12 @@ struct rpw_capture {
 	long dropped;
 	long dmabuf_skipped;
 	long reconnects;
+	/* reconnect backoff: a link that errors again without delivering a frame (negotiation failure,
+	 * wrong target) doubles the delay 50 ms -> 2 s instead of churning ~40 reconnects/s forever. */
+	_Atomic long frames_seen;     /* buffers seen by on_process (loop thread +=) */
+	long frames_at_reconnect;     /* frames_seen at the last reconnect (Go thread) */
+	int reconnect_backoff_ms;     /* current backoff (Go thread) */
+	long long next_reconnect_ns;  /* mono_ns before which no reconnect is issued (Go thread) */
 
 	/* ---- vaapi-native encode mode (production: rpw_set_encode; also RPW_VA_ENC env for the harness) */
 	int enc_mode;        /* 0 = readback RGBA; 1 = fused dmabuf->VA encode (AU in slot) */
@@ -450,7 +467,7 @@ static int au_ring_push(struct rpw_capture *c, const unsigned char *au, int aule
 /* egl_setup_display: open the render node, GBM device, EGL display + GLES context (NOT current),
  * and query dmabuf modifiers per offered format. Runs on the caller thread in rpw_start. */
 static void egl_setup_display(struct rpw_capture *c, const char *node) {
-	if (!egl_load())
+	if (getenv("RPW_SHM_ONLY") || !egl_load()) /* RPW_SHM_ONLY: test hook (SHM-only offer) */
 		return;
 	c->drm_fd = open(node, O_RDWR | O_CLOEXEC);
 	if (c->drm_fd < 0) {
@@ -502,6 +519,29 @@ static void egl_setup_display(struct rpw_capture *c, const char *node) {
 	}
 	c->egl_ready = 1;
 	DBG("egl: display ready, mods[BGRA]=%d (allowDcc=%d)\n", c->n_mods[0], allow_dcc);
+}
+
+/* egl_teardown releases whatever egl_setup_display built (also a partial setup). Not with the
+ * context current on a live loop thread (callers: rpw_stop after the loop stopped, or a retry when
+ * egl_ready == 0, i.e. never made current). */
+static void egl_teardown(struct rpw_capture *c) {
+	if (E.ok) {
+		if (c->egl_ctx)
+			E.DestroyContext(c->dpy, c->egl_ctx);
+		if (c->dpy)
+			E.Terminate(c->dpy);
+		if (c->gbm)
+			E.gbm_device_destroy(c->gbm);
+	}
+	if (c->drm_fd >= 0)
+		close(c->drm_fd);
+	c->egl_ctx = NULL;
+	c->dpy = NULL;
+	c->gbm = NULL;
+	c->drm_fd = -1;
+	c->egl_ready = 0;
+	c->egl_current = 0;
+	memset(c->n_mods, 0, sizeof(c->n_mods));
 }
 
 /* egl_make_current binds the context to the CURRENT (loop) thread, once. */
@@ -1037,6 +1077,7 @@ static void on_process(void *data) {
 	}
 	if (!last)
 		return;
+	atomic_fetch_add_explicit(&c->frames_seen, 1, memory_order_relaxed);
 	struct spa_buffer *sb = last->buffer;
 	if (sb->n_datas >= 1) {
 		struct spa_data *d = &sb->datas[0];
@@ -1162,6 +1203,11 @@ static const struct pw_stream_events stream_events = {
 static void do_reconnect(struct rpw_capture *c) {
 	PW.tl_lock(c->loop);
 	PW.stream_disconnect(c->stream);
+	if (!c->egl_ready) { /* SHM-only offer can never link a dmabuf producer: retry the EGL setup */
+		egl_teardown(c);
+		const char *rn = getenv("RPW_EGL_DEVICE");
+		egl_setup_display(c, rn && *rn ? rn : "/dev/dri/renderD128");
+	}
 	uint8_t fb[4096];
 	struct spa_pod_builder b = SPA_POD_BUILDER_INIT(fb, sizeof(fb));
 	const struct spa_pod *params[N_OFFER + 1];
@@ -1171,6 +1217,36 @@ static void do_reconnect(struct rpw_capture *c) {
 	PW.tl_unlock(c->loop);
 	c->reconnects++;
 	DBG("reconnect #%ld\n", c->reconnects);
+}
+
+/* reconnect_or_backoff: called with c->mu held and need_reconnect set; releases c->mu. Re-arms the
+ * stream now, or - while the backoff runs - sleeps (<= timeout_ms) and leaves need_reconnect set for the
+ * next call. A reconnect that delivered no frame since the previous one doubles the backoff (50 ms ->
+ * 2 s); any delivered frame resets it, so a real producer restart (VRChat hitch) re-arms immediately. */
+static void reconnect_or_backoff(struct rpw_capture *c, long timeout_ms) {
+	long long now = mono_ns();
+	if (now < c->next_reconnect_ns) {
+		pthread_mutex_unlock(&c->mu);
+		long long d = c->next_reconnect_ns - now, cap = (long long)timeout_ms * 1000000LL;
+		if (d > cap)
+			d = cap;
+		struct timespec ts = {(time_t)(d / 1000000000LL), (long)(d % 1000000000LL)};
+		nanosleep(&ts, NULL);
+		return;
+	}
+	c->need_reconnect = 0;
+	pthread_mutex_unlock(&c->mu);
+	long seen = atomic_load_explicit(&c->frames_seen, memory_order_relaxed);
+	if (c->reconnects > 0 && seen == c->frames_at_reconnect) {
+		c->reconnect_backoff_ms = c->reconnect_backoff_ms ? c->reconnect_backoff_ms * 2 : 50;
+		if (c->reconnect_backoff_ms > 2000)
+			c->reconnect_backoff_ms = 2000;
+	} else {
+		c->reconnect_backoff_ms = 0;
+	}
+	c->frames_at_reconnect = seen;
+	c->next_reconnect_ns = mono_ns() + (long long)c->reconnect_backoff_ms * 1000000LL;
+	do_reconnect(c);
 }
 
 struct rpw_capture *rpw_start(const char *target_node) {
@@ -1245,19 +1321,15 @@ int rpw_wait_frame(struct rpw_capture *c, unsigned char *dst, int cap, int *w, i
 	}
 	pthread_mutex_lock(&c->mu);
 	if (c->need_reconnect && !c->has_frame) {
-		c->need_reconnect = 0;
-		pthread_mutex_unlock(&c->mu);
-		do_reconnect(c); /* Go thread: safe to lock the pw thread-loop */
-		return 0;        /* treated as a timeout by Next -> keeps the route alive, retries */
+		reconnect_or_backoff(c, timeout_ms); /* Go thread: safe to lock the pw thread-loop; unlocks mu */
+		return 0;                           /* treated as a timeout by Next -> keeps the route alive */
 	}
 	while (!c->has_frame && !c->fatal && !c->need_reconnect) {
 		if (pthread_cond_timedwait(&c->cv, &c->mu, &ts) != 0)
 			break;
 	}
 	if (c->need_reconnect && !c->has_frame) {
-		c->need_reconnect = 0;
-		pthread_mutex_unlock(&c->mu);
-		do_reconnect(c);
+		reconnect_or_backoff(c, timeout_ms);
 		return 0;
 	}
 	if (c->fatal && !c->has_frame) {
@@ -1360,9 +1432,7 @@ int rpw_wait_au(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int 
 			continue; /* producer raced in: dequeue it */
 		}
 		if (c->need_reconnect) {
-			c->need_reconnect = 0;
-			pthread_mutex_unlock(&c->mu);
-			do_reconnect(c);
+			reconnect_or_backoff(c, timeout_ms); /* unlocks mu */
 			return 0;
 		}
 		if (c->fatal) {
@@ -1432,6 +1502,7 @@ long rpw_enc_aus(struct rpw_capture *c) { return c ? c->enc_aus : 0; }
 long rpw_enc_drops(struct rpw_capture *c) { return c ? c->enc_drops : 0; }
 long rpw_cap_frames(struct rpw_capture *c) { return c ? c->cap_frames : 0; }
 long rpw_reconnects(struct rpw_capture *c) { return c ? c->reconnects : 0; }
+int rpw_egl_ready(struct rpw_capture *c) { return c ? c->egl_ready : 0; }
 int rpw_import_ok(struct rpw_capture *c) { return c ? c->import_ok : 0; }
 int rpw_coded_w(struct rpw_capture *c) { return c ? c->coded_w : 0; }
 int rpw_coded_h(struct rpw_capture *c) { return c ? c->coded_h : 0; }
@@ -1573,17 +1644,8 @@ void rpw_stop(struct rpw_capture *c) {
 	if (c->enc) /* loop stopped: no more on_process, safe to tear down the VA encode session */
 		rva_enc_free(c->enc);
 	au_ring_free(c); /* loop stopped: no more producer; release the ring buffers */
-	/* EGL teardown: the context was made current on the loop thread, now stopped. Best-effort. */
-	if (c->egl_ready) {
-		if (c->egl_ctx)
-			E.DestroyContext(c->dpy, c->egl_ctx);
-		if (c->dpy)
-			E.Terminate(c->dpy);
-		if (c->gbm)
-			E.gbm_device_destroy(c->gbm);
-		if (c->drm_fd >= 0)
-			close(c->drm_fd);
-	}
+	/* EGL teardown (also a partial setup): the context was made current on the loop thread, now stopped. */
+	egl_teardown(c);
 	free(c->rbscratch);
 	free(c->slot);
 	pthread_mutex_destroy(&c->mu);

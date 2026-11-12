@@ -69,6 +69,9 @@ long rpw_enc_aus(struct rpw_capture *c);
 long rpw_enc_drops(struct rpw_capture *c);
 long rpw_cap_frames(struct rpw_capture *c);
 long rpw_reconnects(struct rpw_capture *c);
+/* rpw_egl_ready: 1 = dmabuf (EGL modifier) offer built; 0 = SHM-only offer (a dmabuf-only producer
+ * such as libfunnel/Spout2PW can never link). */
+int rpw_egl_ready(struct rpw_capture *c);
 int rpw_import_ok(struct rpw_capture *c);
 int rpw_coded_w(struct rpw_capture *c);
 int rpw_coded_h(struct rpw_capture *c);
