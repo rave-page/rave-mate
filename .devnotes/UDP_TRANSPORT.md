@@ -398,3 +398,56 @@ stale-seq dropped).
 supported: the lead's evidence shows inbound ALLOW rules exist for both exes (TCP+UDP, all local
 ports), and the three refutations above plus the sender-side `runSend`/source analysis point at a
 clean/fatal sender-side source end, not a reverse-path block.
+
+## Unit: UDP blackout = COLD-START RACE (2026-11-12, deployed 99e3d48, ctl logs -n gave the trace)
+
+The blackout is neither a faulting encoder nor reverse-path starvation: it is a start-up race, proven
+by the first route after both daemons restarted (clocks within a few ms):
+- receiver 13:03:04.125 "receive offered" -> 04.840 "route up (recv)" -> 06.140 first frame AND
+  "udp route blackout - route ended" in the SAME ms.
+- sender 05.759 "vaapi-native encode engaged + route up (send)" (~0.9s after recv route-up: cold
+  PipeWire capture + VA encoder open) -> emits its first frame at 06.140.
+The receiver's liveness window started at dial (~04.1) and the 2s expired at ~06.1 - the instant the
+cold sender's first frame landed. The 35s-later retry found a WARM sender and has stayed up on UDP
+since (udp/plaintext, 60fps, loss 0, nack 0/0, jitterbuf depth 1 - the tuning numbers confirmed live).
+
+**Fix 1 - liveness start-up grace (udpconn.go).** New `udpConfig.StartupGrace` (default
+`udpDefStartupGrace` 15s): the liveness window is the generous grace UNTIL the route is proven
+established end-to-end, then the normal 2s. "Established" (`udpConn.established`) is set on the first
+authenticated MEDIA or peer keepalive-PING (not a one-shot reachability pong). A cold sender's
+encoder-open and a cold receiver's DXVA-decoder-open (VRAM pressure) no longer look like a dead path;
+once real traffic flows, dead-route detection is back to the tight 2s. The answerer now emits
+keepalives densely (`Keepalive: 100ms`) from udpConn birth in serveUDPFirst - before pumpSource opens
+the encoder - so a cold receiver sees the sender's liveness immediately. Mirror case (sender waiting on
+a slow receiver) is structurally safe: the receiver's maintLoop pings from udpConn creation, a
+separate goroutine from dialAndReceive's decoder open, and the grace covers it until establishment.
+Tests: TestUDPConnColdStartGraceStaysUp (3s cold-start delay, keepalives off to isolate the grace -
+stays up), TestUDPConnEstablishedThenSilentBlacksOutFast (tight window applies after establishment).
+
+**Fix 2 - fast re-establish (mediaroute.go + mediaresume.go).** The ~33s recovery (06.140 -> 39.376)
+was a DEAD session lingering in `m.receives` for `receiveGrace` 30s: both reconcile's active-check and
+StartReceive's dedup keyed off mere membership, so the dead route looked "still receiving" and was
+never re-offered until GC. Now: `Receives()` flags each receive with `Active` (true route liveness
+from router.Stats()); reconcile re-offers any remembered source whose route is NOT live; StartReceive
+reclaims a dead (peer,source) entry (CloseRoute+UnregisterSink) instead of returning the dead session;
+the resume ticker is 1s (was 3s) with bounded exponential backoff per key (base 1s, x2, cap 30s),
+reset once a route stays up >= 5s - immediate recovery after a blip, no retry storm when a source
+stays gone. Recovery now ~1-2s. Tests: TestReconcileReoffersDeadSourceImmediately,
+TestReconcileReoffersWhenReceiveLingersButDead, TestReconcileWaitsForAvailability,
+TestReoffBackoffBoundedAndResets.
+
+**Fix 4 - remembered-receive persistence (verified, already correct).** `ctl route-start` -> RouteStart
+-> appControl.mediaRoutes which IS the `rememberingReceives` wrapper (app.go:1057 reassigns
+`mediaRoutesCtl = rr`): StartReceive persists (peer,source) to `config.RememberedReceives` + cfg.Save().
+On restart the daemon loads the config and runReceiveResume.reconcile re-offers at startup. The earlier
+"no active routes until manual route-start" was the SAME lingering-dead-session bug (Fix 2), not a
+persistence gap - the remembered entry was written; reconcile just never acted on it because the dead
+session read as active. With Fix 2 the remembered source auto-reactivates as soon as the peer advertises
+it again.
+
+**Post-deploy verification (next deploy):** (1) a COLD route (both daemons fresh) comes up on UDP and
+STAYS up through the sender's encoder-open - no "route up then blackout in the same ms"; `ctl routes`
+shows udp, 60fps, loss 0. (2) Kill-and-recover: stop the sender's source mid-route, confirm the receiver
+re-establishes within ~1-2s (not 33s) once the source re-advertises; repeated kills back off (1,2,4…)
+but a stable route resets to a fast first retry. (3) After a daemon restart with a remembered receive,
+the route auto-starts when the peer reconnects (no manual route-start).

@@ -135,6 +135,7 @@ func (rm *RouteManager) serveUDPFirst(token uint32, session string, src *net.UDP
 	mc := mux.newMuxConn(token)
 	u, err := newUDPConn(mc, nil, udpConfig{Token: token, Initiator: false, Master: sec, Salt: pa.salt,
 		Encrypt: pa.encrypt, Clock: rm.clock, Log: rm.udpLog, // remote nil → binds on the authenticated datagram
+		Keepalive:  100 * time.Millisecond,           // emit keepalives from udpConn birth (before the encoder opens) so a cold receiver sees liveness
 		PacingRate: pacingRateFor(pa.offer.Bitrate)}) // send-pace at a multiple of the budget (item 2)
 	if err != nil {
 		_ = mc.Close()
