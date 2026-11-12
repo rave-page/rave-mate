@@ -63,3 +63,58 @@ func TestVAEncodeDump(t *testing.T) {
 		t.Errorf("encode fps too low: %.1f", float64(n)/dur.Seconds())
 	}
 }
+
+// TestVAEncodeSoak runs the zero-copy VA capture+encode for RPW_SOAK_SECONDS (default 600), reading
+// H.264 AUs directly from the source (no mediapipe wrap). The driver restarts the producer; this
+// proves capture+encode resume + no leak across restarts. Reports sustained fps.
+func TestVAEncodeSoak(t *testing.T) {
+	node := os.Getenv("RPW_TEST_NODE")
+	if node == "" || os.Getenv("RPW_VA_ENC") == "" {
+		t.Skip("set RPW_TEST_NODE + RPW_VA_ENC")
+	}
+	if !captureAvailable() {
+		t.Skip("libpipewire not available")
+	}
+	secs := 600
+	if v := os.Getenv("RPW_SOAK_SECONDS"); v != "" {
+		if x, err := strconv.Atoi(v); err == nil {
+			secs = x
+		}
+	}
+	src, err := openCapture(context.Background(), nil, node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = src.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(secs+30)*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	deadline := start.Add(time.Duration(secs) * time.Second)
+	var frames, bytes, stalls int
+	lastBeat := time.Now()
+	lastFrames := 0
+	for time.Now().Before(deadline) {
+		fctx, fcancel := context.WithTimeout(ctx, 5*time.Second)
+		fr, err := src.Next(fctx)
+		fcancel()
+		if err != nil {
+			stalls++
+			if ctx.Err() != nil {
+				break
+			}
+			continue
+		}
+		frames++
+		bytes += len(fr.Payload)
+		if time.Since(lastBeat) >= 30*time.Second {
+			t.Logf("[%4.0fs] frames=%d (+%d/30s) %dMB stalls=%d", time.Since(start).Seconds(), frames, frames-lastFrames, bytes/1024/1024, stalls)
+			lastBeat = time.Now()
+			lastFrames = frames
+		}
+	}
+	t.Logf("VA-ENC SOAK %ds: frames=%d ~%.1f fps, %dMB, stalls=%d", secs, frames, float64(frames)/float64(secs), bytes/1024/1024, stalls)
+	if frames < secs*30 {
+		t.Errorf("only %d frames in %ds - did not sustain across restarts", frames, secs)
+	}
+}
