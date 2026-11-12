@@ -1116,6 +1116,7 @@ func (rm *RouteManager) pumpSource(ctx context.Context, session string, pa *pend
 		ar.pipe = pr
 	}
 	rm.trackRoute(session, ar)
+	rm.dropDuplicateSend(pa.peer, pa.offer.SourceID, session) // one send route per (peer, source): newest wins, bye the old
 	rm.infof("route up (send)", map[string]any{"session": session, "peer": pa.peer, "source": pa.offer.SourceID,
 		"stream": pa.stream, "transport": transportName(udp)})
 	go rm.guard("sendControl", func() { rm.sendControl(cancel, rio, src) })
@@ -1613,6 +1614,33 @@ func (rm *RouteManager) dropDuplicateRecv(peer, sourceID, keep string) {
 	for _, r := range victims {
 		rm.warnf("replaced a duplicate recv route (one per peer+source)",
 			map[string]any{"peer": peer, "source": sourceID, "keep": keep})
+		r.cancel()
+		_ = r.conn.Close()
+	}
+}
+
+// dropDuplicateSend closes any OTHER active SEND route for the same (peer, sourceID) when a new one
+// comes up - the sender's "one send route per source" guarantee (newest wins). A duplicate offer (a
+// receiver start-up race, a re-offer after a blip) would otherwise leave two send routes for one
+// source; the old one is ended with a BYE first, so the receiver's old route ends CLEANLY (errUDPEnded)
+// and switches to the new route instead of suffering a 2s liveness blackout.
+func (rm *RouteManager) dropDuplicateSend(peer, sourceID, keep string) {
+	rm.mu.Lock()
+	var victims []*activeRoute
+	for sess, r := range rm.active {
+		if sess == keep || r.dir != "send" || r.peer != peer || r.sourceID != sourceID {
+			continue
+		}
+		victims = append(victims, r)
+		delete(rm.active, sess)
+	}
+	rm.mu.Unlock()
+	for _, r := range victims {
+		rm.warnf("replaced a duplicate send route (one per peer+source) - newest wins",
+			map[string]any{"peer": peer, "source": sourceID, "keep": keep})
+		if r.udp != nil {
+			r.udp.sendBye() // old receiver route ends cleanly + switches to the new one (no blackout)
+		}
 		r.cancel()
 		_ = r.conn.Close()
 	}

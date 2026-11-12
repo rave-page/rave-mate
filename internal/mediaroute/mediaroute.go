@@ -98,6 +98,20 @@ type Receive struct {
 	Name     string // remote source name
 	Since    time.Time
 	Active   bool // route is LIVE in the router now (vs offered-but-not-up / ended-but-not-yet-GC'd)
+	EverUp   bool // route was LIVE at least once (distinguishes a still-establishing offer from a died route)
+}
+
+// receiveEstablishGrace is how long an offered-but-not-yet-live receive is treated as IN-FLIGHT (do
+// not re-offer or reclaim it): the offer→answer→dial→reachability→route-up handshake. Prevents a
+// start-up burst of triggers (resume tick, advert-driven reconcile, UI) from stacking a SECOND offer
+// for a source whose first offer is still coming up (the second killed the first → blackout).
+const receiveEstablishGrace = 8 * time.Second
+
+// Occupied reports whether this receive should block a new offer/reclaim for its (peer, source): it is
+// LIVE, or still establishing (never came up AND within the establish grace). A route that came up
+// then DIED (EverUp && !Active) is NOT occupied - it is re-offered fast.
+func (r Receive) Occupied(now time.Time) bool {
+	return r.Active || (!r.EverUp && now.Sub(r.Since) < receiveEstablishGrace)
 }
 
 // Manager owns the share scanner + receive bookkeeping. Safe for concurrent use.
@@ -323,8 +337,12 @@ func (m *Manager) Receives() []Receive {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]Receive, 0, len(m.receives))
-	for _, r := range m.receives {
-		r.Active = live[r.Session]
+	for sess, r := range m.receives {
+		if live[sess] && !r.EverUp {
+			r.EverUp = true
+			m.receives[sess] = r // once live, always "was up" (so a later death re-offers fast, not as in-flight)
+		}
+		r.Active = live[sess]
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Since.Before(out[j].Since) })
@@ -352,13 +370,15 @@ func (m *Manager) StartReceive(peer, sourceID string) (string, error) {
 	// a fresh route starts now (the resume layer's fast re-offer depends on this - else it got the dead
 	// session back and no route came up until the 30s GC).
 	live := m.liveSessions()
+	now := time.Now()
 	var staleSess, staleSink string
 	m.mu.Lock()
 	for sess, r := range m.receives {
 		if r.Peer == peer && r.SourceID == sourceID {
-			if live[sess] {
+			r.Active = live[sess]
+			if r.Occupied(now) {
 				m.mu.Unlock()
-				return sess, nil // live route exists - idempotent
+				return sess, nil // live OR still establishing - idempotent, never a second route
 			}
 			staleSess, staleSink = sess, r.SinkID
 			delete(m.receives, sess)

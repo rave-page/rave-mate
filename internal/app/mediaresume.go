@@ -104,9 +104,13 @@ func (r *rememberingReceives) reconcile() {
 	if len(wanted) == 0 {
 		return
 	}
+	now := time.Now()
 	active := map[string]bool{}
 	for _, rc := range r.ReceiveControl.Receives() {
-		if rc.Active { // LIVE route only - a died-but-not-GC'd receive is NOT active (fast re-offer)
+		// Occupied = LIVE or still establishing (offer in-flight). A died-but-not-GC'd receive is NOT
+		// occupied (fast re-offer), but an in-flight offer IS - so a start-up burst of triggers does not
+		// stack a SECOND offer for a source whose first is still coming up (that killed the first).
+		if rc.Occupied(now) {
 			active[rc.Peer+"\x00"+rc.SourceID] = true
 		}
 	}
@@ -114,7 +118,6 @@ func (r *rememberingReceives) reconcile() {
 	for _, s := range r.ReceiveControl.RemoteVideoSources() {
 		avail[s.Peer+"\x00"+s.Desc.ID] = true
 	}
-	now := time.Now()
 	for _, w := range wanted {
 		key := w.Peer + "\x00" + w.SourceID
 		b := r.backoffFor(key)

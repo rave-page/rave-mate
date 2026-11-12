@@ -451,3 +451,42 @@ shows udp, 60fps, loss 0. (2) Kill-and-recover: stop the sender's source mid-rou
 re-establishes within ~1-2s (not 33s) once the source re-advertises; repeated kills back off (1,2,4…)
 but a stable route resets to a fast first retry. (3) After a daemon restart with a remembered receive,
 the route auto-starts when the peer reconnects (no manual route-start).
+
+## Unit: start-up DOUBLE-OFFER race (2026-11-12, deployed cba1d58 verified; auto-resume + 1.3s recovery good)
+
+The cold-start grace + fast re-establish verified live (remembered route auto-resumed on UDP, recovery
+~1.3s). One residual defect: a single blackout at start-up. Receiver log:
+  35:42.728 route up (recv) 847b (stream 3)
+  35:43.015 auto-reactivated remembered remote source (SECOND offer, 0.29s after the first came up)
+  35:44.789 udp route blackout 847b (first route dies)
+  35:46.168 route up (recv) 5bec (stream 4, stable since)
+Sender: 847b route up (send) 43.704, 5bec route up (send) 47.703 - TWO send routes for one source.
+
+Root cause: a start-up burst of offer triggers stacked a SECOND offer for a (peer,source) whose first
+offer was still being established, and the duplicate disrupted the first route (two send routes for one
+source; the first's datagrams stopped -> blackout 2s later). Offer triggers all funnel through
+Manager.StartReceive: the resume ticker (runReceiveResume immediate + 1s tick), ctl route-start, the
+media-child proxy (feat_media), and both UIs. The dedup was LIVENESS-only (my prior fix): an IN-FLIGHT
+offer (receive present, route not yet live in router.Stats()) read as "not live", so a second trigger
+during the offer->answer->dial->reachability->route-up window either re-offered (reconcile) or was
+reclaimed-as-dead (StartReceive) - stacking a second route.
+
+Fix (1) - one IN-FLIGHT-or-live receive per (peer,source) (mediaroute.go + mediaresume.go):
+new `Receive.Occupied(now)` = Active OR (never-came-up AND within `receiveEstablishGrace` 8s). An
+in-flight offer counts as occupied (no second offer, no reclaim) until it DEFINITIVELY fails (ages out)
+or the route came up then DIED (EverUp && !Active -> re-offered fast). `Receives()` now also sets
+`EverUp` once a session is live (so a later death re-offers fast instead of being mistaken for
+in-flight). Both reconcile's occupied-check and StartReceive's dedup use Occupied.
+
+Fix (2) - one SEND route per (peer,source), newest wins (router.go): new `dropDuplicateSend`, mirror of
+dropDuplicateRecv, called when a send route comes up. A duplicate offer that is served ends the OLD send
+route with a BYE first, so the receiver's old route ends CLEANLY (errUDPEnded) and switches to the new
+one instead of a 2s liveness blackout. The sender never serves one source to one peer over two routes.
+
+Tests: TestReconcileNoSecondOfferWhileInFlight (burst of triggers -> exactly one offer),
+TestReconcileReoffersDeadRouteThatCameUp (died route re-offered fast), TestDropDuplicateSend (sender
+leaves one send route), plus the existing reconcile/backoff suite.
+
+Post-deploy verification: cold start of both daemons -> the remembered route comes up ONCE on UDP and
+stays (no second "auto-reactivated" offer 0.3s after route-up, no start-up blackout); `ctl routes` shows
+a single udp route per source on both ends; kill-and-recover still ~1-2s.
