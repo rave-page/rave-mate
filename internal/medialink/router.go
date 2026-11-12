@@ -314,6 +314,7 @@ type Options struct {
 	// BudgetUserCeilKbps the user's bitrate ceiling (0=none). nil => fixed behaviour (GovernorBaseKbps).
 	BudgetMode         func() string
 	BudgetUserCeilKbps func() int
+	BudgetLinkFracPct  func() int // static link-ceiling fraction (0 => DefaultLinkFracPct); nil => default
 }
 
 // RouteManager owns the media listener + negotiation. Create with New, attach sources/sinks, then
@@ -352,6 +353,7 @@ type RouteManager struct {
 	govBaseKbps func() int                           // route base bitrate ceiling (config.Bitrate / fixed mode)
 	budgetMode  func() string                        // adaptive bitrate mode ("auto"/"fixed"; nil=fixed)
 	budgetUserK func() int                           // adaptive user ceiling kbps (0=none)
+	budgetLinkF func() int                           // static link-ceiling fraction pct (0=default)
 
 	sampler procstat.Sampler // daemon RSS sampler for the media memory watchdog
 
@@ -408,7 +410,7 @@ func New(opts Options) *RouteManager {
 		encPolicy: opts.EncodePolicy, encDevice: opts.EncodeDevice,
 		headroom: opts.Headroom, governorOn: opts.GovernorEnabled,
 		govFloorMB: opts.GovernorFloorMB, govBaseKbps: opts.GovernorBaseKbps,
-		budgetMode: opts.BudgetMode, budgetUserK: opts.BudgetUserCeilKbps,
+		budgetMode: opts.BudgetMode, budgetUserK: opts.BudgetUserCeilKbps, budgetLinkF: opts.BudgetLinkFracPct,
 		udp:     opts.UDP,
 		sources: map[string]sourceReg{}, sinks: map[string]sinkReg{},
 		remoteAdvert: map[string]Advert{}, pendingAns: map[string]*pendingAnswer{},
@@ -1386,13 +1388,21 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 	// Compressed video only.
 	if ans.Codec.CompressedVideo() {
 		// Adaptive budget: the governor ceiling is the quality-model target for THIS route's codec +
-		// geometry (fixed mode => the configured value), not a flat config number.
-		base := rm.adaptiveBase(ans.Codec, srcDesc.Width, srcDesc.Height, int(srcDesc.FPS))
+		// geometry (fixed mode => the configured value), following the CODED size per tick (item 2) so
+		// a resolution cap lowers the bitrate and a restore raises it.
+		frac := DefaultLinkFracPct
+		if rm.budgetLinkF != nil {
+			if f := rm.budgetLinkF(); f > 0 {
+				frac = f
+			}
+		}
+		linkCeil := rm.localLinkCeilKbps(ans.Addr, frac) // item 4: static link ceiling (0 = unknown)
+		budget := rm.budgetKbpsFn(ans.Codec, srcDesc.Width, srcDesc.Height, int(srcDesc.FPS), linkCeil)
 		switch {
 		case udp != nil:
-			go rm.guard("congestGovernor", func() { rm.congestGovernor(rctx, rio, udp, ans.Stream, base, int(srcDesc.FPS)) })
+			go rm.guard("congestGovernor", func() { rm.congestGovernor(rctx, rio, udp, ans.Stream, budget, int(srcDesc.FPS)) })
 		case rm.headroom != nil:
-			go rm.guard("rateGovernor", func() { rm.rateGovernor(rctx, rio, ans.Stream, base, int(srcDesc.FPS)) })
+			go rm.guard("rateGovernor", func() { rm.rateGovernor(rctx, rio, ans.Stream, budget, int(srcDesc.FPS)) })
 		}
 	}
 	if jb != nil {

@@ -3,6 +3,7 @@ package medialink
 import (
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -128,6 +129,9 @@ type routeStat struct {
 	transport string // negotiated media transport ("tcp"/"udp")
 	encrypted bool   // AEAD media plane (default); false = both peers opted out (plaintext)
 	keyframes uint64 // video keyframes seen (sent or received)
+	// Adaptive budget, recv-governor view (item 5): stored LOCK-FREE (atomic pointer, NOT st.mu) so
+	// the ~1 Hz governor never shares a lock with the per-frame count() path (realtime-path rule).
+	budget atomic.Pointer[budgetView]
 	// rate is the sliding window's sample ring (see rateSpan): appended by count() only,
 	// evaluated - never mutated - by snapshot().
 	rate        []rateSample
@@ -355,6 +359,21 @@ func (st *routeStat) receiverReport(wallNs, ptsNs int64) (Report, bool) {
 		FractionLost: frac, Jitter: s.jitter, WallNanos: wallNs, PTSNanos: ptsNs}, true
 }
 
+// budgetView is one lock-free snapshot of the recv-governor's adaptive-budget decision.
+type budgetView struct {
+	mode   string
+	target int
+	model  int
+	link   int
+	reason string
+}
+
+// setBudget records the recv-governor's live decision LOCK-FREE (atomic store; no st.mu, so the
+// ~1 Hz governor never contends with the per-frame count() path).
+func (st *routeStat) setBudget(mode string, target, model, link int, reason string) {
+	st.budget.Store(&budgetView{mode: mode, target: target, model: model, link: link, reason: reason})
+}
+
 // snapshot exports the route's counters for the Stats() API.
 func (st *routeStat) snapshot() RouteStat {
 	st.mu.Lock()
@@ -368,6 +387,10 @@ func (st *routeStat) snapshot() RouteStat {
 		NACKsSent: st.nacksSent, Retransmits: st.retransmits, PLIRequests: st.pliReqs,
 		ReportsSent: st.reportsSent, ReportsRecv: st.reportsRecv,
 		LatUnsynced: st.latBad, RemoteAt: st.remoteAt,
+	}
+	if bv := st.budget.Load(); bv != nil { // lock-free read of the governor's latest decision
+		out.BudgetMode, out.BudgetTargetKbps, out.BudgetModelKbps = bv.mode, bv.target, bv.model
+		out.BudgetLinkKbps, out.BudgetReason = bv.link, bv.reason
 	}
 	now := st.now()
 	out.RateBps, out.WireFPS = st.rateOver(now)
@@ -451,5 +474,14 @@ type RouteStat struct {
 
 	JB   *JitterStats   // recv video routes: adaptive buffer state (§3.3); nil = no buffer
 	Pipe *PipelineStats // encode/decode child telemetry; nil = passthrough route
-	UDP  *UDPStats      // §2.5 UDP transport telemetry (loss/NACK/retransmit/pacer/owd); nil = TCP route
+
+	// Adaptive budget, recv-governor view (item 5): the live bitrate target it requests, the model
+	// target at nominal geometry, the mode ("auto"/"fixed"/""), the static link ceiling (0=unknown),
+	// and the binding ceiling's reason. Zero on send routes / uncompressed routes.
+	BudgetMode       string
+	BudgetTargetKbps int
+	BudgetModelKbps  int
+	BudgetLinkKbps   int
+	BudgetReason     string
+	UDP              *UDPStats // §2.5 UDP transport telemetry (loss/NACK/retransmit/pacer/owd); nil = TCP route
 }

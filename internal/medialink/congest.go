@@ -132,11 +132,12 @@ func minRateHint(a, b RateHint) RateHint {
 // RateHint, min()-combined with the VRAM governor's ladder (bitrate first, then fps; resolution is
 // the VRAM governor's last resort). Emits only on a change (dedup). The sender applies it through
 // SetRateHint (RateControlSource) exactly like the VRAM backpressure.
-func (rm *RouteManager) congestGovernor(ctx context.Context, rio *routeIO, udp *udpConn, stream uint16, baseKbps, baseFPS int) {
-	ceil := baseKbps
+func (rm *RouteManager) congestGovernor(ctx context.Context, rio *routeIO, udp *udpConn, stream uint16, budget func(codedH int) int, baseFPS int) {
+	ceil := budget(0)
 	if ceil <= 0 {
 		ceil = defaultCongestCeilKbps
 	}
+	assertBudgetSane(rm, stream, ceil)
 	cc := newCongestController(congestConfig{CeilKbps: ceil, BaseFPS: baseFPS, Stream: stream})
 	t := time.NewTicker(rm.reportEvery)
 	defer t.Stop()
@@ -160,7 +161,9 @@ func (rm *RouteManager) congestGovernor(ctx context.Context, rio *routeIO, udp *
 				h = minRateHint(h, rateLadder(free, rm.govFloorMB, ceil, baseFPS, stream))
 			}
 		}
+		capBudgetToCoded(&h, budget) // item 2: a resolution cap lowers the bitrate to the coded-size model
 		h.Type, h.Stream = MetaRate, stream
+		rio.st.setBudget(rm.budgetModeStr(), h.MaxBitrateKbps, ceil, 0, budgetReason(h, ceil, baseFPS)) // item 5
 		if sent && h == last {
 			continue
 		}

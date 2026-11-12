@@ -52,12 +52,27 @@ const (
 // seeded from measured 4K60/1080p60 points (H.264 ~35/HEVC ~22 Mbps at 4K60; ~12/8 at 1080p60).
 // Monotonic in pixel rate and fps; codec/family/content scale the bpp. Clamped to sane bounds.
 func QualityTargetKbps(codec, family string, w, h, fps int, content ContentClass) int {
-	if w <= 0 || h <= 0 || fps <= 0 {
-		return budgetFloorKbps
+	// Robust to unknown inputs BY CONSTRUCTION (regression 2026-11-12: a PipeWire source advertises
+	// 3840x2160@0 before a capture is active, and fps=0 collapsed the model to the 1000-kbps floor on
+	// a live 4K route). An auto budget must NEVER drop below a quality-safe value for the geometry on
+	// its own account - only a user ceiling / link / VRAM / congestion may, with a visible reason.
+	if fps <= 0 {
+		fps = 60 // unknown / variable fps (advert before capture) => nominal 60, not the floor
 	}
+	if w <= 0 || h <= 0 {
+		w, h = 1920, 1080 // unknown geometry => a sane 1080p default, not the floor
+	}
+	// Unknown codec already maps to h264 (least efficient = highest bitrate) in codecBppFactor.
 	bpp := bppBase(h) * codecBppFactor(codec) * familyBppFactor(family) * contentBppFactor(content)
 	kbps := int(bpp * float64(w) * float64(h) * float64(fps) / 1000)
 	return clampInt(kbps, budgetFloorKbps, budgetCeilKbps)
+}
+
+// QualitySanityFloorKbps is the lowest an AUTO target may fall purely on the quality model's account
+// (25% of the model). Below this with no binding external reason (user/link/VRAM/congestion) is a bug
+// - governors assert + log it. External reasons may still push lower (with the reason shown).
+func QualitySanityFloorKbps(codec, family string, w, h, fps int, content ContentClass) int {
+	return QualityTargetKbps(codec, family, w, h, fps, content) / 4
 }
 
 // bppBase is the H.264-hardware bits-per-pixel anchor, interpolated by coded height. bpp DROPS with
@@ -161,6 +176,27 @@ func (rm *RouteManager) adaptiveBase(codec Codec, w, h, fps int) int {
 		user = rm.budgetUserK()
 	}
 	return AdaptiveBaseKbps(BitrateMode(mode), user, fixed, codec, w, h, fps)
+}
+
+// budgetKbpsFn returns the per-route closure the governors call each tick: the adaptive model
+// bitrate for a CODED height (aspect-preserved, capped by the user ceiling / fixed value), further
+// capped by the static link ceiling (item 4; 0 = none). codedH<=0 or >=nominal => nominal. Lets the
+// governor's bitrate follow a live resolution cap (item 2) and never exceed the link fraction.
+func (rm *RouteManager) budgetKbpsFn(codec Codec, w, h, fps, linkCeilKbps int) func(codedH int) int {
+	return func(codedH int) int {
+		ch, cw := h, w
+		if codedH > 0 && codedH < h {
+			ch = codedH
+			if h > 0 {
+				cw = w * codedH / h
+			}
+		}
+		b := rm.adaptiveBase(codec, cw, ch, fps)
+		if linkCeilKbps > 0 && linkCeilKbps < b {
+			b = linkCeilKbps
+		}
+		return b
+	}
 }
 
 // AdaptiveBudget holds one route's QP-bump hysteresis state (not concurrency-safe: one per route,
@@ -274,6 +310,50 @@ func SplitLinkCeiling(totalKbps int, pixelRates []int64) []int {
 		}
 	}
 	return out
+}
+
+// assertBudgetSane logs once (at governor start) if the model target is implausibly low for a
+// compressed video route (< 2000 kbps; any >=720p route models far above this). Catches a model
+// collapse like the fps=0 regression - an auto budget must never go this low on its own account.
+func assertBudgetSane(rm *RouteManager, stream uint16, baseKbps int) {
+	if baseKbps < 2000 {
+		rm.warnf("adaptive budget: implausibly low auto target - route inputs may be unknown (fps/geometry)",
+			map[string]any{"stream": stream, "baseKbps": baseKbps})
+	}
+}
+
+// budgetModeStr is the route's bitrate mode for ctl ("auto"/"fixed").
+func (rm *RouteManager) budgetModeStr() string {
+	if rm.budgetMode != nil {
+		return string(NormalizeBitrateMode(rm.budgetMode()))
+	}
+	return string(BitrateFixed)
+}
+
+// budgetReason names the binding constraint on the emitted hint, for ctl explainability (coarse).
+func budgetReason(h RateHint, nominalKbps, baseFPS int) string {
+	switch {
+	case h.MaxHeight > 0:
+		return "resolution-cap (vram/network)"
+	case h.MaxFPS > 0 && baseFPS > 0 && h.MaxFPS < baseFPS:
+		return "fps-cap (vram/network)"
+	case nominalKbps > 0 && h.MaxBitrateKbps > 0 && h.MaxBitrateKbps < nominalKbps:
+		return "congestion/vram (below quality target)"
+	default:
+		return "quality-model (target met)"
+	}
+}
+
+// capBudgetToCoded lowers a RateHint's bitrate to the quality model's value for the CODED height when
+// a resolution cap is active (the budget follows the coded size: a smaller coded frame needs fewer
+// bits, a restore raises it). No-op when MaxHeight==0 (nominal) or budget is nil.
+func capBudgetToCoded(h *RateHint, budget func(codedH int) int) {
+	if h.MaxHeight <= 0 || budget == nil {
+		return
+	}
+	if m := budget(h.MaxHeight); m > 0 && (h.MaxBitrateKbps <= 0 || m < h.MaxBitrateKbps) {
+		h.MaxBitrateKbps = m
+	}
 }
 
 // ── helpers ──
