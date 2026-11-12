@@ -15,6 +15,7 @@ import (
 	"encoding/binary"
 	"math/rand"
 	"net"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -97,8 +98,8 @@ func (realClock) Quality() ClockQuality { return ClockQuality{Tier: TierMonotoni
 // The receiver binds to the native socket on the first datagram, media flows, a dropped fragment is
 // recovered via NACK->retransmit, and rm_tx_close's bye ends the route with errUDPEnded (not a blackout).
 func TestNativeSenderToGoReceiverInterop(t *testing.T) {
-	if v := nativeABIVersion(); v != 2 {
-		t.Fatalf("linked libravemedia ABI = %d, want 2 (stale lib?)", v)
+	if v := nativeABIVersion(); v != 3 {
+		t.Fatalf("linked libravemedia ABI = %d, want 3 (stale lib?)", v)
 	}
 	if rc := nativeWireSelftest(); rc != 0 {
 		t.Fatalf("rm_wire_selftest = %d (wire core mismatch)", rc)
@@ -388,4 +389,145 @@ func TestNativeSenderRealistic4K60(t *testing.T) {
 	}
 	t.Logf("realistic 4K60: delivered=%d/%d nacksSent=%d retrans=%d owd=%dms lossPct=%.3f",
 		got, nFrames, rs.NacksSent, retx, rs.OwdNs/int64(time.Millisecond), rs.LossPct)
+}
+
+// TestNativeSender4K60TenSeconds (item B acceptance): native sender -> REAL Go udpConn, 4K60-realistic
+// AUs (IDR 400-900 kB every 60, P 80-150 kB, ~50 Mbps) for 10 s under 0.1 % random datagram loss.
+// The sender is opened with media_clock_ns = the receiver's clock (same host), so PTS land in the
+// receiver's domain like the router's media clock. Asserts: EVERY frame completes (NACK recovery),
+// the SENDER saw NACKs and retransmitted, no TX queue drops, transit (arrival - PTS) small and
+// positive, and a receiver jitter buffer stays near 1-2 frames with ~0 misses.
+func TestNativeSender4K60TenSeconds(t *testing.T) {
+	master := testKey()
+	salt := []byte("medialink-interop-4k60-10s")
+	token := routeToken(master, salt)
+	sendKey, sendPre, recvKey, recvPre, err := deriveRouteKeysRaw(master, salt, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.SetReadBuffer(8 << 20); err != nil {
+		t.Logf("SetReadBuffer: %v", err)
+	}
+	clk := NewMonotonicClock()
+	lossy := &lossyPacketConn{packetConn: raw, lossRate: 0.001, rng: rand.New(rand.NewSource(42))}
+	recv, err := newUDPConn(lossy, nil, udpConfig{
+		Token: token, Initiator: true, Master: master, Salt: salt, Encrypt: true,
+		Clock: clk, BodyMax: 1200,
+		Liveness: 3 * time.Second, StartupGrace: 15 * time.Second, Keepalive: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recv.Close()
+
+	const bitrateKbps = 45000
+	const ptsBase = int64(1_700_000_000_000_000_000) // capture-clock epoch, far from the receiver's clock
+	ns, err := openCgoNativeSenderClock(sockaddrIn4(raw.LocalAddr().(*net.UDPAddr)), token, true,
+		sendKey, sendPre, recvKey, recvPre, byte(CodecHEVC), 1, 1200, 100000, float64(bitrateKbps)*1000/8, clk.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ns.close()
+
+	const nFrames = 600 // 10 s at 60 fps
+	jb := newJitterBufferPreset(60, false, PlayoutLowLatency)
+	var mu sync.Mutex
+	seen := make(map[uint32]bool, nFrames)
+	var transits []int64
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			f, e := recv.ReadFrame()
+			if e != nil {
+				return
+			}
+			now := clk.Now()
+			mu.Lock()
+			seen[f.Seq] = true
+			transits = append(transits, now-f.PTS)
+			mu.Unlock()
+			jb.push(f, now)
+		}
+	}()
+	// Release runner (runJitter's loop shape on the real clock).
+	stopRel := make(chan struct{})
+	relDone := make(chan struct{})
+	go func() {
+		defer close(relDone)
+		for {
+			if g, wake := jb.pop(clk.Now()); g != nil {
+				continue
+			} else {
+				d := time.Millisecond
+				if wake != 0 {
+					if w := time.Duration(wake - clk.Now()); w > 0 && w < d {
+						d = w
+					}
+				}
+				select {
+				case <-stopRel:
+					return
+				case <-jb.notify:
+				case <-time.After(d):
+				}
+			}
+		}
+	}()
+
+	buf := make([]byte, 1<<20)
+	start := time.Now()
+	for i := 0; i < nFrames; i++ {
+		au, kf := realisticAU(i, buf)
+		ns.submitAU(au, ptsBase+int64(i)*16_666_667, kf)
+		if d := time.Until(start.Add(time.Duration(i+1) * 16_666_667)); d > 0 {
+			time.Sleep(d) // absolute schedule: no cumulative sleep drift
+		}
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(seen)
+		mu.Unlock()
+		if n >= nFrames {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond) // let the playout drain
+	close(stopRel)
+	<-relDone
+	mu.Lock()
+	got := len(seen)
+	tr := append([]int64(nil), transits...)
+	js := jb.statsAt(clk.Now())
+	mu.Unlock()
+	rs := recv.Stats()
+	ss := ns.fullStats()
+	sort.Slice(tr, func(i, j int) bool { return tr[i] < tr[j] })
+	p50, p99, mx := tr[len(tr)/2], tr[len(tr)*99/100], tr[len(tr)-1]
+	t.Logf("4K60 10s: delivered=%d/%d sender{sent=%d dropped=%d nacksRecv=%d retx=%d bytes=%.1fMB} recv{nacksSent=%d reasmDrops=%d owd=%.1fms lossPct=%.3f} transit p50/p99/max=%.1f/%.1f/%.1fms jb{playout=%.1fms misses=%d lateRate=%.3f drops=%d}",
+		got, nFrames, ss.AUsSent, ss.AUsDropped, ss.NacksRecv, ss.Retransmits, float64(ss.BytesSent)/1e6,
+		rs.NacksSent, rs.ReasmDrops, float64(rs.OwdNs)/1e6, rs.LossPct,
+		float64(p50)/1e6, float64(p99)/1e6, float64(mx)/1e6, js.PlayoutMs, js.Late, js.LateRate, js.PolicyDrops)
+	if got != nFrames {
+		t.Fatalf("not every frame completed: %d/%d (reasmDrops=%d)", got, nFrames, rs.ReasmDrops)
+	}
+	if ss.AUsDropped != 0 {
+		t.Fatalf("sender TX queue dropped %d AUs", ss.AUsDropped)
+	}
+	if rs.NacksSent == 0 || ss.NacksRecv == 0 || ss.Retransmits == 0 {
+		t.Fatalf("NACK path not exercised end to end: recv nacksSent=%d sender nacksRecv=%d retx=%d",
+			rs.NacksSent, ss.NacksRecv, ss.Retransmits)
+	}
+	if tr[0] < 0 || p50 > int64(30*time.Millisecond) {
+		t.Fatalf("PTS not in the receiver clock domain: transit min=%d p50=%d ns", tr[0], p50)
+	}
+	if js.PolicyDrops != 0 || js.Late > 10 || js.PlayoutMs > 50 {
+		t.Fatalf("receiver playout unhealthy: %+v", js)
+	}
 }

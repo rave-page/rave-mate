@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -43,6 +44,14 @@ type reoffBackoff struct {
 	next      time.Time     // earliest next re-offer attempt
 	interval  time.Duration // current backoff step
 	liveSince time.Time     // when the current live route for this key was first seen (zero = not live)
+}
+
+// SetTransportOverride forwards to the wrapped control when it supports per-route overrides.
+func (r *rememberingReceives) SetTransportOverride(peer, sourceID, mode string) error {
+	if t, ok := r.ReceiveControl.(mediaroute.TransportOverrider); ok {
+		return t.SetTransportOverride(peer, sourceID, mode)
+	}
+	return errors.New("per-route transport override unsupported by this media plane")
 }
 
 func (r *rememberingReceives) StartReceive(peer, sourceID string) (string, error) {

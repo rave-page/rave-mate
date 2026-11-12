@@ -13,7 +13,7 @@ const aead = @import("aead.zig");
 const wire = @import("wire.zig");
 const snd = @import("sender.zig");
 
-pub const abi_version: u32 = 2;
+pub const abi_version: u32 = 3;
 
 const alloc = std.heap.c_allocator;
 
@@ -49,6 +49,7 @@ const RmOpenParams = extern struct {
     initial_seq: u64,
     fps: i32,
     startup_grace_ns: i64,
+    media_clock_ns: i64,
 };
 const RmTxStats = extern struct {
     aus_submitted: u64,
@@ -60,6 +61,7 @@ const RmTxStats = extern struct {
     seq: u64,
     queue_depth: i32,
     dead: i32,
+    nacks_recv: u64,
 };
 
 export fn rm_abi_version() u32 {
@@ -128,6 +130,7 @@ export fn rm_tx_open(p: ?*const RmOpenParams, on_need_idr: ?IdrCb, user: ?*anyop
         .initial_seq = params.initial_seq, // continue the Go conn's seq space (strictly-newest at the receiver)
         .fps = params.fps,
         .startup_grace_ns = if (params.startup_grace_ns > 0) params.startup_grace_ns else snd.default_startup_grace_ns,
+        .clock_offset_ns = if (params.media_clock_ns != 0) params.media_clock_ns - snd.nowNs() else 0,
     };
     const fd_res = openSocket(params) catch return RM_ERR_SOCKET;
     const s = snd.Sender.open(alloc, cfg, fd_res.fd, fd_res.own) catch {
@@ -174,6 +177,7 @@ export fn rm_tx_stats_get(s: ?*snd.Sender, out: ?*RmTxStats) void {
         .seq = st.seq,
         .queue_depth = st.queue_depth,
         .dead = st.dead,
+        .nacks_recv = st.nacks_recv,
     };
 }
 export fn rm_tx_close(s: ?*snd.Sender) void {
@@ -197,6 +201,7 @@ test "rm_tx_open rejects ABI version + struct-size skew before opening a socket"
         .initial_seq = 0,
         .fps = 60,
         .startup_grace_ns = 0,
+        .media_clock_ns = 0,
     };
     try std.testing.expectEqual(RM_ERR_ARGS, rm_tx_open(&p, null, null, &out));
     try std.testing.expectEqual(@as(?*snd.Sender, null), out);

@@ -40,6 +40,7 @@ type NativeTXParams struct {
 	BitrateKbps  int           // initial rate hint
 	FPS          int           // nominal frame rate (fps rung)
 	StartupGrace time.Duration // liveness grace before the route is established (cold encoder/decoder)
+	MediaClockNs int64         // media clock sampled just before attach: native rebases PTS into this domain (0 = sender-local mono)
 }
 
 // NativeTXStats mirrors rm_tx_stats; sampled by the router at ~1 Hz into RouteStat.
@@ -53,6 +54,7 @@ type NativeTXStats struct {
 	Seq           uint64
 	QueueDepth    int
 	Dead          bool
+	NacksRecv     uint64 // authenticated NACK datagrams received (ABI v3)
 }
 
 // NativeTX is a running native send path. The Go router supervises it (does not pump media): on Done()

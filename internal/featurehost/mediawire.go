@@ -123,11 +123,12 @@ type clockOffsetEvent struct {
 
 // Method names for calls that need a return value or delivery confirmation.
 const (
-	mStartReceive = "startReceive" // startReceiveReq → startReceiveResp
-	mStopReceive  = "stopReceive"  // stopReceiveReq → (ok)
-	mCommand      = "command"      // commandReq → (ok/err)
-	mFrameShot    = "frameShot"    // frameShotReq → FrameShotResult
-	mTestcard     = "testcard"     // testcardReq → TestcardResult
+	mStartReceive = "startReceive"      // startReceiveReq → startReceiveResp
+	mStopReceive  = "stopReceive"       // stopReceiveReq → (ok)
+	mCommand      = "command"           // commandReq → (ok/err)
+	mFrameShot    = "frameShot"         // frameShotReq → FrameShotResult
+	mTestcard     = "testcard"          // testcardReq → TestcardResult
+	mTransportOv  = "transportOverride" // transportOverrideReq → (ok/err)
 )
 
 // frameShotReq samples a LOCAL video-share sender's CURRENT content N times and reports whether it
@@ -156,6 +157,12 @@ type testcardReq struct {
 
 // TestcardResult aliases testcard.Report for the same no-drift reason as FrameShotResult.
 type TestcardResult = testcard.Report
+
+type transportOverrideReq struct {
+	Peer     string `json:"peer"`
+	SourceID string `json:"sourceId"`
+	Mode     string `json:"mode"`
+}
 
 type startReceiveReq struct {
 	Peer     string `json:"peer"`

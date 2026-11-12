@@ -5,6 +5,9 @@
  *   started at 0, the receiver's replay window rejected it as too-old and never rebound → no media),
  *   fps and startup_grace_ns (mirror NativeTXParams field-for-field). A caller built against v1 sets
  *   abi_version=1 and is rejected cleanly (RM_ERR_ARGS); any struct-size skew is caught too.
+ * ABI v3 (2026-11-12): rm_open_params.media_clock_ns (PTS rebased into the Go media-clock domain,
+ *   0 = sender-local monotonic as in v2); rm_tx_stats.nacks_recv. Callers recompile; no call-site
+ *   change is required (both new fields keep v2 behaviour when zeroed).
  *
  * Ownership split: Go negotiates the route (Offer/Answer), derives the per-route keys + token, then
  * opens a native sender and hands it the derived material. The encode thread (Linux VA shim /
@@ -44,7 +47,7 @@
 extern "C" {
 #endif
 
-#define RM_ABI_VERSION 2u
+#define RM_ABI_VERSION 3u
 
 uint32_t rm_abi_version(void);
 int rm_wire_selftest(void); /* 0 = wire core matches its goldens (integration sanity) */
@@ -106,6 +109,8 @@ typedef struct {
                               * window is rejected as too-old (no rebind, no media) - by design. */
     int32_t fps;             /* nominal frame-rate rung (0 = unknown); mirrors NativeTXParams.FPS */
     int64_t startup_grace_ns;/* liveness grace before the route establishes (0 -> native default 15s) */
+    int64_t media_clock_ns;  /* Go media clock (MediaClock.Now) sampled just before rm_tx_open; PTS are
+                              * rebased into that domain. 0 -> sender-local monotonic (v2 behaviour). */
 } rm_open_params;
 
 typedef struct rm_sender rm_sender; /* opaque */
@@ -125,6 +130,7 @@ typedef struct {
     uint64_t seq;            /* current datagram seq (UDP) -> seq-budget watch */
     int32_t queue_depth;     /* AUs queued now */
     int32_t dead;            /* 1 = TX thread exited (seq exhausted / fatal socket) */
+    uint64_t nacks_recv;     /* authenticated NACK datagrams received (UDP) */
 } rm_tx_stats;
 
 /* rm_tx_open creates + starts a sender (its own TX thread + UDP control-RX). RM_OK + *out on success. */

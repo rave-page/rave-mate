@@ -271,6 +271,12 @@ func (f *mediaFeature) Handle(_ context.Context, method string, params json.RawM
 			return nil, err
 		}
 		return json.Marshal(startReceiveResp{Session: sess})
+	case mTransportOv:
+		var req transportOverrideReq
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		return nil, f.routes.SetTransportOverride(req.Peer, req.SourceID, req.Mode)
 	case mStopReceive:
 		var req stopReceiveReq
 		if err := json.Unmarshal(params, &req); err != nil {

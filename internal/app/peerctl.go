@@ -505,9 +505,9 @@ func formatRoutes(stats []medialink.RouteStat) string {
 			b.WriteString(line + "\n")
 		}
 		// Loss / recovery.
-		if s.SeqGaps > 0 || s.LostEst > 0 || s.Recovered > 0 || s.NACKsSent > 0 || s.Retransmits > 0 {
-			fmt.Fprintf(&b, "    seqGaps=%d lostEst=%d recovered=%d nacksSent=%d retransmits=%d pli=%d\n",
-				s.SeqGaps, s.LostEst, s.Recovered, s.NACKsSent, s.Retransmits, s.PLIRequests)
+		if s.SeqGaps > 0 || s.LostEst > 0 || s.Recovered > 0 || s.NACKsSent > 0 || s.NACKsRecv > 0 || s.Retransmits > 0 {
+			fmt.Fprintf(&b, "    seqGaps=%d lostEst=%d recovered=%d nacksSent=%d nacksRecv=%d retransmits=%d pli=%d\n",
+				s.SeqGaps, s.LostEst, s.Recovered, s.NACKsSent, s.NACKsRecv, s.Retransmits, s.PLIRequests)
 		}
 		// UDP transport telemetry.
 		if u := s.UDP; u != nil {
@@ -613,15 +613,48 @@ func (c *appControl) RouteStart(peer, source string) string {
 	if c.mediaRoutes == nil {
 		return "media plane unavailable"
 	}
+	source, transport := cutTransportFlag(source)
 	pid, sourceID, err := resolveRemoteSource(c.mediaRoutes.RemoteVideoSources(), peer, source)
 	if err != nil {
 		return "error: " + err.Error()
+	}
+	if transport != "" {
+		tov, ok := c.mediaRoutes.(mediaroute.TransportOverrider)
+		if !ok {
+			return "error: per-route transport override unsupported by this media plane"
+		}
+		if err := tov.SetTransportOverride(pid, sourceID, transport); err != nil {
+			return "error: " + err.Error()
+		}
 	}
 	sess, err := c.mediaRoutes.StartReceive(pid, sourceID)
 	if err != nil {
 		return "error: " + err.Error()
 	}
-	return fmt.Sprintf("route started: peer=%s source=%s session=%s", peerShort(pid), sourceID, sess)
+	out := fmt.Sprintf("route started: peer=%s source=%s session=%s", peerShort(pid), sourceID, sess)
+	if transport != "" {
+		out += " transport-override=" + transport + " (applies to new offers; a live route keeps its transport - route-stop first)"
+	}
+	return out
+}
+
+// cutTransportFlag strips a "--transport <udp|tcp|auto>" token pair from a route-start source arg.
+func cutTransportFlag(s string) (rest, transport string) {
+	f := strings.Fields(s)
+	keep := f[:0]
+	for i := 0; i < len(f); i++ {
+		if f[i] == "--transport" && i+1 < len(f) {
+			transport = strings.ToLower(f[i+1])
+			i++
+			continue
+		}
+		if v, ok := strings.CutPrefix(f[i], "--transport="); ok {
+			transport = strings.ToLower(v)
+			continue
+		}
+		keep = append(keep, f[i])
+	}
+	return strings.Join(keep, " "), transport
 }
 
 // RouteStop stops a receive route by source name, or every route from a peer with "all".

@@ -159,3 +159,73 @@ func TestUDPReachabilityFailsToDeadPeer(t *testing.T) {
 		t.Fatal("waitReachable reported a dead UDP peer as reachable")
 	}
 }
+
+// TestRouteTransportOverrideUDP: the receiver has UDP disabled (mediaLink.transport=tcp) but a
+// per-route `udp` override makes THAT route negotiate UDP; another source on the same peer without
+// the override stays TCP; `auto` clears it.
+func TestRouteTransportOverrideUDP(t *testing.T) {
+	rmA, rmB, _ := udpRouteManagers(t, false, true)
+	const n = 16
+	mk := func() []*Frame {
+		fs := make([]*Frame, n)
+		for i := range fs {
+			fs[i] = &Frame{Kind: KindAudio, Codec: CodecPCMS16, PTS: int64(i+1) * 5_000_000, Payload: []byte{byte(i)}}
+		}
+		return fs
+	}
+	for _, id := range []string{"test", "live"} {
+		rmB.RegisterSource(SourceDesc{ID: id, Kind: KindAudio, Codec: CodecPCMS16},
+			func(context.Context, Offer) (Source, error) { return &sliceSource{frames: mk()}, nil })
+	}
+	sinkT, sinkL := newCollectSink(n), newCollectSink(n)
+	rmA.RegisterSink(SinkDesc{ID: "spkT", Kind: KindAudio}, func(context.Context, Answer) (Sink, error) { return sinkT, nil })
+	rmA.RegisterSink(SinkDesc{ID: "spkL", Kind: KindAudio}, func(context.Context, Answer) (Sink, error) { return sinkL, nil })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := rmB.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer rmB.Stop()
+	if err := rmA.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer rmA.Stop()
+	if err := rmA.SetTransportOverride("B", "test", "bogus"); err == nil {
+		t.Fatal("bogus mode accepted")
+	}
+	if err := rmA.SetTransportOverride("B", "test", "udp"); err != nil {
+		t.Fatal(err)
+	}
+	rmB.Advertise()
+	waitFor(t, time.Second, func() bool { _, ok := rmA.RemoteAdverts()["B"]; return ok })
+	sessT, err := rmA.Offer("B", "test", "spkT", CodecPCMS16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessL, err := rmA.Offer("B", "live", "spkL", CodecPCMS16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []*collectSink{sinkT, sinkL} {
+		select {
+		case <-s.done:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("timeout waiting for frames (stats %+v)", rmA.Stats())
+		}
+	}
+	tr := map[string]string{}
+	waitFor(t, 2*time.Second, func() bool {
+		for _, s := range rmA.Stats() {
+			if s.Direction == "recv" {
+				tr[s.Session] = s.Transport
+			}
+		}
+		return tr[sessT] != "" && tr[sessL] != ""
+	})
+	if tr[sessT] != TransportUDP || tr[sessL] != TransportTCP {
+		t.Fatalf("override route=%q (want udp), other route=%q (want tcp)", tr[sessT], tr[sessL])
+	}
+	if err := rmA.SetTransportOverride("B", "test", "auto"); err != nil || rmA.TransportOverride("B", "test") != "" {
+		t.Fatalf("auto did not clear: err=%v", err)
+	}
+}

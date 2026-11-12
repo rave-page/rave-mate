@@ -44,6 +44,14 @@ func nativeWireSelftest() int { return int(C.rm_wire_selftest()) }
 func openCgoNativeSender(peerAddr []byte, token uint32, encrypt bool, sendKey [32]byte, sendPre uint32,
 	recvKey [32]byte, recvPre uint32, codec uint8, stream uint16, bodyMax int, initialSeq uint64,
 	rateBytesPerSec float64) (*cgoNativeSender, error) {
+	return openCgoNativeSenderClock(peerAddr, token, encrypt, sendKey, sendPre, recvKey, recvPre, codec, stream,
+		bodyMax, initialSeq, rateBytesPerSec, 0)
+}
+
+// openCgoNativeSenderClock is openCgoNativeSender with media_clock_ns (PTS domain; 0 = sender-local mono).
+func openCgoNativeSenderClock(peerAddr []byte, token uint32, encrypt bool, sendKey [32]byte, sendPre uint32,
+	recvKey [32]byte, recvPre uint32, codec uint8, stream uint16, bodyMax int, initialSeq uint64,
+	rateBytesPerSec float64, mediaClockNs int64) (*cgoNativeSender, error) {
 
 	var p C.rm_open_params
 	p.abi_version = C.uint32_t(C.RM_ABI_VERSION)
@@ -75,6 +83,7 @@ func openCgoNativeSender(peerAddr []byte, token uint32, encrypt bool, sendKey [3
 	p.initial_seq = C.uint64_t(initialSeq)
 	p.fps = 60
 	p.startup_grace_ns = 0 // native default (15s)
+	p.media_clock_ns = C.int64_t(mediaClockNs)
 
 	var out *C.rm_sender
 	if rc := C.rm_tx_open(&p, nil, nil, &out); rc != C.RM_OK {
@@ -94,6 +103,16 @@ func (n *cgoNativeSender) submitAU(au []byte, ptsNs int64, keyframe bool) {
 		flags = C.RM_FLAG_KEYFRAME
 	}
 	C.rm_tx_submit_au(n.s, ptr, C.size_t(len(au)), C.int64_t(ptsNs), flags)
+}
+
+// fullStats snapshots every rm_tx_stats counter.
+func (n *cgoNativeSender) fullStats() NativeTXStats {
+	var st C.rm_tx_stats
+	C.rm_tx_stats_get(n.s, &st)
+	return NativeTXStats{AUsSubmitted: uint64(st.aus_submitted), AUsSent: uint64(st.aus_sent),
+		AUsDropped: uint64(st.aus_dropped), DatagramsSent: uint64(st.datagrams_sent), BytesSent: uint64(st.bytes_sent),
+		Retransmits: uint64(st.retransmits), Seq: uint64(st.seq), QueueDepth: int(st.queue_depth),
+		Dead: st.dead != 0, NacksRecv: uint64(st.nacks_recv)}
 }
 
 // stats snapshots the lock-free counters.

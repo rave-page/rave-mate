@@ -561,8 +561,10 @@ func (b *jitterBuffer) popLocked(now int64) (*Frame, int64, bool) {
 		}
 		gap := h.Seq != b.nextSeq
 		if gap && !b.intra && !h.Keyframe() {
-			// Missing dependency: give retransmit until the deadline, then give up + PLI.
-			if dl := b.deadline(h); now < dl {
+			// Missing dependency: it may still arrive (retransmit of a big IDR fragment) - wait for it up
+			// to the max margin (a miss = repeated frames, then the margin grows on its arrival), only
+			// then give up + PLI. Never request an IDR while the frame can still arrive within the bound.
+			if dl := b.deadline(h) + max(b.preset.MaxNs-b.margin, 0); now < dl {
 				return nil, dl, fire
 			}
 			b.dropHead()

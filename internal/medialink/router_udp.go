@@ -2,7 +2,9 @@ package medialink
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -22,6 +24,60 @@ func (rm *RouteManager) offerTransports(forceTCP bool) []string {
 		return nil
 	}
 	return []string{TransportUDP, TransportTCP}
+}
+
+// Per-route transport override modes (SetTransportOverride).
+const (
+	TransportOverrideAuto = "auto" // config default (clears the override)
+	TransportOverrideUDP  = "udp"  // offer UDP (TCP fallback) for this route even when mediaLink.transport=tcp
+	TransportOverrideTCP  = "tcp"  // offer TCP only for this route
+)
+
+// SetTransportOverride pins the transport the RECEIVE side offers for one (peer, source) route,
+// independent of mediaLink.transport, so one test route can run UDP (+ a native sender on the
+// answerer) while every other route stays on TCP. In-memory: lasts until the media plane restarts.
+// Applies to the next offer (route start / re-offer); a live route keeps its transport.
+func (rm *RouteManager) SetTransportOverride(peer, sourceID, mode string) error {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	switch mode {
+	case TransportOverrideUDP, TransportOverrideTCP, TransportOverrideAuto, "":
+	default:
+		return fmt.Errorf("medialink: transport override %q (want udp|tcp|auto)", mode)
+	}
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	if rm.tov == nil {
+		rm.tov = map[string]string{}
+	}
+	k := peer + "\x00" + sourceID
+	if mode == TransportOverrideAuto || mode == "" {
+		delete(rm.tov, k)
+		return nil
+	}
+	rm.tov[k] = mode
+	return nil
+}
+
+// TransportOverride returns the override for (peer, source) ("" = none).
+func (rm *RouteManager) TransportOverride(peer, sourceID string) string {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	return rm.tov[peer+"\x00"+sourceID]
+}
+
+// offerTransportsFor is offerTransports with the per-route override applied. A `udp` override needs
+// no local UDP mux: the receive side dials its own UDP socket (dialUDP).
+func (rm *RouteManager) offerTransportsFor(peer, sourceID string, forceTCP bool) []string {
+	switch rm.TransportOverride(peer, sourceID) {
+	case TransportOverrideTCP:
+		return nil
+	case TransportOverrideUDP:
+		if forceTCP {
+			return nil
+		}
+		return []string{TransportUDP, TransportTCP}
+	}
+	return rm.offerTransports(forceTCP)
 }
 
 func containsStr(xs []string, want string) bool {
@@ -44,8 +100,8 @@ func transportName(udp *udpConn) string {
 // dialConn gives the sink side a route conn: a reachable UDP conn when the answer chose UDP and the
 // reachability handshake succeeds, else a TCP conn (default or fallback). Returns the frameConn and,
 // when UDP, the *udpConn (for telemetry + the blackout detector).
-func (rm *RouteManager) dialConn(ctx context.Context, peer string, ans Answer, salt []byte, encrypt bool) (frameConn, *udpConn, error) {
-	if ans.Transport == TransportUDP && rm.udp && salt != nil {
+func (rm *RouteManager) dialConn(ctx context.Context, peer string, ans Answer, salt []byte, encrypt, udpOK bool) (frameConn, *udpConn, error) {
+	if ans.Transport == TransportUDP && udpOK && salt != nil {
 		if u, ok := rm.dialUDP(ctx, peer, ans, salt, encrypt); ok {
 			return u, u, nil
 		}

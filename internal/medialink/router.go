@@ -199,6 +199,7 @@ type pendingOffer struct {
 	enc        string // our advertised media-plane pref (EncAuto/EncOn/EncOff), for the answer-time decision
 	local      bool   // we see the target on a directly-connected private subnet (enc=auto input)
 	noUDP      bool   // this offer forced TCP (blackout re-offer) - don't fall back again
+	udpOK      bool   // this offer may dial UDP (config allows it, or a per-route `udp` override)
 	bitrate    int    // original bitrate budget (for a TCP-fallback re-offer)
 	decoders   []string
 	routeNonce []byte // our ≥128-bit contribution to the per-route key salt (Offer.RouteNonce)
@@ -376,6 +377,7 @@ type RouteManager struct {
 	pendingAns   map[string]*pendingAnswer
 	pendingOff   map[string]*pendingOffer
 	active       map[string]*activeRoute
+	tov          map[string]string // per-(peer,source) transport override (SetTransportOverride)
 	unsub        []func()
 
 	ctx    context.Context
@@ -754,13 +756,15 @@ func (rm *RouteManager) OfferRoute(target, sourceID, sinkID string, opt OfferOpt
 	po := &pendingOffer{target: target, sourceID: sourceID, sinkID: sinkID, sinkKind: sink.desc.Kind,
 		open: sink.open, enc: enc, local: local, noUDP: opt.ForceTCP, bitrate: opt.BitrateKbps,
 		decoders: opt.Decoders, routeNonce: offerNonce}
+	transports := rm.offerTransportsFor(target, sourceID, opt.ForceTCP)
+	po.udpOK = containsStr(transports, TransportUDP)
 	po.timer = time.AfterFunc(pendingTTL, func() { rm.expireOffer(session) })
 	rm.mu.Lock()
 	rm.pendingOff[session] = po
 	rm.mu.Unlock()
 
 	off := Offer{Session: session, Target: target, SourceID: sourceID, SinkID: sinkID, Codec: opt.Codec,
-		Transport: TransportTCP, Transports: rm.offerTransports(opt.ForceTCP), NACK: true, Bitrate: opt.BitrateKbps,
+		Transport: TransportTCP, Transports: transports, NACK: true, Bitrate: opt.BitrateKbps,
 		QualityMode: opt.QualityMode,
 		Enc:         enc, Local: local, RouteNonce: offerNonce, Caps: &Caps{Report: true, Sync: true, Decoders: decoders}}
 	if raw, err := json.Marshal(off); err == nil {
@@ -1191,6 +1195,7 @@ func (rm *RouteManager) tryAttachNativeTX(pa *pendingAnswer, udp *udpConn, src S
 		InitialSeq: udp.sendSeq(), BitrateKbps: pa.offer.Bitrate, FPS: int(pa.srcDesc.FPS),
 		StartupGrace: udpDefStartupGrace,
 	}
+	params.MediaClockNs = rm.clock.Now() // last: as close to rm_tx_open as Go gets
 	tx, err := nts.AttachNativeTX(params)
 	if err != nil {
 		rm.warnf("native tx attach failed - Go pump fallback", map[string]any{"session": pa.offer.Session, "error": err.Error()})
@@ -1394,8 +1399,8 @@ func (rm *RouteManager) peerSyncEstimate(peer string) (SyncEstimate, bool) {
 // the AEAD key, open the sink, and pump conn→(jitter buffer→decode child→)sink.
 func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Answer, po *pendingOffer) {
 	encrypt := resolveEnc(po.enc, ans.Enc, po.local && ans.Local)
-	salt := routeKeySalt(po.routeNonce, ans.RouteNonce, ans.Session) // per-route keys (nil = old peer → legacy)
-	conn, udp, err := rm.dialConn(ctx, peer, ans, salt, encrypt)     // UDP (reachable) else TCP fallback
+	salt := routeKeySalt(po.routeNonce, ans.RouteNonce, ans.Session)       // per-route keys (nil = old peer → legacy)
+	conn, udp, err := rm.dialConn(ctx, peer, ans, salt, encrypt, po.udpOK) // UDP (reachable) else TCP fallback
 	if err != nil {
 		rm.warnf("media dial failed", map[string]any{"addr": ans.Addr, "transport": ans.Transport, "error": err.Error()})
 		return
@@ -1441,7 +1446,7 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 	rio := &routeIO{conn: conn, st: st, caps: capsFromAnswer(ans)}
 	ar := &activeRoute{cancel: cancel, conn: conn, stat: st, udp: udp, dir: "recv", peer: peer, sourceID: po.sourceID}
 	if udp == nil {
-		ar.tcpReason = recvTCPReason(rm.udp, ans, salt) // why this recv route is on TCP, not UDP (brief item 2)
+		ar.tcpReason = recvTCPReason(po.udpOK, ans, salt) // why this recv route is on TCP, not UDP (brief item 2)
 	}
 	if pr, ok := final.(PipelineReporter); ok {
 		ar.pipe = pr
