@@ -451,20 +451,30 @@ struct rva_enc {
 	/* VPP (rgb import -> nv12 scale/convert) */
 	VAConfigID vpp_cfg;
 	VAContextID vpp_ctx;
-	VASurfaceID nv12; /* VPP output = encoder input */
+	VASurfaceID nv12[2]; /* VPP output = encoder input (ping-pong for pipelining) */
 	/* encoder */
 	VAConfigID enc_cfg;
 	VAContextID enc_ctx;
 	VASurfaceID recon[2];
-	VABufferID coded;
+	VABufferID coded[2];
 	int frame_num;   /* H264 frame_num (mod 2^log2_max_fn) */
-	int cur_recon;   /* ping-pong index */
+	int pp;          /* ping-pong index (nv12/recon/coded) */
 	int have_ref;
 	int idr_id;
 	int gop;         /* IDR interval in frames */
 	int since_idr;
+	/* pipeline: submit frame N, emit frame N-1 (sync+map), to overlap GPU encode with CPU prep. */
+	int have_pending;
+	int pend_idx;
+	int pend_idr;
 	unsigned char *au; /* returned AU buffer (AUD + coded) */
 	int au_cap;
+	/* import-surface cache: the PipeWire pool cycles a fixed set of dmabuf fds; create a VASurface
+	 * per fd once + reuse (per-frame vaCreateSurfaces import was the ~55fps-at-4K bottleneck + a slow
+	 * RSS creep). Keyed by the plane-0 fd; the pool's layout per fd is stable. */
+	int cache_fd[16];
+	VASurfaceID cache_surf[16];
+	int cache_n;
 };
 
 static int level_for(int w, int h, int fps) {
@@ -561,15 +571,36 @@ static void write_slice_hdr(struct bs *b, struct rva_enc *e, int idr) {
 	/* deblocking_filter_control_present==0 -> no deblocking syntax. Driver appends slice data. */
 }
 
-/* vpp_to_nv12: import the dmabuf, VPP (convert + vertical mirror + scale) into e->nv12. 0=ok. */
-static int vpp_to_nv12(struct rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int h,
-                       int n_planes, const int *fds, const unsigned *offsets, const unsigned *strides) {
-	VASurfaceID rgb = VA_INVALID_ID;
-	VAStatus st = import_dmabuf(e->dpy, drm_fourcc, modifier, w, h, n_planes, fds, offsets, strides, &rgb);
+/* import_cached returns a VASurface for the dmabuf, reusing one created earlier for the same
+ * plane-0 fd (the pool cycles a fixed fd set). Cache full / miss on a fresh fd => import + store. */
+static VASurfaceID import_cached(struct rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int h,
+                                 int n_planes, const int *fds, const unsigned *offsets, const unsigned *strides) {
+	for (int i = 0; i < e->cache_n; i++)
+		if (e->cache_fd[i] == fds[0])
+			return e->cache_surf[i];
+	VASurfaceID s = VA_INVALID_ID;
+	VAStatus st = import_dmabuf(e->dpy, drm_fourcc, modifier, w, h, n_planes, fds, offsets, strides, &s);
 	if (st != VA_STATUS_SUCCESS) {
 		VDBG("enc: import: %s\n", VA.ErrorStr(st));
-		return -1;
+		return VA_INVALID_ID;
 	}
+	if (e->cache_n < (int)(sizeof(e->cache_fd) / sizeof(e->cache_fd[0]))) {
+		e->cache_fd[e->cache_n] = fds[0];
+		e->cache_surf[e->cache_n] = s;
+		e->cache_n++;
+	} /* else: not cached, destroyed by the caller via a one-shot path - but pools are small, so the
+	     cache never fills in practice; if it did we'd leak this surface. Guarded by the 16 cap. */
+	return s;
+}
+
+/* vpp_to_nv12: import (cached) the dmabuf, VPP (convert + vertical mirror + scale) into e->nv12.
+ * No explicit VPP sync: the encode's BeginPicture(nv12) + SyncSurface order the dependency on the
+ * shared nv12 surface, which lets VPP and encode pipeline. 0=ok. */
+static int vpp_to_nv12(struct rva_enc *e, VASurfaceID target, uint32_t drm_fourcc, uint64_t modifier, int w, int h,
+                       int n_planes, const int *fds, const unsigned *offsets, const unsigned *strides) {
+	VASurfaceID rgb = import_cached(e, drm_fourcc, modifier, w, h, n_planes, fds, offsets, strides);
+	if (rgb == VA_INVALID_ID)
+		return -1;
 	VAProcPipelineParameterBuffer pp;
 	memset(&pp, 0, sizeof(pp));
 	pp.surface = rgb;
@@ -577,22 +608,19 @@ static int vpp_to_nv12(struct rva_enc *e, uint32_t drm_fourcc, uint64_t modifier
 	pp.mirror_state = VA_MIRROR_VERTICAL;
 	VABufferID pbuf = VA_INVALID_ID;
 	int rc = -2;
-	st = VA.CreateBuffer(e->dpy, e->vpp_ctx, VAProcPipelineParameterBufferType, sizeof(pp), 1, &pp, &pbuf);
+	VAStatus st = VA.CreateBuffer(e->dpy, e->vpp_ctx, VAProcPipelineParameterBufferType, sizeof(pp), 1, &pp, &pbuf);
 	if (st == VA_STATUS_SUCCESS)
-		st = VA.BeginPicture(e->dpy, e->vpp_ctx, e->nv12);
+		st = VA.BeginPicture(e->dpy, e->vpp_ctx, target);
 	if (st == VA_STATUS_SUCCESS)
 		st = VA.RenderPicture(e->dpy, e->vpp_ctx, &pbuf, 1);
 	if (st == VA_STATUS_SUCCESS)
 		st = VA.EndPicture(e->dpy, e->vpp_ctx);
-	if (st == VA_STATUS_SUCCESS)
-		st = VA.SyncSurface(e->dpy, e->nv12);
 	if (st != VA_STATUS_SUCCESS)
 		VDBG("enc: vpp: %s\n", VA.ErrorStr(st));
 	else
 		rc = 0;
 	if (pbuf != VA_INVALID_ID)
 		VA.DestroyBuffer(e->dpy, pbuf);
-	VA.DestroySurfaces(e->dpy, &rgb, 1);
 	return rc;
 }
 
@@ -616,10 +644,10 @@ rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps,
 	e->mbh = (out_h + 15) / 16;
 	e->log2_max_fn = 4;
 	e->gop = e->fps * 2;
-	e->coded = VA_INVALID_ID;
+	e->coded[0] = e->coded[1] = VA_INVALID_ID;
 	e->vpp_cfg = e->enc_cfg = VA_INVALID_ID;
 	e->vpp_ctx = e->enc_ctx = VA_INVALID_ID;
-	e->nv12 = e->recon[0] = e->recon[1] = VA_INVALID_ID;
+	e->nv12[0] = e->nv12[1] = e->recon[0] = e->recon[1] = VA_INVALID_ID;
 
 	int maj, min;
 	e->dpy = VA.GetDisplayDRM(e->fd);
@@ -633,13 +661,13 @@ rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps,
 	fa.flags = VA_SURFACE_ATTRIB_SETTABLE;
 	fa.value.type = VAGenericValueTypeInteger;
 	fa.value.value.i = VA_FOURCC_NV12;
-	if (VA.CreateSurfaces(e->dpy, VA_RT_FORMAT_YUV420, out_w, out_h, &e->nv12, 1, &fa, 1) != VA_STATUS_SUCCESS)
+	if (VA.CreateSurfaces(e->dpy, VA_RT_FORMAT_YUV420, out_w, out_h, e->nv12, 2, &fa, 1) != VA_STATUS_SUCCESS)
 		goto fail;
 	if (VA.CreateSurfaces(e->dpy, VA_RT_FORMAT_YUV420, out_w, out_h, e->recon, 2, &fa, 1) != VA_STATUS_SUCCESS)
 		goto fail;
 	if (VA.CreateConfig(e->dpy, VAProfileNone, VAEntrypointVideoProc, NULL, 0, &e->vpp_cfg) != VA_STATUS_SUCCESS)
 		goto fail;
-	if (VA.CreateContext(e->dpy, e->vpp_cfg, out_w, out_h, VA_PROGRESSIVE, &e->nv12, 1, &e->vpp_ctx) != VA_STATUS_SUCCESS)
+	if (VA.CreateContext(e->dpy, e->vpp_cfg, out_w, out_h, VA_PROGRESSIVE, e->nv12, 2, &e->vpp_ctx) != VA_STATUS_SUCCESS)
 		goto fail;
 
 	VAConfigAttrib ea[3];
@@ -653,13 +681,15 @@ rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps,
 		VDBG("enc: create enc config failed\n");
 		goto fail;
 	}
-	VASurfaceID ctx_targets[3] = {e->nv12, e->recon[0], e->recon[1]};
-	if (VA.CreateContext(e->dpy, e->enc_cfg, out_w, out_h, VA_PROGRESSIVE, ctx_targets, 3, &e->enc_ctx) != VA_STATUS_SUCCESS) {
+	VASurfaceID ctx_targets[4] = {e->nv12[0], e->nv12[1], e->recon[0], e->recon[1]};
+	if (VA.CreateContext(e->dpy, e->enc_cfg, out_w, out_h, VA_PROGRESSIVE, ctx_targets, 4, &e->enc_ctx) != VA_STATUS_SUCCESS) {
 		VDBG("enc: create enc context failed\n");
 		goto fail;
 	}
 	unsigned coded_sz = (unsigned)out_w * out_h * 3 / 2 + (1u << 16);
-	if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncCodedBufferType, coded_sz, 1, NULL, &e->coded) != VA_STATUS_SUCCESS)
+	if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncCodedBufferType, coded_sz, 1, NULL, &e->coded[0]) != VA_STATUS_SUCCESS)
+		goto fail;
+	if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncCodedBufferType, coded_sz, 1, NULL, &e->coded[1]) != VA_STATUS_SUCCESS)
 		goto fail;
 	e->au_cap = (int)coded_sz + 16;
 	e->au = malloc(e->au_cap);
@@ -677,7 +707,9 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
                   int force_idr, unsigned char **au, int *au_len, int *keyframe) {
 	if (!e || !au || !au_len || !keyframe)
 		return -1;
-	if (vpp_to_nv12(e, drm_fourcc, modifier, w, h, n_planes, fds, offsets, strides) != 0)
+	*au_len = 0;
+	int idx = e->pp;
+	if (vpp_to_nv12(e, e->nv12[idx], drm_fourcc, modifier, w, h, n_planes, fds, offsets, strides) != 0)
 		return -2;
 	int idr = (e->since_idr == 0) || force_idr;
 	if (idr) {
@@ -748,7 +780,7 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 
 	VAEncPictureParameterBufferH264 pp;
 	memset(&pp, 0, sizeof(pp));
-	int cur = e->cur_recon;
+	int cur = idx;
 	pp.CurrPic.picture_id = e->recon[cur];
 	pp.CurrPic.frame_idx = e->frame_num;
 	for (int i = 0; i < 16; i++) {
@@ -760,7 +792,7 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 		pp.ReferenceFrames[0].frame_idx = (e->frame_num - 1) & ((1 << e->log2_max_fn) - 1);
 		pp.ReferenceFrames[0].flags = VA_PICTURE_H264_SHORT_TERM_REFERENCE;
 	}
-	pp.coded_buf = e->coded;
+	pp.coded_buf = e->coded[idx];
 	pp.frame_num = e->frame_num & ((1 << e->log2_max_fn) - 1);
 	pp.pic_init_qp = 26;
 	pp.pic_fields.bits.idr_pic_flag = idr ? 1 : 0;
@@ -846,13 +878,11 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 		return -5;
 	bufs[nb++] = slb;
 
-	st = VA.BeginPicture(e->dpy, e->enc_ctx, e->nv12);
+	st = VA.BeginPicture(e->dpy, e->enc_ctx, e->nv12[idx]);
 	if (st == VA_STATUS_SUCCESS)
 		st = VA.RenderPicture(e->dpy, e->enc_ctx, bufs, nb);
 	if (st == VA_STATUS_SUCCESS)
-		st = VA.EndPicture(e->dpy, e->enc_ctx);
-	if (st == VA_STATUS_SUCCESS)
-		st = VA.SyncSurface(e->dpy, e->nv12);
+		st = VA.EndPicture(e->dpy, e->enc_ctx); /* submit only - NO sync here (pipeline) */
 	for (int i = 0; i < nb; i++)
 		VA.DestroyBuffer(e->dpy, bufs[i]);
 	if (st != VA_STATUS_SUCCESS) {
@@ -860,15 +890,40 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 		return -6;
 	}
 
+	/* advance state for the frame just submitted */
+	e->frame_num++;
+	e->since_idr++;
+	if (e->since_idr >= e->gop)
+		e->since_idr = 0;
+	e->have_ref = 1;
+	e->pp ^= 1;
+
+	/* emit the PREVIOUS frame (its GPU encode overlapped with building+submitting this one). The
+	 * first frame primes the pipeline and returns no AU. */
+	if (!e->have_pending) {
+		e->have_pending = 1;
+		e->pend_idx = idx;
+		e->pend_idr = idr;
+		return 0; /* *au_len stays 0 */
+	}
+	int pidx = e->pend_idx;
+	int pidr = e->pend_idr;
+	e->pend_idx = idx; /* this frame becomes the new pending regardless of the emit outcome */
+	e->pend_idr = idr;
+	st = VA.SyncSurface(e->dpy, e->nv12[pidx]);
+	if (st != VA_STATUS_SUCCESS) {
+		VDBG("enc: sync pending: %s\n", VA.ErrorStr(st));
+		return -6;
+	}
 	VACodedBufferSegment *seg = NULL;
-	st = VA.MapBuffer(e->dpy, e->coded, (void **)&seg);
+	st = VA.MapBuffer(e->dpy, e->coded[pidx], (void **)&seg);
 	if (st != VA_STATUS_SUCCESS || !seg)
 		return -7;
 	static const unsigned char aud_i[] = {0, 0, 0, 1, 0x09, 0x10};
 	static const unsigned char aud_p[] = {0, 0, 0, 1, 0x09, 0x30};
 	int off = 0;
 	if (off + 6 <= e->au_cap) {
-		memcpy(e->au, idr ? aud_i : aud_p, 6);
+		memcpy(e->au, pidr ? aud_i : aud_p, 6);
 		off = 6;
 	}
 	for (VACodedBufferSegment *s = seg; s; s = (VACodedBufferSegment *)s->next) {
@@ -877,17 +932,11 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 		memcpy(e->au + off, s->buf, s->size);
 		off += (int)s->size;
 	}
-	VA.UnmapBuffer(e->dpy, e->coded);
+	VA.UnmapBuffer(e->dpy, e->coded[pidx]);
 
 	*au = e->au;
 	*au_len = off;
-	*keyframe = idr;
-	e->frame_num++;
-	e->since_idr++;
-	if (e->since_idr >= e->gop)
-		e->since_idr = 0;
-	e->have_ref = 1;
-	e->cur_recon ^= 1;
+	*keyframe = pidr;
 	return 0;
 }
 
@@ -895,8 +944,12 @@ void rva_enc_free(rva_enc *e) {
 	if (!e)
 		return;
 	if (e->dpy) {
-		if (e->coded != VA_INVALID_ID)
-			VA.DestroyBuffer(e->dpy, e->coded);
+		for (int i = 0; i < e->cache_n; i++)
+			if (e->cache_surf[i] != VA_INVALID_ID)
+				VA.DestroySurfaces(e->dpy, &e->cache_surf[i], 1);
+		for (int i = 0; i < 2; i++)
+			if (e->coded[i] != VA_INVALID_ID)
+				VA.DestroyBuffer(e->dpy, e->coded[i]);
 		if (e->enc_ctx != VA_INVALID_ID)
 			VA.DestroyContext(e->dpy, e->enc_ctx);
 		if (e->enc_cfg != VA_INVALID_ID)
@@ -907,8 +960,8 @@ void rva_enc_free(rva_enc *e) {
 			VA.DestroyConfig(e->dpy, e->vpp_cfg);
 		if (e->recon[0] != VA_INVALID_ID)
 			VA.DestroySurfaces(e->dpy, e->recon, 2);
-		if (e->nv12 != VA_INVALID_ID)
-			VA.DestroySurfaces(e->dpy, &e->nv12, 1);
+		if (e->nv12[0] != VA_INVALID_ID)
+			VA.DestroySurfaces(e->dpy, e->nv12, 2);
 		VA.Terminate(e->dpy);
 	}
 	if (e->fd >= 0)

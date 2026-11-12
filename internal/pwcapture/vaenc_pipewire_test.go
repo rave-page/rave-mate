@@ -28,6 +28,14 @@ func TestVAEncodeDump(t *testing.T) {
 			n = x
 		}
 	}
+	// Warm-up frames excluded from the fps window: the first Next pays for format
+	// negotiation + first-frame latency, which would understate steady-state throughput.
+	warm := 60
+	if v := os.Getenv("RPW_H264_WARMUP"); v != "" {
+		if x, err := strconv.Atoi(v); err == nil {
+			warm = x
+		}
+	}
 	src, err := openCapture(context.Background(), nil, node)
 	if err != nil {
 		t.Fatal(err)
@@ -39,28 +47,36 @@ func TestVAEncodeDump(t *testing.T) {
 	}
 	defer func() { _ = f.Close() }()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Generous wall budget: warm-up + measured window at >=2x the real-time duration.
+	budget := time.Duration((warm+n)/30+30) * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	var bytes, keyish int
-	start := time.Now()
-	for i := 0; i < n; i++ {
+	var start time.Time
+	for i := 0; i < warm+n; i++ {
 		fr, err := src.Next(ctx)
 		if err != nil {
 			t.Fatalf("Next after %d frames: %v", i, err)
 		}
+		if i == warm { // begin timing once steady state is reached
+			start = time.Now()
+		}
 		if _, err := f.Write(fr.Payload); err != nil {
 			t.Fatal(err)
 		}
-		bytes += len(fr.Payload)
-		if len(fr.Payload) > 20000 { // crude: IDR AUs are much larger
-			keyish++
+		if i >= warm {
+			bytes += len(fr.Payload)
+			if len(fr.Payload) > 20000 { // crude: IDR AUs are much larger
+				keyish++
+			}
 		}
 	}
 	dur := time.Since(start)
-	t.Logf("VA-ENC %d AUs in %v (~%.1f fps), %d bytes (avg %d), big(IDR-ish)=%d -> %s",
-		n, dur.Round(time.Millisecond), float64(n)/dur.Seconds(), bytes, bytes/n, keyish, out)
-	if float64(n)/dur.Seconds() < 30 {
-		t.Errorf("encode fps too low: %.1f", float64(n)/dur.Seconds())
+	fps := float64(n) / dur.Seconds()
+	t.Logf("VA-ENC %d AUs (after %d warm-up) in %v (~%.1f fps), %d bytes (avg %d), big(IDR-ish)=%d -> %s",
+		n, warm, dur.Round(time.Millisecond), fps, bytes, bytes/n, keyish, out)
+	if fps < 30 {
+		t.Errorf("encode fps too low: %.1f", fps)
 	}
 }
 

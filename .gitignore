@@ -42,3 +42,6 @@ rave-mate-debug.log
 !/driver/ravemidi/build/attest/
 internal/mfenc/embedded/*.exe
 internal/webui/embedded/*.exe
+
+# Linux build-box output (dev harness artifacts)
+contrib/linux-build/out/
