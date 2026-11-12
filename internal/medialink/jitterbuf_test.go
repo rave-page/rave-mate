@@ -3,12 +3,20 @@ package medialink
 import "testing"
 
 // Jitter-buffer tests drive the pure core with a synthetic clock: interval 10 ms (fps 100),
-// transit base 1 ms. deadline(f) = PTS + base + depth·interval.
+// transit base 1 ms. deadline(f) = PTS + base + margin.
 
 const (
 	jbtInterval = int64(10_000_000) // 10 ms
 	jbtBase     = int64(1_000_000)  // 1 ms nominal transit
 )
+
+// newTestJB: policy tests run the low-latency preset (start margin = 1 frame) without the
+// anti-burst spacing so a single drainAt releases every due frame.
+func newTestJB(fps float64, intra bool) *jitterBuffer {
+	b := newJitterBufferPreset(fps, intra, PlayoutLowLatency)
+	b.minSpacing = 0
+	return b
+}
 
 // jbtPush pushes seq i with PTS = i·interval and the given transit.
 func jbtPush(b *jitterBuffer, seq uint32, transit int64, key bool) {
@@ -32,7 +40,7 @@ func drainAt(b *jitterBuffer, now int64) []*Frame {
 }
 
 func TestJitterBufferReleasesInOrder(t *testing.T) {
-	b := newJitterBuffer(100, false)
+	b := newTestJB(100, false)
 	for i := uint32(0); i < 5; i++ {
 		jbtPush(b, i, jbtBase, i == 0)
 	}
@@ -54,56 +62,49 @@ func TestJitterBufferReleasesInOrder(t *testing.T) {
 	}
 }
 
-func TestJitterBufferGrowOnBigLate(t *testing.T) {
-	b := newJitterBuffer(100, true)
+func TestJitterBufferGrowOnMiss(t *testing.T) {
+	b := newTestJB(100, true)
 	b.warmupNs = 0 // exercise the grow mechanism directly (warmup covered by TestJitterBufferWarmupNoGrow)
 	for i := uint32(0); i < 10; i++ {
 		jbtPush(b, i, jbtBase, true)
 	}
-	// One frame late by > one interval → immediate grow (§3.3), regardless of sample count.
+	// One frame 25 ms late vs base (margin 10 ms) -> immediate grow to cover it + headroom.
 	jbtPush(b, 10, jbtBase+2*jbtInterval+jbtInterval/2, true)
-	if s := b.stats(); s.Depth != 2 || s.Grows != 1 || s.Late != 1 {
-		t.Fatalf("stats after burst: %+v", s)
+	s := b.stats()
+	if s.Grows != 1 || s.Late != 1 || s.PlayoutMs != 27 || s.Depth != 3 {
+		t.Fatalf("stats after miss: %+v", s)
 	}
-}
-
-func TestJitterBufferGrowOnLateRate(t *testing.T) {
-	b := newJitterBuffer(100, true)
-	b.warmupNs = 0
-	// 24 on-time frames, then one mildly late (late by < interval): 1/25 = 4% > 2% with ≥20 samples.
-	for i := uint32(0); i < 24; i++ {
-		jbtPush(b, i, jbtBase, true)
-	}
-	jbtPush(b, 24, jbtBase+jbtInterval+jbtInterval/2, true) // deadline slack is depth·interval
-	if s := b.stats(); s.Depth != 2 || s.Grows != 1 {
-		t.Fatalf("late-rate grow: %+v", s)
+	// Lateness under the margin never grows.
+	jbtPush(b, 11, jbtBase+jbtInterval, true)
+	if s := b.stats(); s.Grows != 1 {
+		t.Fatalf("grew without a miss: %+v", s)
 	}
 }
 
 func TestJitterBufferDecayAfterClean(t *testing.T) {
-	b := newJitterBuffer(100, true)
+	b := newTestJB(100, true)
 	b.warmupNs = 0
 	jbtPush(b, 0, jbtBase, true)
-	jbtPush(b, 1, jbtBase+2*jbtInterval+jbtInterval/2, true) // grow → depth 2
-	if b.stats().Depth != 2 {
+	jbtPush(b, 1, jbtBase+2*jbtInterval+jbtInterval/2, true) // grow -> 27 ms
+	if b.stats().PlayoutMs != 27 {
 		t.Fatal("precondition: grow")
 	}
-	// >30 s of clean frames → decay back to 1.
+	// 60 s clean: steps of <= interval/4 per 5 s back to 1 frame.
 	n := uint32(2)
-	for ; int64(n)*jbtInterval < jbDecayCleanNs+8*jbtInterval; n++ {
+	for ; int64(n)*jbtInterval < 60e9; n++ {
 		jbtPush(b, n, jbtBase, true)
 		drainAt(b, int64(n)*jbtInterval+jbtBase+5*jbtInterval) // keep occupancy bounded
 	}
-	if s := b.stats(); s.Depth != 1 || s.Decays != 1 {
+	if s := b.stats(); s.PlayoutMs != 10 || s.Decays != 7 {
 		t.Fatalf("decay: %+v", s)
 	}
 }
 
 // TestJitterBufferWarmupNoGrow: a big-late frame in the startup warmup window must NOT grow the
-// depth (item 2 - startup transients used to pin the buffer at 3-4 frames on a clean LAN); the same
-// lateness after warmup does grow.
+// margin (startup transients used to pin the buffer high on a clean LAN); the same lateness after
+// warmup does grow.
 func TestJitterBufferWarmupNoGrow(t *testing.T) {
-	b := newJitterBuffer(100, true) // default warmup
+	b := newTestJB(100, true) // default warmup
 	jbtPush(b, 0, jbtBase, true)
 	jbtPush(b, 5, jbtBase+2*jbtInterval+jbtInterval/2, true) // big-late, but during warmup
 	if s := b.stats(); s.Grows != 0 || s.Depth != 1 {
@@ -111,14 +112,14 @@ func TestJitterBufferWarmupNoGrow(t *testing.T) {
 	}
 	warmSeq := uint32(jbWarmupNs/jbtInterval) + 10 // arrival past the 2 s warmup
 	jbtPush(b, warmSeq, jbtBase+2*jbtInterval+jbtInterval/2, true)
-	if s := b.stats(); s.Grows != 1 || s.Depth != 2 {
+	if s := b.stats(); s.Grows != 1 || s.Depth != 3 {
 		t.Fatalf("did not grow after warmup: %+v", s)
 	}
 }
 
 func TestJitterBufferKeyframePolicyOnGap(t *testing.T) {
 	var plis int
-	b := newJitterBuffer(100, false) // inter-coded
+	b := newTestJB(100, false) // inter-coded
 	b.pli = func() { plis++ }
 	jbtPush(b, 0, jbtBase, true)
 	jbtPush(b, 1, jbtBase, false)
@@ -159,7 +160,7 @@ func TestJitterBufferKeyframePolicyOnGap(t *testing.T) {
 
 func TestJitterBufferIntraGapResyncs(t *testing.T) {
 	var plis int
-	b := newJitterBuffer(100, true) // MJPEG/raw: every frame decodable
+	b := newTestJB(100, true) // MJPEG/raw: every frame decodable
 	b.pli = func() { plis++ }
 	jbtPush(b, 0, jbtBase, true)
 	jbtPush(b, 3, jbtBase, false) // gap 1-2
@@ -175,7 +176,7 @@ func TestJitterBufferIntraGapResyncs(t *testing.T) {
 }
 
 func TestJitterBufferStaleCatchUp(t *testing.T) {
-	b := newJitterBuffer(100, false)
+	b := newTestJB(100, false)
 	jbtPush(b, 0, jbtBase, true)
 	jbtPush(b, 1, jbtBase, false)
 	jbtPush(b, 2, jbtBase, false)
@@ -192,7 +193,7 @@ func TestJitterBufferStaleCatchUp(t *testing.T) {
 }
 
 func TestJitterBufferLateRetransmitFillsGap(t *testing.T) {
-	b := newJitterBuffer(100, false)
+	b := newTestJB(100, false)
 	jbtPush(b, 0, jbtBase, true)
 	jbtPush(b, 2, jbtBase, false) // gap: 1 missing
 	jbtPush(b, 1, jbtBase+jbtInterval/2, false)
@@ -211,7 +212,7 @@ func TestJitterBufferLateRetransmitFillsGap(t *testing.T) {
 }
 
 func TestJitterBufferHardCap(t *testing.T) {
-	b := newJitterBuffer(100, false)
+	b := newTestJB(100, false)
 	for i := uint32(0); i <= uint32(jbInterCapFrames)+8; i++ {
 		jbtPush(b, i, jbtBase, i%40 == 0)
 	}
@@ -223,7 +224,7 @@ func TestJitterBufferHardCap(t *testing.T) {
 		t.Fatalf("occupancy not bounded: %+v", s)
 	}
 	// A plain burst below the cap never drops (pacing handles it).
-	b2 := newJitterBuffer(100, false)
+	b2 := newTestJB(100, false)
 	for i := uint32(0); i < 60; i++ {
 		jbtPush(b2, i, jbtBase, i == 0)
 	}

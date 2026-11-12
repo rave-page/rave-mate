@@ -393,6 +393,9 @@ type MediaLinkFeature struct {
 	// "tcp" = TCP only (never offer or accept UDP). An escape hatch while the UDP path is being
 	// hardened: TCP ran a 7 h 4K60 route with zero drops, UDP still shows recovered-gap micro hangs.
 	Transport string `json:"transport,omitempty"`
+	// Playout is the recv playout-delay preset: "low-latency" (max 60 ms), "balanced" (default,
+	// max 150 ms), "smooth" (max 250 ms). Margin grows on a late frame, decays slowly.
+	Playout string `json:"playout,omitempty"`
 	// LinkFracPct is the fraction of the interface link speed the auto budget treats as the static
 	// ceiling (0 = default 50%). Only binds on slow links; a 1 Gb LAN is far above the quality model.
 	LinkFracPct int  `json:"linkFracPct,omitempty"`
@@ -653,6 +656,9 @@ func (f MediaLinkFeature) Bitrate() int {
 
 // BitrateModeString returns the raw bitrate-budget mode ("" => auto, normalized at the medialink layer).
 func (f MediaLinkFeature) BitrateModeString() string { return f.BitrateMode }
+
+// PlayoutPreset returns the raw recv playout preset ("" => balanced, normalized at the medialink layer).
+func (f MediaLinkFeature) PlayoutPreset() string { return f.Playout }
 
 // UDPEnabled reports whether the UDP media transport may be offered/accepted (Transport != "tcp").
 func (f MediaLinkFeature) UDPEnabled() bool {

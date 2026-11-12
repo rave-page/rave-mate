@@ -151,6 +151,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 		BudgetMode:         func() string { return liveCfg().BitrateModeString() },
 		BudgetUserCeilKbps: func() int { return liveCfg().UserBitrateCeilKbps() },
 		BudgetLinkFracPct:  func() int { return liveCfg().LinkFractionPct() },
+		PlayoutPreset:      func() string { return liveCfg().PlayoutPreset() },
 	})
 	if len(in.Encoders) > 0 || len(in.Decoders) > 0 {
 		f.router.SetCodecCaps(withVAAPINativeEncoders(in.Encoders), in.Decoders)
