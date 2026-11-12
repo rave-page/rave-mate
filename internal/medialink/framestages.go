@@ -20,9 +20,14 @@ var monoBase = time.Now()
 // monoNs returns monotonic nanoseconds since process start (time.Since uses the monotonic reading).
 func monoNs() int64 { return int64(time.Since(monoBase)) }
 
-// stageBucketsUpperMs are the inter-frame interval histogram upper bounds (ms). 60 fps = 16.67 ms
-// nominal; the fine buckets around there resolve jitter, the coarse tail catches hangs.
-var stageBucketsUpperMs = [...]float64{4, 8, 12, 16, 20, 25, 33, 50, 75, 100, 150, 200, 500, 1e12}
+// stageBucketsUpperMs are the inter-frame interval histogram upper bounds (ms). 1 ms resolution across
+// 10-30 ms (one frame period at 30/60 fps = 33/16.67 ms) so p50/p99 are meaningful around the cadence;
+// coarse below + a tail for hangs.
+var stageBucketsUpperMs = [...]float64{
+	4, 8,
+	10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+	33, 40, 50, 75, 100, 150, 200, 500, 1e12,
+}
 
 // StageHist is a lock-free inter-frame-interval histogram for one pipeline stage. Mark is realtime-safe
 // (single-writer per stage, atomics guard against any racing reader/writer); Snapshot is off-thread.

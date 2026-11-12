@@ -190,6 +190,9 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 }
 
 func (f *mediaFeature) Start(ctx context.Context) error {
+	// Windows: 1 ms system timer so the PTS-paced jitter-buffer playout wakes precisely (stopgap for
+	// the arrival-jitter stutter until the native receiver lands). No-op elsewhere.
+	defer raiseTimerResolution()()
 	if err := f.router.Start(ctx); err != nil {
 		return err
 	}
