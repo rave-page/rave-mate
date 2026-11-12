@@ -148,3 +148,130 @@ unit-test sample carries mixed types to lock the regression.
    - the §6 zero-copy path; only if the EGL readback can't hold 4K60.
 3. **YUV camera formats** (NV12/YUY2) so `Video/Source` cameras are capturable too.
 4. Multi-GPU EGL device selection (match the VAAPI render-node pick).
+
+## 4K60: VA-API native zero-copy engine (feat/pw-4k, 2026-11-12)
+
+The EGL readback path cannot do 4K60 (import rejects multi-plane DCC; RGBA readback is CPU-bound
+~36fps). **Decision: Option A — zero-copy dmabuf -> VA-API in-process** (`internal/pwcapture/vaenc.c`,
+libva/libva-drm dlopen'd). B (fix EGL + GPU NV12 readback) was rejected: its precondition is fixing
+the same 4K DCC import EGL fundamentally rejects.
+
+Precondition probes (sus, RX 7900 XTX, vainfo): libva 2.24 (`libva.so.2`/`libva-drm.so.2`); H264
+Main/High + HEVC Main/Main10 + AV1 = **VAEntrypointEncSlice** (full, no LP); **VAEntrypointVideoProc**
+present. libfunnel 4K producer fixates AMD GFX11 modifier `0x200000028a6bf04`; plane count grows with
+size: **1080p = 2 planes** (color + DCC), **4K = 3 planes** (color + DCC + DCC_RETILE display aux).
+
+VA import probe (`rva_import_probe`: dmabuf -> DRM_PRIME_2 VASurface -> VPP RGB->NV12 (+VA_MIRROR_
+VERTICAL; the GL producer renders bottom-up) -> vaDeriveImage NV12 -> corner read):
+- **1080p (2-plane DCC): rc=0, corners CORRECT** (TL red / TR green / BL blue / BR white, within YUV
+  roundtrip tolerance). **VA imports the DCC dmabuf that EGL's eglCreateImageKHR rejected.**
+- **4K (3-plane DCC_RETILE): import fails** (`invalid parameter`; the 2-plane cap gives 3/4 corners,
+  `{0,last}` = `resource allocation failed`). The driver's retile layout is not VA-importable here.
+- **Producer `AMD_DEBUG=nodcc` => 1-plane tiled (`0x200000028a01f04`) at BOTH 1080p and 4K, rc=0,
+  ALL corners CORRECT.** So 4K is pixel-correct with a non-DCC producer buffer.
+- LINEAR (modifier 0) rejected: libfunnel mislabels a tiled buffer as linear (garbage via both EGL
+  and VA).
+
+**Conclusion:** VA import + VPP works and is pixel-correct. 1080p works with DCC as-is. **4K requires a
+non-DCC producer buffer** (`AMD_DEBUG=nodcc` on VRChat/Spout2PW, or any single-plane tiled dmabuf) -
+a producer-side allocation choice the consumer can't override (the driver adds DCC per AMD_DEBUG, not
+per the negotiated modifier). The shim imports 1-plane + 2-plane layouts and rejects 3-plane with a
+clear error. Zero-copy => CPU is control + the compressed-bitstream readback only (well under the
+1.5-core budget). Engine build (NV12 -> H.264 EncSlice, packed headers, CBR, IDR/reconnect, Annex-B)
+follows.
+
+### VA-native H.264 encoder - WORKING, pixel-correct (2026-11-12)
+
+`vaenc.c` now has the full zero-copy engine: dmabuf -> VA import -> VPP (RGB->NV12, VA_MIRROR_
+VERTICAL, scale) -> H.264 VAEntrypointEncSlice. Constrained Baseline, CAVLC, no B-frames, 1 ref
+(P refs previous), CBR, IDR interval = 2s + on request. radeonsi needs app-written packed headers,
+so the shim emits SPS/PPS/slice bitstreams (Annex-B, emulation-prevention) itself; an AUD is
+prepended per AU. All on the GPU - only the compressed AU crosses to Go.
+
+Verified on sus (RX 7900 XTX) vs the libfunnel producer (AMD_DEBUG=nodcc), decoding the output with
+ffmpeg + numeric corner check (RPW_VA_ENC path, TestVAEncodeDump):
+- **1080p60: ~59.9 fps, pwcap CPU ~2.3%** (0.02 core - zero-copy). Decoded corners TL(232,0,1)=red
+  TR(19,255,8)=green BL(2,0,243)=blue BR=white - pixel-correct within codec tolerance.
+- **4K60: ~55 fps (3s run incl. startup; CPU-trivial so sustained is ~60), pwcap CPU ~2.6%.** Decoded
+  corners identical + correct. **4K encode works, pixel-correct, at ~2.6% CPU (<< 1.5-core budget).**
+- CBR hits target: ~41.6 KB/frame at 20 Mbps/60.
+
+**4K requires a non-DCC producer buffer** (AMD_DEBUG=nodcc), same as the import finding: the 3-plane
+DCC_RETILE layout the driver adds at 4K is not VA-importable; nodcc gives a 1-plane tiled buffer that
+imports + encodes correctly. For VRChat/Spout2PW: set AMD_DEBUG=nodcc in its launch env.
+
+Status: the engine is proven end-to-end via the RPW_VA_ENC test hook in on_process. Production wiring
+(negotiate "vaapi-native" so the pwcapture Source emits H.264 directly, bypassing the mediapipe
+ffmpeg encoder; featurehost plumbing) is the remaining integration - larger, touches medialink/
+mediapipe, not yet done. HEVC: the same path with VAProfileHEVCMain + HEVC packed headers (follow-up).
+
+### Pipelined encoder + sustained-rate verification (feat/pw-4k, 2026-11-12)
+
+The encoder now overlaps GPU work: `rva_enc_frame` submits frame N (BeginPicture/Render/EndPicture, no
+sync) and emits frame N-1 (SyncSurface + MapBuffer + Annex-B copy) that was submitted the previous
+call. `struct rva_enc` holds `nv12[2]`/`coded[2]` ping-pong surfaces + a 1-deep pending slot. Import
+surfaces are cached by dmabuf fd (16 entries) so a steady buffer pool never re-imports. This lifted 4K
+from ~55 fps (prior, submit+sync inline) to a steady ~58.5 fps.
+
+Measured on sus (RX 7900 XTX, live KDE/Parsec desktop) via the RPW_VA_ENC hook, producer = libfunnel
+`AMD_DEBUG=nodcc`, 60-frame warm-up excluded, CPU sampled from /proc utime+stime:
+- **1080p60: ~60.2 fps**, pwcap CPU ~0.9% of one core, VmHWM ~67 MB. Decoded corners pixel-correct
+  (TL red / TR green / BL blue / BR white).
+- **4K60 (3840x2160): ~58.5 fps** sustained over 30 s (1754/1800 frames), **0 stalls**, pwcap CPU
+  **~1.4% of one core** (0.014 core - zero-copy, GPU does VPP+encode), VmHWM ~67 MB. Decoded full
+  3840x2160, corners pixel-correct. CBR ~41.6 KB/frame @ 20 Mbps.
+
+**10-minute 4K soak with 5 producer restarts (TestVAEncodeSoak, 2026-11-12): PASS.** 600 s, 34778
+frames, ~58.0 fps avg (each ~1 s producer-down + reconnect costs ~70 frames, so the 30 s window after
+a restart reads ~1685 vs ~1758), **0 stalls**, clean resume across all 5 restarts (AUTOCONNECT
+re-binds to the node.name). Memory bounded: VmRSS ~70 MB at the end (steady ~67 MB in short runs; ~+3 MB
+over 10 min / 5 reconnects - small, not a runaway). FDs bounded (~37 steady: dmabuf pool + VA/EGL/
+pipewire). Pool-8 build re-confirmed afterwards: 4K 58.7 fps, CPU 1.1%, corners pixel-correct.
+
+**The ~1.5 fps 4K shortfall vs 60 is NOT the encoder.** The test producer renders a verified steady
+**60.0 fps** (its own `render X fps` log), and the consumer sits at 1.4% CPU with 0 stalls - so the
+encode keeps up with ~98.6% idle headroom. The loss is newest-wins frame dropping in on_process
+(shared capture layer): under live-desktop GPU contention a few cycles per second run long enough that
+two buffers queue and the older is dropped before encode. This is the correct low-latency behaviour for
+a live stream (drop stale, show newest) and is the same delivery behaviour the production featurehost
+path would have; it is a capture-phase artifact, not an encode bottleneck. 58.5 is ~0.5 fps under the
+>=59 target; a larger PipeWire buffer pool did NOT help (ruled out buffer starvation); fully closing it
+would need moving the per-frame GPU sync off the PipeWire thread (dedicated encode thread), a bigger
+refactor deferred to production wiring.
+
+### DMA-BUF sync mode is now explicit-only on this box (2026-11-12)
+
+Mesa/driver on sus now sets `api_requires_explicit_sync` for the EGL producer API: libfunnel's
+`funnel_stream_configure` rejects `FUNNEL_SYNC_IMPLICIT` **and** `FUNNEL_SYNC_BOTH` (it falls through to
+implicit) with EINVAL ("default sync mode is unsupported"). The producer must run `-explicit` (frontend
++ backend explicit) or `-hybrid` (frontend EXPLICIT satisfies the EGL API, backend BOTH so an
+implicit-sync consumer can still negotiate). `-hybrid` is what the drivers use now. This is an
+environment change since the earlier soak (which used implicit); it does not touch our consumer code.
+
+### ROOT CAUSE of the "no more input formats" reconnect churn (2026-11-12)
+
+The churn is NOT a modifier/fixate negotiation bug. The consumer connects with
+`PW_KEY_MEDIA_ROLE="Camera"` + `PW_KEY_TARGET_OBJECT=<name>` + AUTOCONNECT. `PW_KEY_TARGET_OBJECT`
+matches a node's **node.name or object.serial, NOT node.nick**. libfunnel registers the producer as
+node.name `page.rave.mate.testprod.<streamname>` with node.nick `<streamname>`. When the target string
+is only the nick (or otherwise doesn't match node.name), the match fails and wireplumber's camera
+policy (triggered by the Camera role) auto-links the consumer to a **real V4L2 webcam** instead (on
+sus: C920 / "3D Camera", YUY2 1920x960 / MJPG). Those formats don't intersect the consumer's
+RGBA/BGRA dmabuf EnumFormat, so the link errors `no more input formats`, disconnects, AUTOCONNECT
+retries, and it churns forever delivering 0 frames. Confirmed from the pipewire daemon journal:
+`pw.link: (100.0.0 -> 231.0.0) negotiating -> error no more input formats` where node 100 was the
+webcam, not the funnel producer.
+
+**Fix (verified): target the exact node.name**, e.g. `page.rave.mate.testprod.pw4ktest`, not the nick -
+then negotiation reaches STREAMING and frames flow. Production must pass the real producer's exact
+PipeWire `node.name` (VRChat/Spout2PW node). Optional hardening for production (cheap, but UNTESTED
+against the real VRChat node so deferred): drop `PW_KEY_MEDIA_ROLE="Camera"` for a named
+Stream/Output/Video target, so wireplumber's camera-default-device policy can't hijack the link when
+the name doesn't match.
+
+### Still unverified
+- The **real VRChat/Spout2PW node** (VRChat was not running): all above is vs the libfunnel synthetic
+  producer. Real-node unknowns: its exact node.name, whether it needs `AMD_DEBUG=nodcc` to avoid the
+  3-plane DCC_RETILE layout at 4K, and its sync mode.
+- Production engine wiring ("vaapi-native" in medialink/mediapipe/featurehost) and HEVC remain
+  follow-ups.

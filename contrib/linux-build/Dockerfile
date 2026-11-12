@@ -15,7 +15,7 @@ RUN set -eux; \
         libgl1-mesa-dev xorg-dev libasound2-dev libwayland-dev \
         libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libegl1-mesa-dev \
         libx11-xcb-dev libxcursor-dev libxfixes-dev \
-        libpipewire-0.3-dev libgbm-dev libdrm-dev; \
+        libpipewire-0.3-dev libgbm-dev libdrm-dev libva-dev; \
     rm -rf /var/lib/apt/lists/*
 
 # Go toolchain: the exact version go.mod requires, tarball SHA-256-pinned.

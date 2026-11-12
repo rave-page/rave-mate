@@ -160,7 +160,15 @@ int main(int argc, char **argv) {
 	unsigned frame = 0;
 	double period = 1.0 / fps;
 	double next = now_s();
+	double fps_t0 = now_s();
+	unsigned fps_f0 = 0;
 	for (;;) {
+		double tn = now_s();
+		if (tn - fps_t0 >= 2.0) {
+			fprintf(stderr, "funnel-producer: render %.1f fps\n", (frame - fps_f0) / (tn - fps_t0));
+			fps_t0 = tn;
+			fps_f0 = frame;
+		}
 		struct funnel_buffer *buf = NULL;
 		if (funnel_stream_dequeue(stream, &buf) < 0)
 			break;
