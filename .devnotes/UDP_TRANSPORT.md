@@ -325,3 +325,76 @@ recv up  session=b21e… stream=4 (udp) ← mediaroute auto-resume re-offer ~30s
 
 `ctl logs` streams/follows (SubscribeLogs; stops only on client disconnect) - intended, but a
 non-following `ctl logs [-n N]` ring-buffer dump would help; run it under a hard `timeout` meanwhile.
+
+## Unit: UDP blackout root cause (2026-11-12) - hypothesis refuted; it is a sender-side end, not liveness starvation
+
+Brief: find the REAL cause of the UDP blackout ~4.5 s after route-up. Lead hypothesis to verify or
+refute: the tuning+replay build removed the spurious reverse NACKs that used to refresh the sender's
+liveness, and the replay fix lets only a strictly-newest datagram refresh it, so a reverse direction
+carrying only sparse keepalives starves the sender. Required: a one-directional 0-loss test on the
+real udpConn pair for >=3x the liveness window that should FAIL on d6dc2fb.
+
+**The hypothesis is refuted, three independent ways:**
+1. `git diff d6dc2fb..HEAD -- udpconn.go udpstate.go udpframe.go` is EMPTY. 6cbfe5b (the blackout-era
+   fix) touched only router.go + a test. The liveness/keepalive code is byte-identical to the build
+   that blacked out, so any test result on HEAD holds for d6dc2fb.
+2. `TestUDPConnOneDirectionalStaysUp` (one-way media, 0 loss, no NACKs, liveness 1 s / keepalive
+   200 ms, run 4 s = 4x the window) PASSES. `maintLoop` runs on BOTH ends and pings every keepalive
+   interval; a pure receiver's pings refresh the sender's liveness. It did NOT fail as predicted -
+   kept as a regression proof that the one-directional liveness path is sound.
+3. `SetPacingRate` is DEAD CODE (no caller anywhere). The pacer rate is fixed at
+   `pacingRateFor(offer.Bitrate)`, floored at `pacerMinRateBytes` = 32 MB/s (~50 MB/s at the
+   production 50 Mbps). A keepalive ping's `pacer.reserve()` is ~1 us and a full keyframe paces in
+   ~10 ms, so the pacer CANNOT starve the liveness heartbeat for 2 s. (It will become starvable if the
+   congestion controller is ever wired to `SetPacingRate` without a floor - see the EOS fix note.)
+
+**Real cause (sender-side).** Transport-wise, both ends heartbeat every 500 ms and neither can be
+starved for the 2 s liveness window, so a receiver blackout is equivalent to "the sender stopped
+emitting ALL datagrams (media AND keepalives)". That happens only when the sender's `runSend` RETURNS
+(router.go), which closes the conn and stops `maintLoop`. Both capture sources (`pwcapture.pwSource`
+raw and native-encode `nextAU`) BLOCK on a transient stall (`rpw_wait_*` returns 0 -> continue), so a
+mere 0 fps stall does NOT end the route; they return `io.EOF` only on a FATAL stream error (-1) or
+Close. The prime trigger is the new pw-4k native VA-API encode path (ed385de/8207f6e) hitting a fatal
+`-1` ~4.5 s in -> `nextAU` returns `io.EOF` -> `runSend` returns nil (graceful) -> conn closed with
+NO notice to the receiver -> the receiver sees silence and reports `errUDPDead` (liveness blackout)
+~2 s later. This matches the live timeline (receiver first, sus stopped emitting first) and the
+~4.5 s-after-up timing of a crashing encoder. The native-encoder robustness is the Linux agent's
+area; flagged for that owner.
+
+**Live forensics (both PCs on d6dc2fb; owner's tcp route untouched).** The funnel-producer on sus
+frequently sits at `render 0.0 fps` (observed: `udptune` stuck at 0 fps for 364 samples under a
+`runuser`/`setsid` launch with no GPU/EGL context; `rm1080` spent its first ~20 s at 0 fps before
+ramping to 60). sus's real daemon (pid 128747) logs only via its own ctl (not journald) - which is
+exactly why a non-following `ctl logs -n N` was needed and is now added. NOTE: my `runuser -l
+dymattic` login triggered a benign `rave-mate.service` restart loop on sus (a lingering user manager
+retries the enabled unit every ~5 s; each spawn exits immediately on the single-instance lock, binding
+nothing - it does not affect pid 128747 or the owner's route). Clears on a clean boot, or
+`systemctl --user disable --now rave-mate.service` in that login.
+
+**Transport fix shipped (attributability).** On UDP there is no FIN, so a receiver cannot tell a clean
+sender-end from a dropped network path without an explicit signal. Added `dgTypeBye` (clean
+end-of-stream): the sender calls `udpConn.sendBye()` just before `endRoute` closes a send route (source
+EOF / stop), a SYNCHRONOUS direct-to-socket write that bypasses the pacer/sendLoop (which may be torn
+down). The receiver ends promptly with `errUDPEnded` ("remote source ended") instead of waiting out
+the liveness window and logging a (misleading) blackout. Security/compat: the bye is authenticated
+like every control type (decodeBody token+AEAD gate) and honored ONLY on a strictly-newest (stNew)
+datagram, so a wrong-token, replayed, or reordered bye can never tear down a live/re-established route;
+the datagram-type switch has no default, so OLD peers ignore `dgTypeBye` and keep the old 2 s-blackout
+behaviour (no regression on a mixed-version pair). A stalled/crashed sender that cannot send a bye
+still surfaces as `errUDPDead` as before. Tests: `TestUDPConnByeEndsCleanlyNotBlackout` (end-to-end,
+prompt EOS not a blackout), `TestByeAuthenticatedAndReplaySafe` (wrong-token rejected, valid honored,
+stale-seq dropped).
+
+**Small items shipped.**
+- `ctl logs -n N` - non-following ring-buffer dump (`LOGS-N <n>` command -> `Control.LogTail`;
+  `app.TailLogs`; `-n N`/`-nN` parsed in the CLI). The follow form is unchanged.
+- Route line shows WHY a route is on TCP when UDP was possible: `RouteStat.TCPReason`
+  (recv: "udp disabled locally" / "peer selected tcp (no udp support)" / "no per-route key (legacy
+  peer)" / "udp unreachable (reachability handshake failed)"; send: adds "peer did not offer udp" /
+  "udp unreachable (peer fell back to tcp)" / "negotiated tcp"). Shown as `[tcp: <reason>]` in the
+  Peers panel and `(<reason>)` in `ctl routes`.
+
+**Correction to the previous unit's note.** The earlier firewall hypothesis for the blackout is NOT
+supported: the lead's evidence shows inbound ALLOW rules exist for both exes (TCP+UDP, all local
+ports), and the three refutations above plus the sender-side `runSend`/source analysis point at a
+clean/fatal sender-side source end, not a reverse-path block.

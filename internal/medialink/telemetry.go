@@ -407,6 +407,7 @@ type RouteStat struct {
 	Software bool // tier-4 software encode - surface the CPU warning
 
 	Transport string // negotiated media transport ("tcp"/"udp"; "" = legacy/tcp)
+	TCPReason string // why a TCP route is not UDP (reachability failed / peer lacks udp / udp off / legacy); "" on UDP routes
 	Encrypted bool   // media plane AEAD-sealed (default); false = both peers opted out (plaintext)
 
 	Keyframes uint64  // video keyframes (send: emitted; recv: seen)

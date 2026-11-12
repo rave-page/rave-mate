@@ -121,6 +121,7 @@ type Control interface {
 	LaunchAppGroup(id string) string             // relaunch a crash-recovery app group; status line
 	GPUSelfTest() string                         // inject a synthetic GPU hang to prove auto-recovery (relaunches)
 	SubscribeLogs() (<-chan string, func())      // stream formatted log lines; cancel to stop
+	LogTail(max int, filter string) string       // recent formatted log ring (non-following), at most max lines (0→500)
 }
 
 type instance struct{ ln net.Listener }
@@ -543,6 +544,12 @@ func handleConn(conn net.Conn, ctrl Control) {
 		fmt.Fprintln(conn, ctrl.RemoteSelfUpdate(strings.TrimSpace(cmd[len("REMOTE-UPDATE"):])))
 	case cmd == "LOGS":
 		streamLogs(conn, ctrl)
+	case strings.HasPrefix(cmd, "LOGS-N "):
+		// Non-following ring-buffer dump: print the last N lines and return (no live stream). N<=0 → 500.
+		n, _ := strconv.Atoi(strings.TrimSpace(cmd[len("LOGS-N "):]))
+		if out := ctrl.LogTail(n, ""); out != "" {
+			fmt.Fprintln(conn, out)
+		}
 	case auth.IsDeepLink(cmd):
 		ctrl.HandleDeepLink(cmd)
 	}
@@ -655,6 +662,22 @@ func StreamLogs(out io.Writer) error {
 	if _, err := conn.Write([]byte("LOGS\n")); err != nil {
 		return err
 	}
+	_, err = io.Copy(out, conn)
+	return err
+}
+
+// TailLogs prints the last n lines of the daemon's log ring and returns (non-following) - the
+// `rave-mate ctl logs -n N` form. n<=0 dumps the default (500) lines.
+func TailLogs(out io.Writer, n int) error {
+	conn, err := net.DialTimeout("tcp", lockAddr, 2*time.Second)
+	if err != nil {
+		return errNoDaemon
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.Write([]byte(fmt.Sprintf("LOGS-N %d\n", n))); err != nil {
+		return err
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	_, err = io.Copy(out, conn)
 	return err
 }

@@ -1156,10 +1156,35 @@ func runCtl(args []string) int {
 		fmt.Println(resp)
 	case "logs":
 		out := os.Stdout
-		for _, a := range args[1:] {
-			if a == "--stderr" {
+		tailN := -1 // >=0 → non-following dump of the last N ring lines (`-n N`)
+		rest := args[1:]
+		for i := 0; i < len(rest); i++ {
+			switch {
+			case rest[i] == "--stderr":
 				out = os.Stderr
+			case rest[i] == "-n" && i+1 < len(rest):
+				n, err := strconv.Atoi(rest[i+1])
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "ctl: logs -n needs a number")
+					return 2
+				}
+				tailN = n
+				i++
+			case strings.HasPrefix(rest[i], "-n"):
+				n, err := strconv.Atoi(strings.TrimPrefix(rest[i], "-n"))
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "ctl: logs -n needs a number")
+					return 2
+				}
+				tailN = n
 			}
+		}
+		if tailN >= 0 { // non-following ring dump
+			if err := app.TailLogs(out, tailN); err != nil {
+				fmt.Fprintln(os.Stderr, "ctl:", err)
+				return 1
+			}
+			return 0
 		}
 		if err := app.StreamLogs(out); err != nil {
 			fmt.Fprintln(os.Stderr, "ctl:", err)

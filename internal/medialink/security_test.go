@@ -265,6 +265,59 @@ func TestReplayDoesNotRebindOrRefreshLiveness(t *testing.T) {
 	}
 }
 
+// TestByeAuthenticatedAndReplaySafe: a clean end-of-stream (dgTypeBye) tears the route down, but ONLY
+// when it is authenticated AND strictly-new. A wrong-token bye is rejected (an off-path attacker must
+// not be able to kill a route), and a replayed/stale-seq bye is dropped (a captured bye must not kill
+// a later, re-established route). Mirrors the ping/pong/nack auth+replay guarantees for the new type.
+// stubPC is a no-op packetConn so a bare test udpConn can run the bye teardown (which closes pc).
+type stubPC struct{}
+
+func (stubPC) ReadFrom([]byte) (int, net.Addr, error) { return 0, nil, nil }
+func (stubPC) WriteTo([]byte, net.Addr) (int, error)  { return 0, nil }
+func (stubPC) SetReadDeadline(time.Time) error        { return nil }
+func (stubPC) Close() error                           { return nil }
+
+func TestByeAuthenticatedAndReplaySafe(t *testing.T) {
+	mc := &manualClock{}
+	const tok = 0x55AA
+	src := &net.UDPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 1}
+	newConn := func() *udpConn {
+		return &udpConn{clock: mc, token: tok, seqTrk: newReplayWin(), reasm: newReassembler(0, 0),
+			deadline: 200 * time.Millisecond, reachableCh: make(chan struct{}), lastRTx: map[uint16]int64{},
+			recvCh: make(chan *Frame, 16), done: make(chan struct{}), pc: stubPC{}}
+	}
+
+	// (a) wrong-token bye → rejected at decodeBody; route must survive.
+	u := newConn()
+	forged := newDgEncoder(tok+1, nil, 1200).control(dgTypeBye, nil) // different token
+	mc.ns.Store(1000)
+	u.handleDatagram(forged, src)
+	if u.isDead() {
+		t.Fatal("a wrong-token bye ended the route (off-path kill)")
+	}
+
+	// (b) authenticated, strictly-new bye → route ends with errUDPEnded.
+	u2 := newConn()
+	bye := newDgEncoder(tok, nil, 1200).control(dgTypeBye, nil) // seq 0, correct token
+	mc.ns.Store(1000)
+	u2.handleDatagram(bye, src)
+	if u2.err() != errUDPEnded {
+		t.Fatalf("valid bye did not end cleanly: %v (want errUDPEnded)", u2.err())
+	}
+
+	// (c) replayed/stale-seq bye after a newer datagram → dropped; route must survive.
+	u3 := newConn()
+	enc := newDgEncoder(tok, nil, 1200)
+	byeOld := enc.control(dgTypeBye, nil)                       // seq 0
+	dg1, _, _, _ := enc.encodeFrame(nil, sampleFrame(1, 1, 50)) // seq 1 (media, advances highest)
+	mc.ns.Store(1000)
+	u3.handleDatagram(dg1[0], src) // media seq 1 → highest = 1
+	u3.handleDatagram(byeOld, src) // seq 0 → stTooOld/stDup → dropped before the type switch
+	if u3.isDead() {
+		t.Fatal("a replayed stale-seq bye ended the route")
+	}
+}
+
 // TestForgedFirstDatagramNoClaim: a forged first datagram (wrong mode / wrong key) must NOT claim the
 // pending answer or bind a remote; a correctly-sealed datagram does (finding 2).
 func TestForgedFirstDatagramNoClaim(t *testing.T) {
