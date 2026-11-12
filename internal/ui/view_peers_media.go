@@ -159,8 +159,8 @@ func fmtPipeLine(s medialink.RouteStat) string {
 		parts = append(parts, fmt.Sprintf("kf %d", s.Keyframes))
 	}
 	if s.JB != nil {
-		parts = append(parts, fmt.Sprintf("buffer %df · late %.1f%% · drops %d",
-			s.JB.Depth, s.JB.LateRate*100, s.JB.PolicyDrops))
+		parts = append(parts, fmt.Sprintf("buffer %.0fms · late %.1f%% · drops %d",
+			s.JB.PlayoutMs, s.JB.LateRate*100, s.JB.PolicyDrops))
 	}
 	if s.Pipe != nil {
 		p := fmt.Sprintf("out %.1f fps", s.Pipe.OutFPS)

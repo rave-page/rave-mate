@@ -126,11 +126,11 @@ func TestFmtPipeLine(t *testing.T) {
 	}
 	s := medialink.RouteStat{Encoder: "hevc_nvenc", Tier: 2, RateBps: 14_200_000, WireFPS: 59.8,
 		Keyframes: 30,
-		JB:        &medialink.JitterStats{Depth: 2, LateRate: 0.013, PolicyDrops: 4},
+		JB:        &medialink.JitterStats{PlayoutMs: 150, LateRate: 0.013, PolicyDrops: 4},
 		Pipe: &medialink.PipelineStats{OutFPS: 59.8, HWAccel: "cuda", Restarts: 1,
 			PubFrames: 3591, PubBytes: 3591 * 1920 * 1080 * 4}}
 	got := fmtPipeLine(s)
-	want := "hevc_nvenc tier 2 · 14.2 Mbps · wire 59.8 fps · kf 30 · buffer 2f · late 1.3% · drops 4 · out 59.8 fps · cuda · restarts 1 · published 3591"
+	want := "hevc_nvenc tier 2 · 14.2 Mbps · wire 59.8 fps · kf 30 · buffer 150ms · late 1.3% · drops 4 · out 59.8 fps · cuda · restarts 1 · published 3591"
 	if got != want {
 		t.Errorf("pipe line:\n got %q\nwant %q", got, want)
 	}
