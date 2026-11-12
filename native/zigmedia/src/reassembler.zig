@@ -13,11 +13,19 @@ const Entry = struct {
     key: u64 = 0,
     count: u16 = 0,
     have: u16 = 0,
+    max_frag: i32 = -1, // highest fragment index received (within-frame hole proof)
     last_len: usize = 0,
     order: u64 = 0,
+    last_nack: i64 = 0, // rate-limit NACKs for this frame
     buf: []u8, // backing (max frame bytes)
     present: []u64, // fragment-present bitmap (max_frags bits)
 };
+
+/// NackItem names one missing fragment to request retransmission of (wire: stream, frame_seq, frag_idx).
+pub const NackItem = struct { stream: u16, frame_seq: u32, frag_idx: u16 };
+
+const max_streams = 8;
+const StreamMax = struct { id: u16 = 0, max: u32 = 0, used: bool = false };
 
 pub const Reassembler = struct {
     alloc: std.mem.Allocator,
@@ -28,6 +36,7 @@ pub const Reassembler = struct {
     done_pos: usize = 0,
     next_order: u64 = 1,
     dropped: u64 = 0,
+    smax: [max_streams]StreamMax = [_]StreamMax{.{}} ** max_streams, // per-stream high-water frame_seq
 
     pub fn init(alloc: std.mem.Allocator, n_entries: usize, body_max: usize, max_frame_bytes: usize) !Reassembler {
         const es = try alloc.alloc(Entry, n_entries);
@@ -57,6 +66,7 @@ pub const Reassembler = struct {
     pub fn accept(r: *Reassembler, stream: u16, frame_seq: u32, frag_idx: u16, frag_count: u16, chunk: []const u8) ?[]const u8 {
         if (frag_count == 0 or frag_count > max_frags or frag_idx >= frag_count) return null;
         const key = (@as(u64, stream) << 32) | frame_seq;
+        r.noteFrame(stream, frame_seq); // high-water for overtaken-frame NACK detection
         if (r.isDone(key)) return null;
 
         var e = r.find(key) orelse r.alloc_entry(key, frag_count);
@@ -73,6 +83,7 @@ pub const Reassembler = struct {
         @memcpy(e.buf[off..][0..chunk.len], chunk);
         bitSet(e.present, frag_idx);
         e.have += 1;
+        if (frag_idx > e.max_frag) e.max_frag = frag_idx;
 
         if (e.have < e.count) return null;
         const total = @as(usize, e.count - 1) * r.body_max + e.last_len;
@@ -112,11 +123,72 @@ pub const Reassembler = struct {
         e.key = key;
         e.count = count;
         e.have = 0;
+        e.max_frag = -1;
+        e.last_nack = 0;
         e.last_len = 0;
         e.order = r.next_order;
         r.next_order += 1;
         @memset(e.present, 0);
         return e;
+    }
+
+    fn noteFrame(r: *Reassembler, stream: u16, frame_seq: u32) void {
+        for (&r.smax) |*s| {
+            if (s.used and s.id == stream) {
+                if (seqGreater(frame_seq, s.max)) s.max = frame_seq;
+                return;
+            }
+        }
+        for (&r.smax) |*s| {
+            if (!s.used) {
+                s.* = .{ .id = stream, .max = frame_seq, .used = true };
+                return;
+            }
+        }
+    }
+
+    fn streamMax(r: *const Reassembler, stream: u16) ?u32 {
+        for (r.smax) |s| if (s.used and s.id == stream) return s.max;
+        return null;
+    }
+
+    /// scanMissing fills out with the missing fragments of incomplete frames that are PROVEN lost,
+    /// rate-limited per frame. A hole is proven two ways on a switched LAN (the sender transmits a
+    /// frame's fragments in order and a frame fully before the next):
+    ///   - WITHIN-FRAME: a later fragment of the SAME frame arrived, so any missing fragment below
+    ///     that highest-seen index (max_frag) is a real hole - NACK it immediately, without waiting
+    ///     for the next frame. This is the fast path that keeps recovery inside the playout margin.
+    ///   - OVERTAKEN: a later frame on the same stream has started, so the whole tail of this frame
+    ///     (including fragments above max_frag that never arrived) is proven lost too.
+    /// Returns how many items. The caller NACKs them immediately so recovery completes within the
+    /// playout margin (one LAN RTT).
+    pub fn scanMissing(r: *Reassembler, out: []NackItem, now: i64, min_interval_ns: i64) usize {
+        var k: usize = 0;
+        for (r.entries) |*e| {
+            if (!e.active or e.have >= e.count) continue;
+            const stream: u16 = @intCast(e.key >> 32);
+            const fseq: u32 = @truncate(e.key);
+            const mx = r.streamMax(stream) orelse fseq;
+            const overtaken = seqGreater(mx, fseq);
+            // Proven-lost ceiling: the whole frame if overtaken, else only fragments BELOW the highest
+            // index seen for this frame (a later fragment of the same frame proves the gap under it).
+            const limit: u16 = if (overtaken) e.count else (if (e.max_frag > 0) @intCast(e.max_frag) else 0);
+            if (limit == 0) continue; // nothing proven lost yet (newest in-flight frame, no later fragment)
+            if (e.last_nack != 0 and now - e.last_nack < min_interval_ns) continue;
+            var i: u16 = 0;
+            while (i < limit) : (i += 1) {
+                if (!bitGet(e.present, i)) {
+                    out[k] = .{ .stream = stream, .frame_seq = fseq, .frag_idx = i };
+                    k += 1;
+                    if (k >= out.len) {
+                        e.last_nack = now;
+                        return k;
+                    }
+                }
+            }
+            e.last_nack = now;
+        }
+        return k;
     }
 
     fn isDone(r: *const Reassembler, key: u64) bool {
@@ -130,6 +202,9 @@ pub const Reassembler = struct {
     }
 };
 
+fn seqGreater(a: u32, b: u32) bool {
+    return @as(i32, @bitCast(a -% b)) > 0;
+}
 fn bitGet(bm: []const u64, i: u16) bool {
     return bm[i / 64] & (@as(u64, 1) << @intCast(i % 64)) != 0;
 }
@@ -163,6 +238,33 @@ test "duplicate fragment ignored" {
     _ = r.accept(2, 5, 0, 2, "XXXX"); // dup
     const out = r.accept(2, 5, 1, 2, "YY").?;
     try std.testing.expectEqualSlices(u8, "XXXXYY", out);
+}
+
+test "scanMissing NACKs a within-frame hole immediately (later fragment proves it), rate-limited" {
+    var r = try Reassembler.init(std.testing.allocator, 4, 4, 64);
+    defer r.deinit();
+    var items: [8]NackItem = undefined;
+    _ = r.accept(1, 1, 0, 3, "AAAA"); // only frag 0 of frame 1 so far
+    try std.testing.expectEqual(@as(usize, 0), r.scanMissing(&items, 1000, 0)); // nothing below frag 0 → nothing proven
+    _ = r.accept(1, 1, 2, 3, "CC"); // frag 2 arrives → frag 1 (below the highest seen) is a proven hole
+    const k = r.scanMissing(&items, 2000, 0);
+    try std.testing.expectEqual(@as(usize, 1), k); // frag 1 only (frag 2 present; frag 2 is the ceiling, not proven-above)
+    try std.testing.expectEqual(@as(u32, 1), items[0].frame_seq);
+    try std.testing.expectEqual(@as(u16, 1), items[0].frag_idx);
+    try std.testing.expectEqual(@as(usize, 0), r.scanMissing(&items, 2001, 1_000_000)); // rate-limited
+}
+
+test "scanMissing NACKs an overtaken frame's whole tail" {
+    var r = try Reassembler.init(std.testing.allocator, 4, 4, 64);
+    defer r.deinit();
+    var items: [8]NackItem = undefined;
+    _ = r.accept(1, 1, 0, 3, "AAAA"); // frame 1: only frag 0; no later fragment of frame 1 → tail not yet proven
+    try std.testing.expectEqual(@as(usize, 0), r.scanMissing(&items, 1000, 0));
+    _ = r.accept(1, 2, 0, 2, "DDDD"); // frame 2 starts → frame 1 overtaken → frags 1 AND 2 proven lost
+    const k = r.scanMissing(&items, 2000, 0);
+    try std.testing.expectEqual(@as(usize, 2), k);
+    try std.testing.expectEqual(@as(u16, 1), items[0].frag_idx);
+    try std.testing.expectEqual(@as(u16, 2), items[1].frag_idx);
 }
 
 test "drop-oldest on pool overflow" {
