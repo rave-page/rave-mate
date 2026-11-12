@@ -42,3 +42,35 @@ func TestDropDuplicateRecv(t *testing.T) {
 		}
 	}
 }
+
+// TestDropDuplicateSend: a new SEND route for a (peer, source) replaces any existing send route for
+// the same pair (newest wins) - the sender never serves one source to one peer over two routes (the
+// duplicate-offer blackout) - while leaving other sources, peers, and RECV routes alone.
+func TestDropDuplicateSend(t *testing.T) {
+	rm := New(Options{Self: "X", Bus: &busView{&hub{}, "X"}, Secrets: fakeSecrets{key: testKey()}, Ports: []int{0}})
+	mk := func(session, peer, src, dir string) (*fakeConn, *bool) {
+		fc := &fakeConn{}
+		canceled := false
+		rm.active[session] = &activeRoute{cancel: func() { canceled = true }, conn: fc, dir: dir, peer: peer, sourceID: src}
+		return fc, &canceled
+	}
+	dupConn, dupCancel := mk("A", "peerB", "mic", "send") // the duplicate to be replaced
+	mk("B", "peerB", "mic", "send")                       // the keeper (new route)
+	mk("C", "peerB", "cam", "send")                       // different source
+	mk("D", "peerB", "mic", "recv")                       // recv route (not a send dedup target)
+	mk("E", "peerZ", "mic", "send")                       // different peer
+
+	rm.dropDuplicateSend("peerB", "mic", "B")
+
+	if _, ok := rm.active["A"]; ok {
+		t.Fatal("duplicate send route A not removed")
+	}
+	if !dupConn.closed || !*dupCancel {
+		t.Fatalf("duplicate not torn down (closed=%v canceled=%v)", dupConn.closed, *dupCancel)
+	}
+	for _, keep := range []string{"B", "C", "D", "E"} {
+		if _, ok := rm.active[keep]; !ok {
+			t.Fatalf("route %s wrongly dropped", keep)
+		}
+	}
+}

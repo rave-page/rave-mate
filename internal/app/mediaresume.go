@@ -22,10 +22,27 @@ import (
 // (already remembered - no re-persist). The daemon owns cfg.Save().
 type rememberingReceives struct {
 	mediaroute.ReceiveControl
-	log  *logbus.Bus
-	cfg  *config.Config
-	save func()
-	mu   sync.Mutex // guards RememberedReceives writes + Save
+	log     *logbus.Bus
+	cfg     *config.Config
+	save    func()
+	mu      sync.Mutex               // guards RememberedReceives writes + Save
+	backoff map[string]*reoffBackoff // per (peer,source) re-offer backoff; reconcile-goroutine only (no lock)
+}
+
+// re-offer backoff: a died route is retried fast (immediate, then 1s, 2s, 4s … capped), so a stage
+// blip recovers in ~1s, but a source that stays gone/unreachable is not hammered. The backoff resets
+// once a route has stayed up for reoffResetStable (so flapping keeps backing off, a stable route does
+// not inherit old penalty).
+const (
+	reoffBase        = 1 * time.Second
+	reoffCap         = 30 * time.Second
+	reoffResetStable = 5 * time.Second
+)
+
+type reoffBackoff struct {
+	next      time.Time     // earliest next re-offer attempt
+	interval  time.Duration // current backoff step
+	liveSince time.Time     // when the current live route for this key was first seen (zero = not live)
 }
 
 func (r *rememberingReceives) StartReceive(peer, sourceID string) (string, error) {
@@ -77,7 +94,9 @@ func (r *rememberingReceives) sourceName(peer, sourceID string) string {
 	return ""
 }
 
-// reconcile starts every remembered source that is advertised again but not currently active.
+// reconcile re-offers every remembered source that is advertised but whose route is NOT live now -
+// immediately on the first miss, then with bounded exponential backoff so a gone/unreachable source is
+// not hammered. A LIVE route (Active) resets the backoff once it has been up for reoffResetStable.
 func (r *rememberingReceives) reconcile() {
 	r.mu.Lock()
 	wanted := append([]config.RememberedReceive(nil), r.cfg.Features.MediaLink.RememberedReceives...)
@@ -85,9 +104,15 @@ func (r *rememberingReceives) reconcile() {
 	if len(wanted) == 0 {
 		return
 	}
+	now := time.Now()
 	active := map[string]bool{}
 	for _, rc := range r.ReceiveControl.Receives() {
-		active[rc.Peer+"\x00"+rc.SourceID] = true
+		// Occupied = LIVE or still establishing (offer in-flight). A died-but-not-GC'd receive is NOT
+		// occupied (fast re-offer), but an in-flight offer IS - so a start-up burst of triggers does not
+		// stack a SECOND offer for a source whose first is still coming up (that killed the first).
+		if rc.Occupied(now) {
+			active[rc.Peer+"\x00"+rc.SourceID] = true
+		}
 	}
 	avail := map[string]bool{}
 	for _, s := range r.ReceiveControl.RemoteVideoSources() {
@@ -95,22 +120,68 @@ func (r *rememberingReceives) reconcile() {
 	}
 	for _, w := range wanted {
 		key := w.Peer + "\x00" + w.SourceID
-		if active[key] || !avail[key] {
-			continue // already receiving, or the source PC has not advertised it (yet)
+		b := r.backoffFor(key)
+		if active[key] {
+			r.noteLive(b, now) // live: arm the stable-reset timer; reset backoff once stable
+			continue
+		}
+		b.liveSince = time.Time{} // not live: restart the stability clock for the next up period
+		if !avail[key] {
+			continue // source PC has not advertised it (yet): wait, do not burn a backoff step
+		}
+		if now.Before(b.next) {
+			continue // backing off from a recent attempt
 		}
 		if _, err := r.ReceiveControl.StartReceive(w.Peer, w.SourceID); err != nil {
+			r.armBackoff(b, now)
 			r.log.Debug("mediaroute", "auto-reactivate deferred", map[string]any{
 				"peer": w.Peer, "source": w.SourceID, "err": err.Error()})
 			continue
 		}
+		r.armBackoff(b, now) // provisional: don't re-offer again until it has had a chance to come up
 		r.log.Info("mediaroute", "auto-reactivated remembered remote source", map[string]any{
 			"peer": w.Peer, "source": w.SourceID, "name": w.Name})
 	}
 }
 
-// runReceiveResume drives reconcile on a ticker until ctx is cancelled.
+// backoffFor returns the (reconcile-goroutine-only) backoff record for a key, creating it at the base.
+func (r *rememberingReceives) backoffFor(key string) *reoffBackoff {
+	if r.backoff == nil {
+		r.backoff = map[string]*reoffBackoff{}
+	}
+	b := r.backoff[key]
+	if b == nil {
+		b = &reoffBackoff{interval: reoffBase}
+		r.backoff[key] = b
+	}
+	return b
+}
+
+// armBackoff schedules the next attempt and doubles the step (capped).
+func (r *rememberingReceives) armBackoff(b *reoffBackoff, now time.Time) {
+	if b.interval <= 0 {
+		b.interval = reoffBase
+	}
+	b.next = now.Add(b.interval)
+	if b.interval *= 2; b.interval > reoffCap {
+		b.interval = reoffCap
+	}
+}
+
+// noteLive resets the backoff once a live route has been stable for reoffResetStable.
+func (r *rememberingReceives) noteLive(b *reoffBackoff, now time.Time) {
+	if b.liveSince.IsZero() {
+		b.liveSince = now
+	}
+	if now.Sub(b.liveSince) >= reoffResetStable {
+		b.interval = reoffBase
+		b.next = time.Time{}
+	}
+}
+
+// runReceiveResume drives reconcile on a 1s ticker (fast recovery; backoff bounds the retry rate).
 func runReceiveResume(ctx context.Context, r *rememberingReceives) {
-	t := time.NewTicker(3 * time.Second)
+	t := time.NewTicker(1 * time.Second)
 	defer t.Stop()
 	r.reconcile() // resume immediately at startup (sources already advertised)
 	for {

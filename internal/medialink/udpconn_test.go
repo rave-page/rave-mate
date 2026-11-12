@@ -308,6 +308,68 @@ func TestUDPConnByeEndsCleanlyNotBlackout(t *testing.T) {
 	}
 }
 
+// TestUDPConnColdStartGraceStaysUp: a cold sender that emits its first datagram only after 3s (longer
+// than the 2s liveness window) must NOT be killed - the startup grace tolerates encoder/decoder open.
+// Keepalives are disabled so ONLY media establishes/refreshes liveness, isolating the grace.
+func TestUDPConnColdStartGraceStaysUp(t *testing.T) {
+	a, b, _, _ := udpPair(t, nil, nil, true, func(c *udpConfig) {
+		c.Liveness = 2 * time.Second
+		c.StartupGrace = 15 * time.Second
+		c.Keepalive = time.Hour // no keepalives: only media refreshes, so the grace is what keeps B alive
+	})
+	defer a.Close()
+	defer b.Close()
+	go func() {
+		time.Sleep(3 * time.Second) // cold-start delay (PipeWire + VA encoder open)
+		for i := 0; i < 60; i++ {
+			f := sampleFrame(uint32(i), 1, 500)
+			f.Flags = 0
+			if a.WriteFrame(f) != nil {
+				return
+			}
+			time.Sleep(16 * time.Millisecond)
+		}
+	}()
+	got := readN(b, 1, 6*time.Second) // first frame lands at ~3s; without the grace B dies at 2s
+	if len(got) == 0 || b.isDead() {
+		t.Fatalf("receiver blacked out during cold start before the first frame: dead=%v err=%v", b.isDead(), b.err())
+	}
+}
+
+// TestUDPConnEstablishedThenSilentBlacksOutFast: once established (media flowed), the TIGHT liveness
+// window applies - a sender that then goes silent is detected fast, not after the 15s grace.
+func TestUDPConnEstablishedThenSilentBlacksOutFast(t *testing.T) {
+	a, b, _, _ := udpPair(t, nil, nil, true, func(c *udpConfig) {
+		c.Liveness = 500 * time.Millisecond
+		c.StartupGrace = 15 * time.Second
+		c.Keepalive = time.Hour // no keepalives: media establishes, then silence
+	})
+	defer a.Close()
+	defer b.Close()
+	for i := 0; i < 5; i++ { // establish B with media
+		f := sampleFrame(uint32(i), 1, 500)
+		f.Flags = 0
+		if err := a.WriteFrame(f); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	if got := readN(b, 1, time.Second); len(got) == 0 {
+		t.Fatal("no media - route not established")
+	}
+	_ = a.Close() // sender gone: no more datagrams
+	start := time.Now()
+	var err error
+	for err == nil { // drain buffered frames, then block until the blackout
+		_, err = b.ReadFrame()
+	}
+	if err != errUDPDead {
+		t.Fatalf("want errUDPDead after established silence, got %v", err)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("established route took %v to detect death - tight window (500ms) not applied after establishment", d)
+	}
+}
+
 func TestUDPConnKeepaliveLiveness(t *testing.T) {
 	// B→A fully blacked out: A receives nothing → A hits the liveness timeout and ReadFrame errors.
 	aToB := newImpairment(31)
@@ -316,6 +378,7 @@ func TestUDPConnKeepaliveLiveness(t *testing.T) {
 	a, b, _, _ := udpPair(t, aToB, bToA, true, func(c *udpConfig) {
 		c.Keepalive = 50 * time.Millisecond
 		c.Liveness = 300 * time.Millisecond
+		c.StartupGrace = 300 * time.Millisecond // never-established route: blackout at the (short) grace here
 	})
 	defer a.Close()
 	defer b.Close()
@@ -336,7 +399,8 @@ func TestUDPConnKeepaliveLiveness(t *testing.T) {
 func TestUDPConnRejectFloodNoLiveness(t *testing.T) {
 	am, bm := newMemPair(newImpairment(41), newImpairment(42))
 	b, err := newUDPConn(bm, am.self, udpConfig{Token: testToken, Initiator: false, Master: testKey(),
-		Encrypt: true, Clock: NewMonotonicClock(), Keepalive: 50 * time.Millisecond, Liveness: 300 * time.Millisecond})
+		Encrypt: true, Clock: NewMonotonicClock(), Keepalive: 50 * time.Millisecond, Liveness: 300 * time.Millisecond,
+		StartupGrace: 300 * time.Millisecond}) // rejected flood never establishes → blackout at the (short) grace
 	if err != nil {
 		t.Fatal(err)
 	}

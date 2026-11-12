@@ -97,6 +97,21 @@ type Receive struct {
 	SinkID   string
 	Name     string // remote source name
 	Since    time.Time
+	Active   bool // route is LIVE in the router now (vs offered-but-not-up / ended-but-not-yet-GC'd)
+	EverUp   bool // route was LIVE at least once (distinguishes a still-establishing offer from a died route)
+}
+
+// receiveEstablishGrace is how long an offered-but-not-yet-live receive is treated as IN-FLIGHT (do
+// not re-offer or reclaim it): the offer→answer→dial→reachability→route-up handshake. Prevents a
+// start-up burst of triggers (resume tick, advert-driven reconcile, UI) from stacking a SECOND offer
+// for a source whose first offer is still coming up (the second killed the first → blackout).
+const receiveEstablishGrace = 8 * time.Second
+
+// Occupied reports whether this receive should block a new offer/reclaim for its (peer, source): it is
+// LIVE, or still establishing (never came up AND within the establish grace). A route that came up
+// then DIED (EverUp && !Active) is NOT occupied - it is re-offered fast.
+func (r Receive) Occupied(now time.Time) bool {
+	return r.Active || (!r.EverUp && now.Sub(r.Since) < receiveEstablishGrace)
 }
 
 // Manager owns the share scanner + receive bookkeeping. Safe for concurrent use.
@@ -314,16 +329,33 @@ func (m *Manager) RemoteVideoSources() []RemoteSource {
 	return out
 }
 
-// Receives snapshots the receive routes this instance requested (active or pending).
+// Receives snapshots the receive routes this instance requested, each flagged with whether its route
+// is LIVE now (Active) - so the resume layer re-offers a DIED route immediately instead of waiting out
+// the GC grace (a dead session lingers in the map until cleanup).
 func (m *Manager) Receives() []Receive {
+	live := m.liveSessions()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]Receive, 0, len(m.receives))
-	for _, r := range m.receives {
+	for sess, r := range m.receives {
+		if live[sess] && !r.EverUp {
+			r.EverUp = true
+			m.receives[sess] = r // once live, always "was up" (so a later death re-offers fast, not as in-flight)
+		}
+		r.Active = live[sess]
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Since.Before(out[j].Since) })
 	return out
+}
+
+// liveSessions is the set of sessions with a LIVE route in the router right now.
+func (m *Manager) liveSessions() map[string]bool {
+	live := map[string]bool{}
+	for _, s := range m.router.Stats() {
+		live[s.Session] = true
+	}
+	return live
 }
 
 // StartReceive offers to pull peer's source into a fresh local Spout sender
@@ -332,17 +364,32 @@ func (m *Manager) StartReceive(peer, sourceID string) (string, error) {
 	if m.sameHost != nil && m.sameHost(peer) {
 		return "", errors.New("same PC: pick the Spout sender directly - a route would re-encode for nothing (§3)")
 	}
-	// De-dup: one receive per (peer, source). Activating the same source twice stacked a second full
-	// route (each pinning its own jitter buffer + Spout sender) - a big multiplier in the RAM blowup.
+	// De-dup: one LIVE receive per (peer, source). Activating the same source twice stacked a second
+	// full route (each pinning its own jitter buffer + Spout sender) - a big multiplier in the RAM
+	// blowup. A DEAD entry for this source (route ended, not yet GC'd) is NOT a live dup: reclaim it so
+	// a fresh route starts now (the resume layer's fast re-offer depends on this - else it got the dead
+	// session back and no route came up until the 30s GC).
+	live := m.liveSessions()
+	now := time.Now()
+	var staleSess, staleSink string
 	m.mu.Lock()
-	for _, r := range m.receives {
+	for sess, r := range m.receives {
 		if r.Peer == peer && r.SourceID == sourceID {
-			sess := r.Session
-			m.mu.Unlock()
-			return sess, nil // already receiving this source - idempotent
+			r.Active = live[sess]
+			if r.Occupied(now) {
+				m.mu.Unlock()
+				return sess, nil // live OR still establishing - idempotent, never a second route
+			}
+			staleSess, staleSink = sess, r.SinkID
+			delete(m.receives, sess)
+			break
 		}
 	}
 	m.mu.Unlock()
+	if staleSess != "" { // tear the dead route/sink down before re-offering
+		m.router.CloseRoute(staleSess)
+		m.router.UnregisterSink(staleSink)
+	}
 	ad, ok := m.router.RemoteAdverts()[peer]
 	if !ok {
 		return "", fmt.Errorf("mediaroute: no advert from %s", peer)

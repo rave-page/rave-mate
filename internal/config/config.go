@@ -389,9 +389,13 @@ type MediaLinkFeature struct {
 	// "fixed" (exactly the old behaviour: BitrateKbps is the target). Empty = auto. Migration: an
 	// existing config with only bitrateKbps set becomes auto with that value as the ceiling.
 	BitrateMode string `json:"bitrateMode,omitempty"`
-	SWOnly      bool   `json:"swOnly,omitempty"`    // advertise software encoders only (diagnostic; tier 4 + CPU warning)
-	MaxFPS      int    `json:"maxFps,omitempty"`    // sender-side video fps cap; 0 = 60, -1 = uncapped
-	MaxHeight   int    `json:"maxHeight,omitempty"` // encode downscale policy: 0 = auto (native on hw, 1080p on sw x264), >0 = cap, -1 = never
+	// Transport selects the media transport: "" / "auto" = UDP datagrams with TCP fallback;
+	// "tcp" = TCP only (never offer or accept UDP). An escape hatch while the UDP path is being
+	// hardened: TCP ran a 7 h 4K60 route with zero drops, UDP still shows recovered-gap micro hangs.
+	Transport string `json:"transport,omitempty"`
+	SWOnly    bool   `json:"swOnly,omitempty"`    // advertise software encoders only (diagnostic; tier 4 + CPU warning)
+	MaxFPS    int    `json:"maxFps,omitempty"`    // sender-side video fps cap; 0 = 60, -1 = uncapped
+	MaxHeight int    `json:"maxHeight,omitempty"` // encode downscale policy: 0 = auto (native on hw, 1080p on sw x264), >0 = cap, -1 = never
 	// Encode-device preference (SENDER side). DevicePolicy "" = auto: no device flags, the encoder
 	// picks (adapter 0) - byte-identical to pre-WP-3 behaviour. "pin" = always EncoderDevice.
 	// "avoid-busiest" = the least video-encode-loaded adapter, skipping ones OBS/Parsec hold.
@@ -646,6 +650,11 @@ func (f MediaLinkFeature) Bitrate() int {
 
 // BitrateModeString returns the raw bitrate-budget mode ("" => auto, normalized at the medialink layer).
 func (f MediaLinkFeature) BitrateModeString() string { return f.BitrateMode }
+
+// UDPEnabled reports whether the UDP media transport may be offered/accepted (Transport != "tcp").
+func (f MediaLinkFeature) UDPEnabled() bool {
+	return !strings.EqualFold(strings.TrimSpace(f.Transport), "tcp")
+}
 
 // UserBitrateCeilKbps is the user's bitrate CEILING in auto mode (0 = none). Same bitrateKbps the user
 // set: in auto it caps the adaptive target (50000 keeps meaning "never above 50 Mbps"); in fixed it is

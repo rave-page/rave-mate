@@ -67,6 +67,20 @@ Minimize tokens. Drop filler ("simply", "just", "in order to", "make sure that")
   new view logic that has no Zig side. Anything with a rect, a visual, a frame or a pixel in it
   (render surfaces, the visual tree, presenters, hit geometry) lives in the shell child, never in
   the daemon. See `.devnotes/SDL_WEBVIEW_SURFACE_DESIGN.md` §1 directive #2.
+- **Realtime paths are native: Zig (or C), never Go (HARD REQUIREMENT, owner directive
+  2026-11-12).** Anything on a per-frame / per-packet / per-sample path - capture, encode, decode,
+  packetizing, pacing, socket send/receive, reassembly, jitter buffer, retransmit, media crypto,
+  publishing - is written in Zig (C where a library's API makes that the natural fit) and runs in
+  a native child or native thread with no Go runtime in the loop: a Go GC or scheduler pause on
+  that path is a visible hang on stage. Go keeps control and policy only: negotiation, key
+  agreement, budgets/planning, supervision, telemetry aggregation, ctl. **All new feature
+  development is Zig-first**, most strictly for realtime code; new Go on a data path is a defect,
+  not a shortcut. Existing Go data paths (`internal/medialink` transport, jitter buffer, pacer)
+  are legacy to be ported: the Go implementation stays only as wire-format reference + fallback
+  + golden tests until the native path reaches parity (same pattern as zigui). Checks,
+  logging, stats sampling, VRAM/health probes must run off the realtime thread (separate thread,
+  lock-free hand-off) - nothing on the frame path may block on them. See
+  `.devnotes/ZIGMEDIA_DESIGN.md`.
 - **Supply chain: 7-day soak.** Never `go get pkg@latest`. Pin exact versions ≥7
   days old. See `SUPPLY_CHAIN.md`. Prefer the **stdlib** - every new direct dep needs
   a justification row in that file.
