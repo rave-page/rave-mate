@@ -1,13 +1,13 @@
 {
-  "version": "nightly-6bedd3a",
-  "build": 428,
-  "commit": "6bedd3a",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-428-20261112-6bedd3a.exe",
-  "sha256": "037eb8a41a4fab274dea06eee1c009ee44cceb29627458441a16369a42a242e9",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-428-20261112-6bedd3a.exe",
-  "installer_sha256": "928bfd090ff2d9fb52105e0827701b6e824d54d1f06713a70cccc57a38dafcd2",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-428-20261112-6bedd3a",
-  "linux_sha256": "554dd40aecc38f2363b977aa3342c9265905bd2b87aacab899ebafd374938077",
+  "version": "nightly-2fda247",
+  "build": 429,
+  "commit": "2fda247",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-429-20261112-2fda247.exe",
+  "sha256": "a515ee68857eec5022eb1d243f57cee8ea9bd0a9554b68151c81aedc942e3560",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-429-20261112-2fda247.exe",
+  "installer_sha256": "8eb4606ecbc72f95f5ca8216d903773b04cded61bc14f9e94b44e490863c170a",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-429-20261112-2fda247",
+  "linux_sha256": "a85f8eea265534491287fa77fd4e34b57874996857c8217ef0b11cf95229796e",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-11-12T13:37:16Z",
-  "notes": "CLAUDE.md: realtime paths are native (Zig/C), never Go; all new development Zig-first (owner directive 2026-11-12)"
+  "released": "2026-11-12T16:10:17Z",
+  "notes": "Merge feat/pw-4k: constant-quality mode in the VA engines, cadence diagnostics, DJ-set/bar test producer"
 }
