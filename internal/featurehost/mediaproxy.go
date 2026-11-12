@@ -276,6 +276,14 @@ func (p *MediaRoutesProxy) StartReceive(peer, sourceID string) (string, error) {
 	return r.Session, nil
 }
 
+// SetTransportOverride pins one (peer, source) receive route's transport in the media child.
+func (p *MediaRoutesProxy) SetTransportOverride(peer, sourceID, mode string) error {
+	ctx, cancel := p.h.callCtx()
+	defer cancel()
+	_, err := p.h.host.Call(ctx, mTransportOv, transportOverrideReq{Peer: peer, SourceID: sourceID, Mode: mode})
+	return err
+}
+
 // FrameShot samples a local video-share sender's content in the media child (where the Spout cgo
 // lives) and returns the verdict plus the last frame as a PNG. Its own timeout: N grabs spaced
 // IntervalMs apart can legitimately outlast the default call budget, and a diagnostic that times

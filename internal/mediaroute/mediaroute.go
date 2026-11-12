@@ -358,6 +358,15 @@ func (m *Manager) liveSessions() map[string]bool {
 	return live
 }
 
+// SetTransportOverride forwards a per-route transport override to the router (udp|tcp|auto).
+func (m *Manager) SetTransportOverride(peer, sourceID, mode string) error {
+	r, ok := m.router.(TransportOverrider)
+	if !ok {
+		return errors.New("mediaroute: router has no per-route transport override")
+	}
+	return r.SetTransportOverride(peer, sourceID, mode)
+}
+
 // StartReceive offers to pull peer's source into a fresh local Spout sender
 // ("rave-mate link <name>"). Returns the route session id.
 func (m *Manager) StartReceive(peer, sourceID string) (string, error) {

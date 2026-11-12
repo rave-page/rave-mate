@@ -22,3 +22,11 @@ type ReceiveControl interface {
 }
 
 var _ ReceiveControl = (*Manager)(nil)
+
+// TransportOverrider pins one receive route's transport (udp|tcp|auto) for its next offer. Optional
+// capability: *Manager and the media-child proxy implement it.
+type TransportOverrider interface {
+	SetTransportOverride(peer, sourceID, mode string) error
+}
+
+var _ TransportOverrider = (*Manager)(nil)

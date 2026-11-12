@@ -526,7 +526,7 @@ func runCtl(args []string) int {
 			"                       dmx-status|stream-status|mocap-status|crew-status|perf|pprof-cpu [SECONDS]|pprof-heap|goroutines|\n"+
 			"                       tc-status|tc-start|tc-stop|ablelink-status|ablelink-resync|\n"+
 			"                       pw-nodes|peers|pair <nodeID|name|host:port>|pair-confirm <nodeID> yes|no|unpair <nodeID|name>|\n"+
-			"                       media-sources|routes|route-start <peer> <source>|route-stop <peer> <source|all>|\n"+
+			"                       media-sources|routes|route-start <peer> <source> [--transport udp|tcp|auto]|route-stop <peer> <source|all>|\n"+
 			"                       encoder-scan|remote-encoder-scan [NODEID]|\n"+
 			"                       frame-shot OUT.PNG [GRABS] [X,Y,W,H] SENDER...|remote-frame-shot OUT.PNG [GRABS] [X,Y,W,H] [@NODEID] SENDER...|\n"+
 			"                       testcard [start [WxH@fps]|stop|stats|reset]|remote-testcard [@NODEID] ...|\n"+
@@ -623,9 +623,9 @@ func runCtl(args []string) int {
 			return 1
 		}
 		fmt.Println(resp)
-	case "route-start": // receiving side: request a peer's source (<peer> <source name>)
+	case "route-start": // receiving side: request a peer's source (<peer> <source name> [--transport udp|tcp|auto])
 		if len(args) < 3 {
-			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl route-start <peer> <source name>")
+			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl route-start <peer> <source name> [--transport udp|tcp|auto]")
 			return 2
 		}
 		resp, err := app.Send("ROUTE-START " + args[1] + " " + strings.Join(args[2:], " "))
