@@ -358,8 +358,8 @@ func (s *pwSource) encTelemetry() {
 				"renderNode": s.encNode, "capFps": fmtf(st.CapFPS), "encFps": fmtf(st.OutFPS),
 				"dropped": st.Dropped, "bytesPerFrame": uint64(st.AUBytesPerFrame),
 				"ringDepth": int(C.rpw_ring_depth(s.h)), "ringHiwater": int(C.rpw_ring_hiwater(s.h)),
-				"ringOverflow": int64(C.rpw_ring_overflow(s.h)),
-				"reconnects":   int64(C.rpw_reconnects(s.h))})
+				"ringOverflow": int64(C.rpw_ring_overflow(s.h)), "capDrops": int64(C.rpw_cap_drops(s.h)),
+				"reconnects": int64(C.rpw_reconnects(s.h))})
 		}
 	}
 }
@@ -369,8 +369,9 @@ func fmtf(v float64) string { return fmt.Sprintf("%.1f", v) }
 
 // ringStats exposes the AU hand-off ring telemetry (depth, high-water, overflow drops) to in-package
 // tests (cgo can't live in a _test.go file).
-func (s *pwSource) ringStats() (depth, hiwater int, overflow int64) {
-	return int(C.rpw_ring_depth(s.h)), int(C.rpw_ring_hiwater(s.h)), int64(C.rpw_ring_overflow(s.h))
+func (s *pwSource) ringStats() (depth, hiwater int, overflow, capDrops int64) {
+	return int(C.rpw_ring_depth(s.h)), int(C.rpw_ring_hiwater(s.h)),
+		int64(C.rpw_ring_overflow(s.h)), int64(C.rpw_cap_drops(s.h))
 }
 
 // qpNext is the cgo seam for the pure constant-quality ceiling controller (rva_qp_next): cgo cannot
