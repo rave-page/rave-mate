@@ -63,6 +63,7 @@ type udpConfig struct {
 	FrameDeadline time.Duration // incomplete-reassembly drop + retransmit abandon (default 200ms)
 	Keepalive     time.Duration // ping cadence (default 500ms)
 	Liveness      time.Duration // no-authenticated-datagram timeout → errUDPDead (default 2s)
+	StartupGrace  time.Duration // liveness window until first real traffic establishes the route (default 15s)
 	PacingRate    float64       // initial pacer rate, bytes/s (0 = unpaced)
 	Log           func(string, map[string]any)
 }
@@ -71,6 +72,13 @@ const (
 	udpDefFrameDeadline = 200 * time.Millisecond
 	udpDefKeepalive     = 500 * time.Millisecond
 	udpDefLiveness      = 2 * time.Second
+	// udpDefStartupGrace is the liveness window BEFORE the route is proven established end-to-end (the
+	// first authenticated media or peer keepalive-ping arrives). A cold sender needs ~1.6-2s to open
+	// PipeWire capture + the VA encoder before it emits anything, and a cold receiver can take seconds
+	// to open a DXVA decoder under VRAM pressure; the tight udpDefLiveness window would kill the route
+	// mid-startup (the first frame once landed in the same ms the route was declared dead). The normal
+	// window applies only AFTER first real traffic.
+	udpDefStartupGrace  = 15 * time.Second
 	udpMaintTick        = 5 * time.Millisecond   // NACK-scan + sweep cadence
 	udpRebindMin        = time.Second            // min interval between authenticated remote rebinds
 	owdBucketNs         = int64(2 * time.Second) // one-way-delay baseline window bucket (queuing-delay min)
@@ -139,10 +147,11 @@ type udpConn struct {
 	owdPrevMin   int64
 	owdHasPrev   bool
 
-	lastRecvNs atomic.Int64 // media-clock ns of the last AUTHENTICATED datagram (liveness)
-	rttNs      atomic.Int64
-	owdJitter  atomic.Int64 // |transit delta| EWMA (telemetry)
-	owdNs      atomic.Int64 // smoothed QUEUING delay above baseline, ns (offset-free; cc gradient input)
+	lastRecvNs  atomic.Int64 // media-clock ns of the last AUTHENTICATED datagram (liveness)
+	established atomic.Bool  // route proven live (first authenticated media or peer keepalive-ping); gates the liveness window
+	rttNs       atomic.Int64
+	owdJitter   atomic.Int64 // |transit delta| EWMA (telemetry)
+	owdNs       atomic.Int64 // smoothed QUEUING delay above baseline, ns (offset-free; cc gradient input)
 
 	st udpStatsMu
 
@@ -475,6 +484,12 @@ func (u *udpConn) handleDatagram(dg []byte, src net.Addr) {
 		u.lastRecvNs.Store(u.clock.Now())               // liveness: a genuinely new datagram arrived
 		u.reachOnce.Do(func() { close(u.reachableCh) }) // reachability handshake
 	}
+	// Establish the route on the first real traffic: a media datagram, or a peer keepalive PING (proves
+	// the peer's maintLoop is up and emitting, not just a one-shot reachability pong). After this the
+	// tight liveness window applies; before it the startup grace tolerates a cold sender/receiver.
+	if h.Typ == dgTypeMedia || h.Typ == dgTypePing {
+		u.established.Store(true)
+	}
 	switch h.Typ {
 	case dgTypeMedia:
 		u.onMedia(h, chunk)
@@ -631,6 +646,13 @@ func (u *udpConn) maintLoop() {
 	if liveness <= 0 {
 		liveness = udpDefLiveness
 	}
+	startup := u.cfg.StartupGrace
+	if startup <= 0 {
+		startup = udpDefStartupGrace
+	}
+	if startup < liveness {
+		startup = liveness // never stricter than the steady window
+	}
 	var lastPing int64
 	for {
 		select {
@@ -639,8 +661,15 @@ func (u *udpConn) maintLoop() {
 		case <-t.C:
 		}
 		now := u.clock.Now()
-		// Liveness: no authenticated datagram within the window → blackout, tear the conn down.
-		if now-u.lastRecvNs.Load() > int64(liveness) {
+		// Liveness: no authenticated datagram within the window → blackout, tear the conn down. Until the
+		// route is established end-to-end (first media / peer ping) the generous startup grace applies, so
+		// a cold sender's encoder-open (or a cold receiver's decoder-open under VRAM pressure) is not
+		// mistaken for a dead path.
+		window := liveness
+		if !u.established.Load() {
+			window = startup
+		}
+		if now-u.lastRecvNs.Load() > int64(window) {
 			u.setErr(errUDPDead)
 			u.closeOnce.Do(func() {
 				close(u.done)
