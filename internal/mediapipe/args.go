@@ -185,6 +185,58 @@ func foldAdapter(init []string, idx int) []string {
 
 // encodeArgs builds the raw-RGBA-stdin → bitstream-stdout child argv. forceSW pins the MaxHeight
 // downscale to CPU swscale (used after a GPU-scaler failure).
+// qpFromQuality maps the adaptive budget's QualityTarget (1..100, higher = better) to a quantizer
+// in [18, 38] (lower = better) usable as CRF/CQ/QVBR/global_quality across ffmpeg families. 70 => 24.
+func qpFromQuality(qt int) int {
+	if qt <= 0 {
+		return 24
+	}
+	if qt > 100 {
+		qt = 100
+	}
+	if qt < 1 {
+		qt = 1
+	}
+	qp := 38 - (qt-1)*(38-18)/99
+	if qp < 18 {
+		qp = 18
+	}
+	if qp > 38 {
+		qp = 38
+	}
+	return qp
+}
+
+// rcFor builds a family's ffmpeg rate-control args. QUALITY mode (qt>0): constant-quality capped at
+// the bitrate (maxrate is the hard ceiling; the encoder undershoots on simple content) via each
+// family's native knob - nvenc -cq, amf QVBR, qsv -global_quality, x264/x265 -crf, svtav1 -crf.
+// Else the legacy CBR-ish ceiling (b:v==maxrate). VA-API + MF keep the ceiling form (vaapi VBR adds
+// its own -rc_mode; MF/Zig quality mode is a separate path).
+func rcFor(encoder string, kbps, qt, gop int) []string {
+	br := strconv.Itoa(kbps) + "k"
+	vbv := strconv.Itoa(kbps/2) + "k"
+	g := strconv.Itoa(gop)
+	cbr := []string{"-b:v", br, "-maxrate", br, "-bufsize", vbv, "-g", g, "-bf", "0"}
+	if qt <= 0 {
+		return cbr
+	}
+	q := strconv.Itoa(qpFromQuality(qt))
+	switch {
+	case strings.Contains(encoder, "nvenc"):
+		return []string{"-rc", "vbr", "-cq", q, "-b:v", "0", "-maxrate", br, "-bufsize", vbv, "-g", g, "-bf", "0"}
+	case strings.Contains(encoder, "amf"):
+		return []string{"-rc", "qvbr", "-qvbr_quality_level", q, "-maxrate", br, "-bufsize", vbv, "-g", g, "-bf", "0"}
+	case strings.Contains(encoder, "qsv"):
+		return []string{"-global_quality", q, "-maxrate", br, "-bufsize", vbv, "-g", g, "-bf", "0"}
+	case strings.Contains(encoder, "libx264"), strings.Contains(encoder, "libx265"):
+		return []string{"-crf", q, "-maxrate", br, "-bufsize", vbv, "-g", g, "-bf", "0"}
+	case strings.Contains(encoder, "svtav1"), strings.Contains(encoder, "av1"):
+		return []string{"-crf", q, "-g", g} // svtav1: CRF; maxrate support is build-dependent
+	default:
+		return cbr // vaapi / mf / mjpeg / unknown keep the ceiling form
+	}
+}
+
 func encodeArgs(spec medialink.EncodeSpec, forceSW bool) []string {
 	fps := spec.FPS
 	if fps <= 0 {
@@ -220,9 +272,10 @@ func encodeArgs(spec medialink.EncodeSpec, forceSW bool) []string {
 		args = append(args, "-vf", dev.vf)
 	}
 	g := strconv.Itoa(gopFrames(fps))
-	br := strconv.Itoa(kbps) + "k"
-	vbv := strconv.Itoa(kbps/2) + "k"
-	rc := []string{"-b:v", br, "-maxrate", br, "-bufsize", vbv, "-g", g, "-bf", "0"}
+	// Rate control: adaptive-budget QUALITY mode (spec.QualityTarget>0) = constant-quality capped at
+	// the bitrate, so simple content undershoots and complex spends up to the ceiling; else the legacy
+	// CBR-ish ceiling (b:v==maxrate).
+	rc := rcFor(spec.Encoder, kbps, spec.QualityTarget, gopFrames(fps))
 	switch spec.Encoder {
 	case medialink.EncoderMFNative:
 		// Defensive: the native engine has no ffmpeg counterpart name. Reached only when the
