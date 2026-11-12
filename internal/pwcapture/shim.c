@@ -879,9 +879,13 @@ struct rpw_capture *rpw_start(const char *target_node) {
 	if (!c->core)
 		goto fail_unlock;
 
+	/* NO PW_KEY_MEDIA_ROLE="Camera": the role makes wireplumber's camera-device policy auto-link this
+	 * input to a default V4L2 webcam, hijacking the link when PW_KEY_TARGET_OBJECT doesn't match (the
+	 * "no more input formats" churn). We bind by exact node.name via TARGET_OBJECT + AUTOCONNECT; no
+	 * role means the policy honours the target instead of substituting a camera. */
 	struct pw_properties *props = PW.props_new(
 		PW_KEY_MEDIA_TYPE, "Video", PW_KEY_MEDIA_CATEGORY, "Capture",
-		PW_KEY_MEDIA_ROLE, "Camera", PW_KEY_TARGET_OBJECT, target_node, NULL);
+		PW_KEY_TARGET_OBJECT, target_node, NULL);
 	c->stream = PW.stream_new(c->core, "rave-mate-capture", props);
 	if (!c->stream)
 		goto fail_unlock;
