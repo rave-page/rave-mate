@@ -1,13 +1,13 @@
 {
-  "version": "nightly-b83b3eb",
-  "build": 420,
-  "commit": "b83b3eb",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-420-20261112-b83b3eb.exe",
-  "sha256": "494bee0648e3df300399a12490a171ced7de8b5eb03c3ab14a841a55bbd9b568",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-420-20261112-b83b3eb.exe",
-  "installer_sha256": "7e9229f352b7762a1b559f3b47c074743fc6c84c86dc8487fcb0e58c28e63f05",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-420-20261112-b83b3eb",
-  "linux_sha256": "d620f275da11cd1f8b7e1632595dcbc77274ca03fc8b43e26a9229bbde70774a",
+  "version": "nightly-5c9d9f4",
+  "build": 421,
+  "commit": "5c9d9f4",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-421-20261112-5c9d9f4.exe",
+  "sha256": "27aba4d9138254cf20cf0af430d96e001f416308d7decb5a7f478efa1e655a9a",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-421-20261112-5c9d9f4.exe",
+  "installer_sha256": "1882f3d12a4ddfe0d00527f45fd5d767e3a8dd25b05e993717b9f6a6dafdf084",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-421-20261112-5c9d9f4",
+  "linux_sha256": "d9d937316bfea07eac0f86ab62f2a76eb9a53f5f5e1a96d985c679a3accfe517",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-11-12T10:58:08Z",
-  "notes": "Merge feat/udp-transport: one recv route per (peer, source), no untracked blackout re-offer"
+  "released": "2026-11-12T11:51:57Z",
+  "notes": "Merge feat/pw-4k: enforced bitrate ceiling (closed-loop), sender telemetry, live MaxHeight on native VA-API"
 }
