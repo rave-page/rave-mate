@@ -44,7 +44,8 @@ func NewSelfFootprint(s gpumem.Sampler, names []string, ttl time.Duration) *Self
 }
 
 // Get returns the last sampled footprint (MB, known) and kicks an async refresh when stale. It never
-// blocks on the sweep: the first calls return (0,false) until the first background sweep lands.
+// blocks on the sweep: the first calls return (0,false) until the first background sweep lands. Used
+// on the admission path (a route must never wait on a process sweep).
 func (f *SelfFootprint) Get() (uint64, bool) {
 	f.mu.Lock()
 	mb, known, stale := f.mb, f.known, f.now().Sub(f.at) > f.ttl
@@ -59,25 +60,45 @@ func (f *SelfFootprint) Get() (uint64, bool) {
 	return mb, known
 }
 
-// refresh runs one sweep and folds the result (the only place the expensive SampleProcesses runs).
-func (f *SelfFootprint) refresh() {
-	defer func() {
-		f.mu.Lock()
-		f.refreshing = false
-		f.mu.Unlock()
-	}()
-	aps, err := f.s.SampleProcesses(selfSweepTopN)
+// Sample does a SYNCHRONOUS sweep and returns the fresh footprint (MB, known). For ctl / diagnostics,
+// where a one-off process sweep is fine and a real number beats "unknown". Falls back to the cached
+// value if the sweep fails.
+func (f *SelfFootprint) Sample() (uint64, bool) {
+	if f.s == nil {
+		return 0, false
+	}
+	if mb, ok := f.sweep(); ok {
+		return mb, true
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.mb, f.known
+}
+
+// sweep runs one process sweep and folds the result. Returns the fresh sum (ok=false on sweep error).
+func (f *SelfFootprint) sweep() (uint64, bool) {
+	aps, err := f.s.SampleProcesses(selfSweepAll) // ALL processes: our small children must not be truncated
 	if err != nil {
-		return
+		return 0, false
 	}
 	mb := sumSelf(aps, f.names)
 	f.mu.Lock()
 	f.mb, f.known, f.at = mb, true, f.now()
 	f.mu.Unlock()
+	return mb, true
 }
 
-// selfSweepTopN is generous so rave-mate's children are not missed below the top consumers.
-const selfSweepTopN = 24
+// refresh is the async wrapper around sweep (clears the refreshing flag).
+func (f *SelfFootprint) refresh() {
+	f.sweep()
+	f.mu.Lock()
+	f.refreshing = false
+	f.mu.Unlock()
+}
+
+// selfSweepAll (0) tells SampleProcesses not to truncate to a top-N, so every rave-mate process is
+// counted regardless of its VRAM rank behind Resolume/other heavy consumers.
+const selfSweepAll = 0
 
 // sumSelf totals the MB of every process whose name matches one of names, across all adapters.
 func sumSelf(aps []gpumem.AdapterProcs, names []string) uint64 {

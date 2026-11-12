@@ -18,6 +18,7 @@ type Budget struct {
 	store    *CostStore
 	headroom func() gpumem.Headroom // primary-adapter headroom (cached sample); nil => fail open
 	self     func() (uint64, bool)  // rave-mate's own GPU footprint MB across its processes; nil => unknown
+	selfNow  func() (uint64, bool)  // synchronous self footprint for ctl; nil => falls back to self
 	adapter  func() Adapter         // adapter identity for cost keys; nil => unknown
 
 	lastMu sync.Mutex
@@ -29,14 +30,15 @@ type Options struct {
 	Policy   Policy
 	Store    *CostStore
 	Headroom func() gpumem.Headroom
-	Self     func() (uint64, bool)
+	Self     func() (uint64, bool) // async, non-blocking (admission path)
+	SelfNow  func() (uint64, bool) // synchronous (ctl Report); nil => falls back to Self
 	Adapter  func() Adapter
 }
 
 // New builds a Budget from Options.
 func New(o Options) *Budget {
-	return &Budget{pol: o.Policy, store: o.Store, headroom: o.Headroom, self: o.Self, adapter: o.Adapter,
-		last: map[Op]Decision{}}
+	return &Budget{pol: o.Policy, store: o.Store, headroom: o.Headroom, self: o.Self, selfNow: o.SelfNow,
+		adapter: o.Adapter, last: map[Op]Decision{}}
 }
 
 // Policy returns the active policy (diagnostics).
@@ -126,6 +128,10 @@ func (b *Budget) ReserveFloorMB() uint64 {
 func (b *Budget) Report() string {
 	var sb strings.Builder
 	in := b.inputs()
+	// ctl: a synchronous self-footprint sweep beats "unknown" (admission uses the async value).
+	if b.selfNow != nil {
+		in.SelfUsedMB, in.SelfKnown = b.selfNow()
+	}
 	if in.Headroom.Present {
 		cap := SelfCapMB(in.Headroom.BudgetMB, b.pol)
 		self := "self=?"

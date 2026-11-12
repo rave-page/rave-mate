@@ -53,7 +53,8 @@ func WireVramBudget(liveCfg func() config.MediaLinkFeature, sampler gpumem.Sampl
 			log.Warn("gpubudget", m, nil)
 		}
 	})
-	b := gpubudget.New(gpubudget.Options{Policy: pol, Store: store, Headroom: headroom, Self: self.Get, Adapter: adapter})
+	b := gpubudget.New(gpubudget.Options{Policy: pol, Store: store, Headroom: headroom,
+		Self: self.Get, SelfNow: self.Sample, Adapter: adapter})
 
 	mfenc.DecAdmit = func(inW, inH, _, _, fps int, hevc bool) mfenc.DecVerdict {
 		d := b.AdmitDecode(inW, inH, fps, decCodec(hevc))
