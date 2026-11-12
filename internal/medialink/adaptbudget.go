@@ -163,6 +163,22 @@ func (rm *RouteManager) adaptiveBase(codec Codec, w, h, fps int) int {
 	return AdaptiveBaseKbps(BitrateMode(mode), user, fixed, codec, w, h, fps)
 }
 
+// budgetKbpsFn returns the per-route closure the governors call each tick: the adaptive model
+// bitrate for a CODED height (aspect-preserved, capped by the user ceiling / fixed value). codedH<=0
+// or >=nominal => nominal. Lets the governor's bitrate follow a live resolution cap (item 2).
+func (rm *RouteManager) budgetKbpsFn(codec Codec, w, h, fps int) func(codedH int) int {
+	return func(codedH int) int {
+		ch, cw := h, w
+		if codedH > 0 && codedH < h {
+			ch = codedH
+			if h > 0 {
+				cw = w * codedH / h
+			}
+		}
+		return rm.adaptiveBase(codec, cw, ch, fps)
+	}
+}
+
 // AdaptiveBudget holds one route's QP-bump hysteresis state (not concurrency-safe: one per route,
 // stepped by that route's governor goroutine).
 type AdaptiveBudget struct {
@@ -274,6 +290,18 @@ func SplitLinkCeiling(totalKbps int, pixelRates []int64) []int {
 		}
 	}
 	return out
+}
+
+// capBudgetToCoded lowers a RateHint's bitrate to the quality model's value for the CODED height when
+// a resolution cap is active (the budget follows the coded size: a smaller coded frame needs fewer
+// bits, a restore raises it). No-op when MaxHeight==0 (nominal) or budget is nil.
+func capBudgetToCoded(h *RateHint, budget func(codedH int) int) {
+	if h.MaxHeight <= 0 || budget == nil {
+		return
+	}
+	if m := budget(h.MaxHeight); m > 0 && (h.MaxBitrateKbps <= 0 || m < h.MaxBitrateKbps) {
+		h.MaxBitrateKbps = m
+	}
 }
 
 // ── helpers ──

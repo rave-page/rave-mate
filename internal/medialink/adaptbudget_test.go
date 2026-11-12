@@ -176,6 +176,34 @@ func TestSplitLinkCeiling(t *testing.T) {
 	}
 }
 
+func TestCapBudgetToCoded(t *testing.T) {
+	// budget: model(1080)=12000, model(2160)=35000 (stand-in).
+	budget := func(codedH int) int {
+		if codedH > 0 && codedH <= 1080 {
+			return 12000
+		}
+		return 35000
+	}
+	// No cap (MaxHeight 0): bitrate untouched.
+	h := RateHint{MaxBitrateKbps: 35000}
+	capBudgetToCoded(&h, budget)
+	if h.MaxBitrateKbps != 35000 {
+		t.Fatalf("no cap must not change bitrate: %d", h.MaxBitrateKbps)
+	}
+	// Cap to 1080: bitrate drops to the 1080 model (12000).
+	h = RateHint{MaxHeight: 1080, MaxBitrateKbps: 35000}
+	capBudgetToCoded(&h, budget)
+	if h.MaxBitrateKbps != 12000 {
+		t.Fatalf("coded-size cap must lower bitrate to the model: %d", h.MaxBitrateKbps)
+	}
+	// Never raises above an already-lower hint (congestion/VRAM trim wins).
+	h = RateHint{MaxHeight: 1080, MaxBitrateKbps: 5000}
+	capBudgetToCoded(&h, budget)
+	if h.MaxBitrateKbps != 5000 {
+		t.Fatalf("must not raise a lower cap: %d", h.MaxBitrateKbps)
+	}
+}
+
 func TestNormalizeBitrateModeMigration(t *testing.T) {
 	// Empty (existing configs with only bitrateKbps) => auto; explicit fixed preserved.
 	if NormalizeBitrateMode("") != BitrateAuto {

@@ -1385,13 +1385,14 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 	// Compressed video only.
 	if ans.Codec.CompressedVideo() {
 		// Adaptive budget: the governor ceiling is the quality-model target for THIS route's codec +
-		// geometry (fixed mode => the configured value), not a flat config number.
-		base := rm.adaptiveBase(ans.Codec, srcDesc.Width, srcDesc.Height, int(srcDesc.FPS))
+		// geometry (fixed mode => the configured value), following the CODED size per tick (item 2) so
+		// a resolution cap lowers the bitrate and a restore raises it.
+		budget := rm.budgetKbpsFn(ans.Codec, srcDesc.Width, srcDesc.Height, int(srcDesc.FPS))
 		switch {
 		case udp != nil:
-			go rm.guard("congestGovernor", func() { rm.congestGovernor(rctx, rio, udp, ans.Stream, base, int(srcDesc.FPS)) })
+			go rm.guard("congestGovernor", func() { rm.congestGovernor(rctx, rio, udp, ans.Stream, budget, int(srcDesc.FPS)) })
 		case rm.headroom != nil:
-			go rm.guard("rateGovernor", func() { rm.rateGovernor(rctx, rio, ans.Stream, base, int(srcDesc.FPS)) })
+			go rm.guard("rateGovernor", func() { rm.rateGovernor(rctx, rio, ans.Stream, budget, int(srcDesc.FPS)) })
 		}
 	}
 	if jb != nil {

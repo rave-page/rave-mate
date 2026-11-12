@@ -89,7 +89,8 @@ func govFPS(base, div int) int {
 // resolution last-resort, unwired). Runs only for compressed video routes with a known base
 // bitrate. Emits ONLY on a change (dedup), including restoring the base on recovery; fails open
 // (governor off or headroom unknown => never emits, sender stays at full).
-func (rm *RouteManager) rateGovernor(ctx context.Context, rio *routeIO, stream uint16, baseKbps, baseFPS int) {
+func (rm *RouteManager) rateGovernor(ctx context.Context, rio *routeIO, stream uint16, budget func(codedH int) int, baseFPS int) {
+	baseKbps := budget(0)
 	if rm.headroom == nil || baseKbps <= 0 {
 		return
 	}
@@ -110,7 +111,8 @@ func (rm *RouteManager) rateGovernor(ctx context.Context, rio *routeIO, stream u
 		if !present {
 			continue // headroom unknown: fail open
 		}
-		h := rateLadder(free, rm.govFloorMB, baseKbps, baseFPS, stream)
+		h := rateLadder(free, rm.govFloorMB, budget(0), baseFPS, stream)
+		capBudgetToCoded(&h, budget) // item 2: a resolution cap lowers the bitrate to the coded-size model
 		if sent && h == last {
 			continue
 		}
