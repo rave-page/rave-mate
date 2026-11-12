@@ -39,7 +39,10 @@ fn fixtureKeys() struct { ks: keys.KeySchedule, token: u32 } {
     const nonces = ([_]u8{0xAA} ** 16) ++ ([_]u8{0xBB} ** 16);
     @memcpy(salt[0..32], &nonces);
     @memcpy(salt[32..40], "route-99");
-    return .{ .ks = keys.deriveUdp(&master, &salt, true), .token = keys.token(&master, &salt) };
+    // The native sender is the ANSWERER = responder (initiator=false): send=s2c, recv=c2s. A native
+    // receiver pairs with deriveUdp(initiator=true). The earlier sender→decoder tests use ks.send for
+    // both the seal and the open, so this direction flip keeps them consistent too.
+    return .{ .ks = keys.deriveUdp(&master, &salt, false), .token = keys.token(&master, &salt) };
 }
 
 fn openNativeSender(recv_addr: SockaddrIn, encrypt: bool) !*snd.Sender {
@@ -227,6 +230,65 @@ test "receiver NACK -> sender retransmits from the ring" {
     }
     try testing.expect(retx_seen);
     try testing.expect(sender.snapshot().retransmits >= 1);
+}
+
+// ── end-to-end: native sender → native receiver (increment-3 milestone) ──────────────────────────
+const Receiver = @import("receiver.zig").Receiver;
+const RxConfig = @import("receiver.zig").RxConfig;
+
+var g_rx_count: u32 = 0;
+var g_rx_lastbyte: u8 = 0;
+fn onFrame(user: ?*anyopaque, ptr: [*]const u8, len: usize, pts: i64) callconv(.c) void {
+    _ = user;
+    _ = pts;
+    g_rx_count += 1;
+    if (len > 0) g_rx_lastbyte = ptr[len - 1];
+}
+
+test "end-to-end: native sender -> native receiver, frames delivered through playout" {
+    g_rx_count = 0;
+    const fk = fixtureKeys();
+    // Receiver keys: dialer (initiator) opens the sender's media (s2c) + seals control (c2s).
+    var master: [32]u8 = undefined;
+    for (&master, 0..) |*b, i| b.* = @intCast(i + 1);
+    var sb: [64]u8 = undefined;
+    const nonces = ([_]u8{0xAA} ** 16) ++ ([_]u8{0xBB} ** 16);
+    @memcpy(sb[0..32], &nonces);
+    @memcpy(sb[32..40], "route-99");
+    const ks_rcv = keys.deriveUdp(&master, sb[0..40], true); // dialer
+
+    const r = try bindEphemeral();
+    const rx = try Receiver.open(testing.allocator, r.fd, .{
+        .encrypt = true,
+        .token = fk.token,
+        .open_key = ks_rcv.recv.key, // s2c: opens the answerer's media
+        .open_prefix = ks_rcv.recv.prefix,
+        .send_key = ks_rcv.send.key, // c2s: seals control to the sender
+        .send_prefix = ks_rcv.send.prefix,
+        .body_max = 1200,
+        .fps = 60,
+    });
+    rx.on_frame = onFrame;
+    defer rx.close();
+    defer snd.closeFd(r.fd);
+
+    const sender = try openNativeSender(r.addr, true); // answerer
+    defer sender.close();
+
+    const n_aus = 12;
+    var i: u32 = 0;
+    while (i < n_aus) : (i += 1) {
+        var au: [8]u8 = undefined;
+        au[0] = 0xAA;
+        au[7] = @intCast(i);
+        sender.submit(&au, @as(i64, i) + 1, if (i == 0) snd.flag_keyframe else 0);
+        sleepMs(8);
+    }
+    // Wait out the playout margin + delivery.
+    const deadline = nowMs() + 3000;
+    while (g_rx_count < n_aus and nowMs() < deadline) sleepMs(10);
+    try testing.expect(g_rx_count >= n_aus - 1); // allow the very first/last to be in flight
+    try testing.expect(rx.deliveredCount() >= n_aus - 1);
 }
 
 fn nowMs() i64 {
