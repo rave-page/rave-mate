@@ -28,6 +28,9 @@ pub const Config = struct {
     recv_key: [32]u8 = undefined,
     recv_prefix: u32 = 0,
     rate_bps: f64 = 0,
+    initial_seq: u64 = 0, // first datagram seq (continues the Go handshake conn's seq space)
+    fps: i32 = 0, // nominal frame-rate rung (mirrors NativeTXParams.FPS); not used on the TX path yet
+    startup_grace_ns: i64 = default_startup_grace_ns, // liveness grace before the route establishes
 };
 
 pub const Stats = struct {
@@ -48,7 +51,7 @@ const retx_slots = 2048;
 const retx_dg_cap = 1500;
 const keepalive_ns: i64 = 100 * std.time.ns_per_ms;
 const liveness_ns: i64 = 2 * std.time.ns_per_s;
-const startup_grace_ns: i64 = 15 * std.time.ns_per_s;
+pub const default_startup_grace_ns: i64 = 15 * std.time.ns_per_s;
 
 // ── Linux socket syscalls (this dev-Zig moved socket I/O out of std.posix) ────────────────────────
 pub fn udpSocket() !i32 {
@@ -130,6 +133,8 @@ pub const Sender = struct {
             .dg_buf = try alloc.alloc(u8, wire.header_len + cfg.body_max + aead.tag_len + 64),
             .rx_buf = try alloc.alloc(u8, 2048),
         };
+        s.seq = cfg.initial_seq; // continue the Go conn's datagram seq space (strictly-newest at the receiver)
+        s.s_seq.store(cfg.initial_seq, .monotonic);
         s.last_recv_ns = nowNs();
         s.thread = try std.Thread.spawn(.{}, worker, .{s});
         return s;
@@ -256,7 +261,7 @@ pub const Sender = struct {
     }
 
     fn livenessDead(s: *Sender, now: i64) bool {
-        const window: i64 = if (s.established) liveness_ns else startup_grace_ns;
+        const window: i64 = if (s.established) liveness_ns else s.cfg.startup_grace_ns;
         return now - s.last_recv_ns > window;
     }
 

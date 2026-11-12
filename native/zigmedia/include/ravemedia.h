@@ -1,5 +1,10 @@
 /* ravemedia — native realtime media transport, SENDER C ABI. Mirror of src/root.zig exports.
- * ABI v1 (owner directive 2026-11-12: the per-frame path is native, no Go runtime in the loop).
+ * ABI v2 (owner directive 2026-11-12: the per-frame path is native, no Go runtime in the loop).
+ * ABI v2 (2026-11-12): rm_open_params gained struct_size (mismatched-caller guard), initial_seq
+ *   (the native sender CONTINUES the Go handshake conn's datagram seq space — without it the sender
+ *   started at 0, the receiver's replay window rejected it as too-old and never rebound → no media),
+ *   fps and startup_grace_ns (mirror NativeTXParams field-for-field). A caller built against v1 sets
+ *   abi_version=1 and is rejected cleanly (RM_ERR_ARGS); any struct-size skew is caught too.
  *
  * Ownership split: Go negotiates the route (Offer/Answer), derives the per-route keys + token, then
  * opens a native sender and hands it the derived material. The encode thread (Linux VA shim /
@@ -39,7 +44,7 @@
 extern "C" {
 #endif
 
-#define RM_ABI_VERSION 1u
+#define RM_ABI_VERSION 2u
 
 uint32_t rm_abi_version(void);
 int rm_wire_selftest(void); /* 0 = wire core matches its goldens (integration sanity) */
@@ -84,7 +89,8 @@ typedef struct {
  * (socket_fd < 0; peer_addr = sockaddr bytes). The UDP mux port the receiver dials is the one the
  * Answer advertised, so when Go hands a bound/connected socket its local port MUST match that. */
 typedef struct {
-    uint32_t abi_version;    /* = RM_ABI_VERSION */
+    uint32_t abi_version;    /* = RM_ABI_VERSION (mismatch -> RM_ERR_ARGS, no struct access) */
+    uint32_t struct_size;    /* = sizeof(rm_open_params); layout-skew guard -> RM_ERR_ARGS */
     rm_transport transport;  /* UDP or TCP (the owner's route may be either) */
     rm_codec codec;          /* payload codec -> frame header */
     uint16_t stream;         /* negotiated media stream id */
@@ -94,6 +100,12 @@ typedef struct {
     int32_t peer_addr_len;
     rm_keys keys;
     double initial_rate_bytes_per_sec; /* pacer rate (0 = unpaced) */
+    uint64_t initial_seq;    /* first datagram seq: CONTINUE the Go conn's seq space (udpConn.sendSeq())
+                              * so the first native datagram is strictly-newest at the receiver, which
+                              * rebinds its remote to the native socket. 0 against an advanced receiver
+                              * window is rejected as too-old (no rebind, no media) - by design. */
+    int32_t fps;             /* nominal frame-rate rung (0 = unknown); mirrors NativeTXParams.FPS */
+    int64_t startup_grace_ns;/* liveness grace before the route establishes (0 -> native default 15s) */
 } rm_open_params;
 
 typedef struct rm_sender rm_sender; /* opaque */

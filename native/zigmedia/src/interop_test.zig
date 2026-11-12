@@ -46,6 +46,10 @@ fn fixtureKeys() struct { ks: keys.KeySchedule, token: u32 } {
 }
 
 fn openNativeSender(recv_addr: SockaddrIn, encrypt: bool) !*snd.Sender {
+    return openNativeSenderSeq(recv_addr, encrypt, 0);
+}
+
+fn openNativeSenderSeq(recv_addr: SockaddrIn, encrypt: bool, initial_seq: u64) !*snd.Sender {
     const fk = fixtureKeys();
     const fd = try snd.udpSocket();
     try snd.udpConnect(fd, @ptrCast(&recv_addr), @sizeOf(SockaddrIn));
@@ -61,8 +65,32 @@ fn openNativeSender(recv_addr: SockaddrIn, encrypt: bool) !*snd.Sender {
         .recv_key = fk.ks.recv.key,
         .recv_prefix = fk.ks.recv.prefix,
         .rate_bps = 0,
+        .initial_seq = initial_seq,
     };
     return snd.Sender.open(testing.allocator, cfg, fd, true);
+}
+
+test "native sender continues InitialSeq: first datagram seq == InitialSeq" {
+    const r = try bindEphemeral();
+    defer snd.closeFd(r.fd);
+    const initial_seq: u64 = 0x12340000;
+    const sender = try openNativeSenderSeq(r.addr, true, initial_seq);
+    defer sender.close();
+    sender.submit("seqtest", 1, snd.flag_keyframe);
+
+    // The first datagram out of the worker (a keepalive ping or the media, whichever the single worker
+    // emits first) MUST carry seq == initial_seq - that strictly-newest first datagram is what makes
+    // the Go receiver rebind its remote to the native socket. Loopback preserves single-sender order.
+    var buf: [2048]u8 = undefined;
+    const deadline = nowMs() + 3000;
+    while (nowMs() < deadline) {
+        const rn = linux.recvfrom(r.fd, &buf, buf.len, 0, null, null);
+        if (linux.errno(rn) != .SUCCESS) continue;
+        const h = wire.Header.decode(buf[0..rn]) catch continue;
+        try testing.expectEqual(initial_seq, h.seq);
+        return;
+    }
+    return error.NoDatagram;
 }
 
 // decodeMedia authenticates (AEAD) + parses a media datagram, returning (frame_seq, frag_idx,

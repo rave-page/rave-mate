@@ -62,11 +62,36 @@ is equivalent to the Go receiver): AEAD media decodes IN ORDER, large AU fragmen
 (interop is Linux-only). Socket I/O uses `std.os.linux` raw syscalls (this dev-Zig moved it out of
 `std.posix`); Windows sockets are increment 4. ABI unchanged (no version bump).
 
+## ABI v2 (2026-11-12) + Go-receiver cgo interop DONE
+
+`rm_open_params` grew `struct_size` (layout-skew guard), `initial_seq`, `fps`, `startup_grace_ns`,
+`RM_ABI_VERSION` → 2. **Why:** the native sender started at datagram seq 0; a real `udpConn` whose
+replay window was already advanced by the Go handshake rejected those datagrams as too-old and never
+rebound → no media. `initial_seq` = `udpConn.sendSeq()` continues the seq space so the first native
+datagram is strictly-newest → the receiver rebinds its remote to the native socket. A v1 caller
+(abi_version=1) or any struct-size skew is rejected cleanly (RM_ERR_ARGS) before any field use.
+
+**Go-receiver cgo interop (item B) — DONE.** `internal/medialink/nativesender_{cgo,interop}_linux_*.go`
+(`//go:build linux && zignative`) links `libravemedia.a` into a Go test: native sender → a REAL
+`udpConn` over loopback. Proven (Linux build container, Go 1.26.6 + gcc + CGO): continuing InitialSeq →
+receiver rebinds + media flows + a dropped fragment recovered via NACK→retransmit + `rm_tx_close` bye
+ends the route with errUDPEnded; and initial_seq=0 vs an advanced window is REJECTED (no rebind, no
+media) while initial_seq=highSeq+1 is accepted over the same window. Build + run:
+`cd native/zigmedia && zig build -Dtarget=x86_64-linux-gnu --release=fast`, then
+`go test -tags zignative -run NativeSender ./internal/medialink/` in the container.
+**The Go RECEIVER needs NO change for a native sender** — it is still the Go `udpConn` until the native
+Windows receiver (increment 3) lands; the native sender is wire-compatible with it.
+
+**Linux agent's call site (branch feat/pw-4k, commit ecb0003):** its `rm_open_params` construction must
+add, to clear the v1→v2 skew rejection: `struct_size = sizeof(rm_open_params)`, `initial_seq =
+NativeTXParams.InitialSeq` (`udpConn.sendSeq()`), `fps = NativeTXParams.FPS`, `startup_grace_ns =
+int64(NativeTXParams.StartupGrace)` (0 → native 15s default), and bump its `abi_version` to 2 /
+`RM_ABI_VERSION`. (The call site is NOT on feat/udp-transport, so it is not edited here.)
+
 ## Next increments
 
 - **2b-cont — TCP path** (length-prefixed, implicit-counter GCM, wirecrypto.Sealer labels) behind the
-  same ABI (`rm_tx_open` transport=TCP currently returns RM_ERR_UNIMPL). **Go-receiver cgo interop**
-  (link `libravemedia.a` into a Go test, native sender → a real `udpConn`) + the impairment shim, and
+  same ABI (`rm_tx_open` transport=TCP currently returns RM_ERR_UNIMPL), and
   the **4K60 10-minute soak** with the STEP-0 stage histograms on the Go receiver (acceptance: no
   receive-stage interval > 2 frame periods; zero steady-state allocations — assert via the histograms +
   a failing-allocator guard). Elevated-priority tuning (MMCSS/SCHED_FIFO) pass.
