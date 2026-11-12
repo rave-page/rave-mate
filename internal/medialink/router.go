@@ -206,12 +206,15 @@ type pendingOffer struct {
 }
 
 type activeRoute struct {
-	cancel context.CancelFunc
-	conn   frameConn
-	stat   *routeStat
-	jb     *jitterBuffer    // recv video routes (§3.3); nil otherwise
-	pipe   PipelineReporter // encode/decode child telemetry; nil = passthrough
-	udp    *udpConn         // non-nil on a UDP route (transport telemetry + congestion input)
+	cancel   context.CancelFunc
+	conn     frameConn
+	stat     *routeStat
+	peer     string           // recv-side peer (dedup key)
+	sourceID string           // recv-side source (dedup key: one recv route per peer+source)
+	dir      string           // "send" | "recv"
+	jb       *jitterBuffer    // recv video routes (§3.3); nil otherwise
+	pipe     PipelineReporter // encode/decode child telemetry; nil = passthrough
+	udp      *udpConn         // non-nil on a UDP route (transport telemetry + congestion input)
 }
 
 // Options configures a RouteManager. Bus, Secrets, Self are required.
@@ -1060,7 +1063,7 @@ func (rm *RouteManager) pumpSource(ctx context.Context, session string, pa *pend
 	if pa.caps.nack {
 		rio.rebuf = newRetransmitBuf(0, 0)
 	}
-	ar := &activeRoute{cancel: cancel, conn: conn, stat: st, udp: udp}
+	ar := &activeRoute{cancel: cancel, conn: conn, stat: st, udp: udp, dir: "send", peer: pa.peer, sourceID: pa.offer.SourceID}
 	if pr, ok := src.(PipelineReporter); ok {
 		ar.pipe = pr
 	}
@@ -1294,7 +1297,7 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 		}
 	}
 	rio := &routeIO{conn: conn, st: st, caps: capsFromAnswer(ans)}
-	ar := &activeRoute{cancel: cancel, conn: conn, stat: st, udp: udp}
+	ar := &activeRoute{cancel: cancel, conn: conn, stat: st, udp: udp, dir: "recv", peer: peer, sourceID: po.sourceID}
 	if pr, ok := final.(PipelineReporter); ok {
 		ar.pipe = pr
 	}
@@ -1313,6 +1316,7 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 		ar.jb = jb
 	}
 	rm.trackRoute(ans.Session, ar)
+	rm.dropDuplicateRecv(peer, po.sourceID, ans.Session) // one recv route per (peer, source): replace atomically
 	rm.infof("route up (recv)", map[string]any{"session": ans.Session, "peer": peer, "stream": ans.Stream,
 		"codec": ans.Codec, "compressed": ans.Codec.CompressedVideo(), "decoded": final != sink})
 	if rio.caps.report {
@@ -1350,14 +1354,16 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 		err = rm.runReceive(rctx, rio, final)
 	}
 	_ = final.Close()
-	rm.endRoute(ans.Session, conn, err, "recv")
-	// §2.5 mid-route UDP blackout: no datagrams within the liveness window while we are otherwise up.
-	// Renegotiate ONCE onto TCP (the control plane re-answers if the peer is still reachable).
-	if udp != nil && errors.Is(err, errUDPDead) && !po.noUDP {
-		rm.warnf("udp route blackout - renegotiating once on TCP", map[string]any{"session": ans.Session, "peer": peer})
-		_, _ = rm.OfferRoute(po.target, po.sourceID, po.sinkID, OfferOptions{
-			Codec: CodecNone, BitrateKbps: po.bitrate, Decoders: po.decoders, ForceTCP: true})
+	if udp != nil && errors.Is(err, errUDPDead) {
+		// §2.5 mid-route UDP blackout. The route ends here; re-establishment is the RECEIVE layer's
+		// job (mediaroute auto-resume re-offers via StartReceive, and dialConn's reachability probe
+		// falls back to TCP if UDP is still blocked). The RouteManager must NOT re-offer directly:
+		// that produced an UNTRACKED route (bypassing mediaroute's receive bookkeeping) which showed
+		// up as a second live route for one source and which `route-stop all` could not find.
+		rm.warnf("udp route blackout - route ended; receive layer will re-establish (TCP if UDP stays blocked)",
+			map[string]any{"session": ans.Session, "peer": peer})
 	}
+	rm.endRoute(ans.Session, conn, err, "recv")
 }
 
 // remoteSourceDesc looks a peer's advertised source up (decode dims + fps).
@@ -1526,6 +1532,31 @@ func (rm *RouteManager) trackRoute(session string, r *activeRoute) {
 	}
 	rm.active[session] = r
 	rm.mu.Unlock()
+}
+
+// dropDuplicateRecv closes any OTHER active recv route for the same (peer, sourceID) - the atomic
+// "one route per source" guarantee on a receiver. A transport fallback/upgrade, a mediaroute
+// re-offer, the §-asymmetric-reachability edge, or a UI/auto-resume race can each produce a second
+// offer for a source already being received; when the new route comes up it REPLACES the old (tear
+// down the loser: its goroutine, decoder + sink follow the conn close), so a receiver never runs two
+// live routes + two 4K decodes into one Spout sink for one source.
+func (rm *RouteManager) dropDuplicateRecv(peer, sourceID, keep string) {
+	rm.mu.Lock()
+	var victims []*activeRoute
+	for sess, r := range rm.active {
+		if sess == keep || r.dir != "recv" || r.peer != peer || r.sourceID != sourceID {
+			continue
+		}
+		victims = append(victims, r)
+		delete(rm.active, sess)
+	}
+	rm.mu.Unlock()
+	for _, r := range victims {
+		rm.warnf("replaced a duplicate recv route (one per peer+source)",
+			map[string]any{"peer": peer, "source": sourceID, "keep": keep})
+		r.cancel()
+		_ = r.conn.Close()
+	}
 }
 
 func (rm *RouteManager) endRoute(session string, conn frameConn, err error, dir string) {

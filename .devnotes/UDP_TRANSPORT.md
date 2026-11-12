@@ -273,3 +273,55 @@ the lead must re-measure after deploy.
 
 Operational note: during live diagnosis a `ctl route-stop <peer> all` also stopped a separate user
 "Spout2PW (VRChat)" route (already starving, fps 2/0). Use a specific session id, not `all`.
+
+## Post-deploy round 2 (2026-11-12, both PCs on d6dc2fb): duplicate routes + stop-all
+
+Live logs (real 4K VRChat route sus↔this PC) nailed the sequence behind the three route-lifecycle
+findings - a single captured timeline:
+
+```
+recv up  session=4c7f… stream=2 (udp, congestion governor runs)
+recv end session=4c7f… "udp route blackout" (BOTH ends' liveness fired ~3s apart)
+recv up  session=2f03… stream=3 (TCP) ← the RouteManager blackout RE-OFFER (untracked: rm.OfferRoute, NOT StartReceive)
+recv up  session=b21e… stream=4 (udp) ← mediaroute auto-resume re-offer ~30s later (tracked)
+→ stream 3 (tcp) + stream 4 (udp) BOTH LIVE for one source = the duplicate
+```
+
+- **Duplicate route for one (peer, source) [fixed].** Two independent re-offers raced: the blackout
+  re-offer (untracked TCP) + the auto-resume reconcile re-offer (tracked UDP). Root fix: the
+  RouteManager now enforces ONE recv route per (peer, sourceID) and REPLACES atomically -
+  `dropDuplicateRecv` closes any other live recv route for the same (peer, source) when a new one
+  comes up (tear down the loser; its decoder + Spout sink follow the conn close). Never two live
+  routes / two 4K decodes into one sink. Test: `TestDropDuplicateRecv`. ALSO removed the RouteManager
+  blackout RE-OFFER (it created the untracked route): on a UDP blackout the route just ends; the
+  RECEIVE layer re-establishes via StartReceive (tracked), and dialConn's reachability probe falls
+  back to TCP if UDP is still blocked - so the TCP escape is kept, without an untracked route.
+- **`route-stop … all` stopped only 1 of 2 [fixed by the above].** It iterates `m.receives`
+  (StartReceive bookkeeping); the blackout re-offer's TCP route was created via `rm.OfferRoute`
+  directly, so it was never in `m.receives` and was unmatched. Removing the untracked re-offer means
+  every receiver route goes through StartReceive → `m.receives` → stop-all sees it; the atomic replace
+  means there is only ever one to stop. (`route-stop` itself: `all` already matches every receive for
+  the peer; the bug was the invisible route, not the matcher.)
+- **First route came up TCP / the UDP route blacks out ~4.5s in [root-caused; cascade fixed, true
+  reverse-path cause left for the lead].** It is not a skipped handshake and not the per-route-key /
+  authenticate-before-claim change: both ends derive keys+token from the two route nonces + session
+  BEFORE the first datagram (verified), the answerer registers the mux-expect before publishing the
+  Answer, and the logs show the UDP route coming UP (handshake succeeded) then blacking out. Both the
+  receiver AND the sender logged "udp route blackout (no datagrams within liveness window)" ~3s apart:
+  the REVERSE control path (receiver→sus keepalives/reports) stopped refreshing sus's liveness, so sus
+  stopped sending and the receiver then timed out. Most likely cause: the Windows firewall on the
+  freshly-replaced exe blocking the dialer's EPHEMERAL UDP socket (the recv-route dialer binds a
+  random port via net.ListenUDP, which the 47641-5 firewall rule does not cover), so the reverse
+  datagrams never reach sus. The blackout re-offer then turned this transient into a stuck TCP route +
+  a duplicate - both now fixed. LEAD TO CHECK after deploy: whether UDP stays up on a normal route;
+  if it still blacks out, (a) confirm the inbound-UDP firewall rule covers the dialer path, and
+  consider binding the recv-route dialer to the well-known media port range (or sharing the answerer's
+  UDP socket) so one firewall rule covers both directions; (b) watch sus's udpConn liveness vs the
+  receiver's keepalive arrival.
+- **Sender `fps out=0` on the native engine [not my area - reported].** `out` = PipelineStats.OutFPS
+  ("frames leaving the encoder child"), populated by the MF-native bridge (mf_bridge.go) but NOT by
+  the Linux `h264_vaapi_native` send engine (the Linux agent's new engine). Frames clearly flow
+  (receiver out=58-60); it is a send-side telemetry gap in the native VA-API engine's PipeStats.
+
+`ctl logs` streams/follows (SubscribeLogs; stops only on client disconnect) - intended, but a
+non-following `ctl logs [-n N]` ring-buffer dump would help; run it under a hard `timeout` meanwhile.
