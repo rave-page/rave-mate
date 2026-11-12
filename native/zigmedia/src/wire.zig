@@ -103,3 +103,29 @@ pub fn numFrags(wire_len: usize, body_max: usize) usize {
     if (wire_len == 0) return 1;
     return (wire_len + body_max - 1) / body_max;
 }
+
+pub const ParsedFrame = struct {
+    stream: u16,
+    kind: u8,
+    codec: u8,
+    flags: u8,
+    seq: u32,
+    pts: i64,
+    payload: []const u8,
+};
+
+/// parseFrameForTest decodes the 26-byte inner Frame header + payload (receiver-side verification).
+pub fn parseFrameForTest(buf: []const u8) !ParsedFrame {
+    if (buf.len < frame_header_len) return error.Short;
+    const plen = std.mem.readInt(u32, buf[22..26], .big);
+    if (frame_header_len + plen != buf.len) return error.BadLen;
+    return .{
+        .stream = std.mem.readInt(u16, buf[0..2], .big),
+        .kind = buf[2],
+        .codec = buf[3],
+        .flags = buf[4],
+        .seq = std.mem.readInt(u32, buf[6..10], .big),
+        .pts = @bitCast(std.mem.readInt(u64, buf[14..22], .big)),
+        .payload = buf[frame_header_len..],
+    };
+}
