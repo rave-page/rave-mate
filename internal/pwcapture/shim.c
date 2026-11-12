@@ -275,6 +275,72 @@ static const enum spa_video_format OFFER_FORMATS[] = {
 	SPA_VIDEO_FORMAT_BGRA, SPA_VIDEO_FORMAT_RGBA, SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_RGBx};
 #define N_OFFER (sizeof(OFFER_FORMATS) / sizeof(OFFER_FORMATS[0]))
 
+/* ---- native per-AU interval histogram (lock-free; single writer = the encode thread) ---------------
+ * Same bucket bounds as medialink.stageBucketsUpperMs (framestages.go) so the native enc/tx stages read
+ * exactly like the Go-pump stages in `ctl routes`. Marked on the encode thread (relaxed atomics, no
+ * lock, no alloc); rpw_hist_snap computes the percentiles at Go's <= 1 Hz sample, off the frame path. */
+#define RPW_HIST_NB 32
+static const double rpw_hist_ub_ms[RPW_HIST_NB] = {
+	4, 8,
+	10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+	33, 40, 50, 75, 100, 150, 200, 500, 1e12};
+
+struct rpw_hist {
+	_Atomic long long last; /* mono ns of the previous mark (0 = none) */
+	_Atomic unsigned long long n, sum_ns, max_ns, o25, o50, o100;
+	_Atomic unsigned long long b[RPW_HIST_NB];
+};
+
+static void rpw_hist_mark(struct rpw_hist *h, long long now) {
+	long long prev = atomic_exchange_explicit(&h->last, now, memory_order_relaxed);
+	if (prev == 0 || now <= prev)
+		return;
+	unsigned long long d = (unsigned long long)(now - prev);
+	atomic_fetch_add_explicit(&h->n, 1, memory_order_relaxed);
+	atomic_fetch_add_explicit(&h->sum_ns, d, memory_order_relaxed);
+	if (d > atomic_load_explicit(&h->max_ns, memory_order_relaxed)) /* single writer: plain max */
+		atomic_store_explicit(&h->max_ns, d, memory_order_relaxed);
+	double ms = (double)d / 1e6;
+	if (ms > 25)
+		atomic_fetch_add_explicit(&h->o25, 1, memory_order_relaxed);
+	if (ms > 50)
+		atomic_fetch_add_explicit(&h->o50, 1, memory_order_relaxed);
+	if (ms > 100)
+		atomic_fetch_add_explicit(&h->o100, 1, memory_order_relaxed);
+	for (int i = 0; i < RPW_HIST_NB; i++) {
+		if (ms <= rpw_hist_ub_ms[i]) {
+			atomic_fetch_add_explicit(&h->b[i], 1, memory_order_relaxed);
+			break;
+		}
+	}
+}
+
+/* rpw_hist_pct: upper bound of the bucket holding quantile q (bucket-approximated, like StageHist). */
+static double rpw_hist_pct(struct rpw_hist *h, unsigned long long n, double q) {
+	unsigned long long target = (unsigned long long)(q * (double)n), cum = 0;
+	for (int i = 0; i < RPW_HIST_NB; i++) {
+		cum += atomic_load_explicit(&h->b[i], memory_order_relaxed);
+		if (cum >= target)
+			return rpw_hist_ub_ms[i];
+	}
+	return rpw_hist_ub_ms[RPW_HIST_NB - 1];
+}
+
+static void rpw_hist_snap(struct rpw_hist *h, rpw_stage_snap *o) {
+	memset(o, 0, sizeof(*o));
+	unsigned long long n = atomic_load_explicit(&h->n, memory_order_relaxed);
+	o->count = n;
+	o->max_ms = (double)atomic_load_explicit(&h->max_ns, memory_order_relaxed) / 1e6;
+	o->over25 = atomic_load_explicit(&h->o25, memory_order_relaxed);
+	o->over50 = atomic_load_explicit(&h->o50, memory_order_relaxed);
+	o->over100 = atomic_load_explicit(&h->o100, memory_order_relaxed);
+	if (n == 0)
+		return;
+	o->mean_ms = (double)atomic_load_explicit(&h->sum_ns, memory_order_relaxed) / 1e6 / (double)n;
+	o->p50_ms = rpw_hist_pct(h, n, 0.50);
+	o->p99_ms = rpw_hist_pct(h, n, 0.99);
+}
+
 /* ---- capture state -------------------------------------------------------------------------- */
 struct rpw_capture {
 	struct pw_thread_loop *loop;
@@ -370,6 +436,11 @@ struct rpw_capture {
 	long start_holds;        /* frames skipped pre-encode while the route's first AU was unconsumed */
 	long forced_idrs;        /* IDRs forced by a post-encode drop (byte cap) - at most one per episode */
 	int enc_sync;            /* RPW_ENC_SYNC: emit every frame synchronously (no 1-frame pipeline) */
+	/* native-path telemetry (encode thread writes; Go samples <= 1 Hz): per-AU interval histograms of
+	 * the encoder output (enc) and the native-sender hand-off (tx), keyframes, AU bytes. */
+	struct rpw_hist h_enc, h_tx;
+	long enc_keyframes;
+	long long enc_bytes;
 
 	/* Native realtime TX (unit 3): when the router attaches a native sender (UDP route + per-route
 	 * keys), the encode thread submits AUs straight to it (rm_tx_submit_au) instead of the AU ring ->
@@ -1030,8 +1101,13 @@ static int enc_ensure(struct rpw_capture *c) {
  * queue + drop + IDR callback) or the Go AU ring. A post-encode ring miss (byte cap only - room was
  * checked pre-encode) drops the AU and forces ONE IDR. Encode thread. */
 static void enc_emit_au(struct rpw_capture *c, rm_sender *tx, unsigned char *au, int aulen, int kf, long long pts) {
+	rpw_hist_mark(&c->h_enc, mono_ns());
+	c->enc_bytes += aulen;
+	if (kf)
+		c->enc_keyframes++;
 	if (tx) {
 		rm_tx_submit_au(tx, au, (size_t)aulen, (int64_t)pts, (uint32_t)(kf ? RM_FLAG_KEYFRAME : 0));
+		rpw_hist_mark(&c->h_tx, mono_ns()); /* queued to the native sender (== Go-pump "tx" stage) */
 		c->enc_aus++;
 		return;
 	}
@@ -1677,6 +1753,21 @@ long rpw_repeats(struct rpw_capture *c) { return c ? c->repeats : 0; }
 long rpw_ring_skips(struct rpw_capture *c) { return c ? c->ring_skips : 0; }
 long rpw_start_holds(struct rpw_capture *c) { return c ? c->start_holds : 0; }
 long rpw_forced_idrs(struct rpw_capture *c) { return c ? c->forced_idrs : 0; }
+long rpw_enc_keyframes(struct rpw_capture *c) { return c ? c->enc_keyframes : 0; }
+long long rpw_enc_bytes(struct rpw_capture *c) { return c ? c->enc_bytes : 0; }
+void rpw_native_stages(struct rpw_capture *c, rpw_stage_snap *enc, rpw_stage_snap *tx) {
+	if (!c) {
+		if (enc)
+			memset(enc, 0, sizeof(*enc));
+		if (tx)
+			memset(tx, 0, sizeof(*tx));
+		return;
+	}
+	if (enc)
+		rpw_hist_snap(&c->h_enc, enc);
+	if (tx)
+		rpw_hist_snap(&c->h_tx, tx);
+}
 int rpw_import_ok(struct rpw_capture *c) { return c ? c->import_ok : 0; }
 int rpw_coded_w(struct rpw_capture *c) { return c ? c->coded_w : 0; }
 int rpw_coded_h(struct rpw_capture *c) { return c ? c->coded_h : 0; }

@@ -292,8 +292,22 @@ func TestNativeTXSend(t *testing.T) {
 		t.Logf("NATIVE-TX t=%ds submitted=%d sent=%d dropped=%d datagrams=%d bytes=%d qdepth=%d dead=%v",
 			i+1, st.AUsSubmitted, st.AUsSent, st.AUsDropped, st.DatagramsSent, st.BytesSent, st.QueueDepth, st.Dead)
 	}
+	// Native-path telemetry must be truthful (the Go pump that normally feeds it does not run).
+	ps := esrc.(medialink.PipelineReporter).PipeStats()
+	t.Logf("NATIVE-TX telemetry: outFps=%.1f capFps=%.1f bytes/frame=%.0f queue=%d dropped=%d keyframes=%d",
+		ps.OutFPS, ps.CapFPS, ps.AUBytesPerFrame, ps.QueueDepth, ps.Dropped, st.Keyframes)
+	t.Logf("NATIVE-TX stage enc: n=%d p50=%.0f p99=%.0f max=%.1f mean=%.2f >25/50/100=%d/%d/%d",
+		st.Enc.Count, st.Enc.P50Ms, st.Enc.P99Ms, st.Enc.MaxMs, st.Enc.MeanMs, st.Enc.Over25, st.Enc.Over50, st.Enc.Over100)
+	t.Logf("NATIVE-TX stage tx:  n=%d p50=%.0f p99=%.0f max=%.1f mean=%.2f >25/50/100=%d/%d/%d",
+		st.Tx.Count, st.Tx.P50Ms, st.Tx.P99Ms, st.Tx.MaxMs, st.Tx.MeanMs, st.Tx.Over25, st.Tx.Over50, st.Tx.Over100)
 	if st.AUsSubmitted < uint64(secs*40) {
 		t.Errorf("too few AUs submitted (%d) in %ds - native submit path not flowing", st.AUsSubmitted, secs)
+	}
+	if ps.OutFPS < 40 || ps.CapFPS < 40 {
+		t.Errorf("native route fps telemetry zero/low: out=%.1f cap=%.1f", ps.OutFPS, ps.CapFPS)
+	}
+	if st.Enc.Count < uint64(secs*40) || st.Tx.Count < uint64(secs*40) || st.Keyframes == 0 {
+		t.Errorf("native stages/keyframes not populated: enc=%d tx=%d kf=%d", st.Enc.Count, st.Tx.Count, st.Keyframes)
 	}
 	if st.Dead {
 		t.Error("native sender dead")

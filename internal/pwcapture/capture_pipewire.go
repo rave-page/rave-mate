@@ -21,6 +21,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -90,6 +91,11 @@ type pwSource struct {
 	outRate     ratewin.Ring // emitted AUs: OutFPS + bytes/frame + AU totals
 	capRate     ratewin.Ring // dmabuf frames captured (from the C cap_frames counter delta): CapFPS
 	lastCapTick int64        // last cap_frames seen; nextAU is called serially by the pump (no lock)
+
+	// native TX route: the Go pump (nextAU) does not run, so the 1 Hz sampler (pwNativeTX.watch) feeds
+	// outRate/capRate from the C counters instead. Touched only by that goroutine.
+	nativeOn                     atomic.Bool
+	natAUs, natBytes, natCapTick int64
 }
 
 // Next implements medialink.Source. In vaapi-native encode mode it returns compressed Annex-B AUs
@@ -316,6 +322,13 @@ func (s *pwSource) PipeStats() medialink.PipelineStats {
 		return medialink.PipelineStats{}
 	}
 	drops := uint64(C.rpw_enc_drops(s.h)) + uint64(C.rpw_ring_skips(s.h)) // encode errors + downstream-stall skips
+	qdepth := int(C.rpw_ring_depth(s.h))                                  // AUs buffered in the lock-free hand-off ring
+	if s.nativeOn.Load() {                                                // native route: the sender's queue + its drops
+		var ns C.rm_tx_stats
+		C.rpw_native_tx_stats(s.h, &ns)
+		qdepth = int(ns.queue_depth)
+		drops += uint64(ns.aus_dropped)
+	}
 	importOK := C.rpw_import_ok(s.h) != 0
 	now := time.Now()
 	_, outFPS := s.outRate.Rate(now) // AUs/s leaving the encoder (windowed; accurate on one read)
@@ -335,7 +348,7 @@ func (s *pwSource) PipeStats() medialink.PipelineStats {
 		RateCapped: uint64(C.rpw_grid_drops(s.h)), // PTS-grid pacing (source faster than the rate): deliberate
 		AUBytes:    auBytes, AUCount: auCount, AUBytesPerFrame: bpf,
 		DevPolicy:     s.encNode,
-		QueueDepth:    int(C.rpw_ring_depth(s.h)), // AUs buffered in the lock-free hand-off ring
+		QueueDepth:    qdepth,
 		QualityTarget: quality, BudgetKbps: kbps,
 		Feedback: medialink.EncoderFeedback{
 			Present: present != 0, AvgQP: float64(avgQP), RateLimited: rateLimited != 0},
@@ -373,6 +386,8 @@ func (s *pwSource) AttachNativeTX(p medialink.NativeTXParams) (medialink.NativeT
 		C.uint(p.Token), rateBps, C.ulonglong(p.InitialSeq), C.int(p.FPS), C.longlong(int64(p.StartupGrace))) == 0 {
 		return nil, errors.New("pwcapture: rpw_attach_native_tx failed")
 	}
+	s.natAUs, s.natBytes, s.natCapTick = int64(C.rpw_enc_aus(s.h)), int64(C.rpw_enc_bytes(s.h)), int64(C.rpw_cap_frames(s.h))
+	s.nativeOn.Store(true)
 	tx := &pwNativeTX{s: s, done: make(chan struct{})}
 	go tx.watch()
 	if s.log != nil {
@@ -401,13 +416,37 @@ func (t *pwNativeTX) SetRate(kbps, fps int) {
 // Stats snapshots the native sender's lock-free counters.
 func (t *pwNativeTX) Stats() medialink.NativeTXStats {
 	var st C.rm_tx_stats
+	var enc, tx C.rpw_stage_snap
 	C.rpw_native_tx_stats(t.s.h, &st)
+	C.rpw_native_stages(t.s.h, &enc, &tx)
 	return medialink.NativeTXStats{
 		AUsSubmitted: uint64(st.aus_submitted), AUsSent: uint64(st.aus_sent),
 		AUsDropped: uint64(st.aus_dropped), DatagramsSent: uint64(st.datagrams_sent),
 		BytesSent: uint64(st.bytes_sent), Retransmits: uint64(st.retransmits),
 		Seq: uint64(st.seq), QueueDepth: int(st.queue_depth), Dead: st.dead != 0,
+		Keyframes: uint64(C.rpw_enc_keyframes(t.s.h)),
+		Enc:       stageSnap(&enc), Tx: stageSnap(&tx),
 	}
+}
+
+// stageSnap converts the natively computed stage distribution.
+func stageSnap(c *C.rpw_stage_snap) medialink.StageSnapshot {
+	return medialink.StageSnapshot{Count: uint64(c.count), MeanMs: float64(c.mean_ms), P50Ms: float64(c.p50_ms),
+		P99Ms: float64(c.p99_ms), MaxMs: float64(c.max_ms), Over25: uint64(c.over25), Over50: uint64(c.over50),
+		Over100: uint64(c.over100)}
+}
+
+// sampleNative feeds the windowed out/cap rates from the C counters (native route, <= 1 Hz, off the
+// frame path) - the Go pump that ticks them per AU does not run when the native sender owns the path.
+func (s *pwSource) sampleNative(now time.Time) {
+	aus, bytes, capf := int64(C.rpw_enc_aus(s.h)), int64(C.rpw_enc_bytes(s.h)), int64(C.rpw_cap_frames(s.h))
+	if d := aus - s.natAUs; d > 0 {
+		s.outRate.Add(uint64(bytes-s.natBytes), uint64(d), now)
+	}
+	if d := capf - s.natCapTick; d > 0 {
+		s.capRate.Add(0, uint64(d), now)
+	}
+	s.natAUs, s.natBytes, s.natCapTick = aus, bytes, capf
 }
 
 func (t *pwNativeTX) Done() <-chan struct{} { return t.done }
@@ -417,6 +456,7 @@ func (t *pwNativeTX) Err() error { t.mu.Lock(); defer t.mu.Unlock(); return t.er
 // Close stops + frees the native sender (clean bye); idempotent.
 func (t *pwNativeTX) Close() error {
 	C.rpw_native_tx_close(t.s.h)
+	t.s.nativeOn.Store(false)
 	t.finish(nil)
 	return nil
 }
@@ -434,7 +474,7 @@ func (t *pwNativeTX) finish(err error) {
 
 // watch closes Done when the native sender ends (dead flag), the capture closes, or Close is called.
 func (t *pwNativeTX) watch() {
-	tk := time.NewTicker(500 * time.Millisecond)
+	tk := time.NewTicker(time.Second) // <= 1 Hz: liveness + native rate sampling
 	defer tk.Stop()
 	for {
 		select {
@@ -443,7 +483,8 @@ func (t *pwNativeTX) watch() {
 		case <-t.s.done:
 			t.finish(errors.New("pwcapture: capture closed"))
 			return
-		case <-tk.C:
+		case now := <-tk.C:
+			t.s.sampleNative(now)
 			if t.Stats().Dead {
 				t.finish(errors.New("pwcapture: native TX ended (dead)"))
 				return

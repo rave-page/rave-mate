@@ -78,6 +78,17 @@ long rpw_repeats(struct rpw_capture *c);
 long rpw_ring_skips(struct rpw_capture *c);
 long rpw_start_holds(struct rpw_capture *c);
 long rpw_forced_idrs(struct rpw_capture *c);
+
+/* native-path telemetry, sampled by Go at <= 1 Hz: one stage's per-AU interval distribution (ms),
+ * computed natively from a lock-free histogram (same buckets as medialink.StageHist). */
+typedef struct {
+	unsigned long long count, over25, over50, over100;
+	double mean_ms, p50_ms, p99_ms, max_ms;
+} rpw_stage_snap;
+/* rpw_native_stages: enc = AUs leaving the encoder, tx = AUs queued to the native sender. */
+void rpw_native_stages(struct rpw_capture *c, rpw_stage_snap *enc, rpw_stage_snap *tx);
+long rpw_enc_keyframes(struct rpw_capture *c);
+long long rpw_enc_bytes(struct rpw_capture *c);
 int rpw_import_ok(struct rpw_capture *c);
 int rpw_coded_w(struct rpw_capture *c);
 int rpw_coded_h(struct rpw_capture *c);

@@ -127,6 +127,9 @@ type routeStat struct {
 	stages *FrameStages
 
 	mu            sync.Mutex
+	nativeStages  bool          // native send route: enc/tx stages come from the source (setNativeStats)
+	nativeEnc     StageSnapshot // guarded by mu
+	nativeTx      StageSnapshot
 	encoder       string // §3.2 negotiated encoder ("" = raw/echo route)
 	tier          int
 	software      bool
@@ -240,6 +243,10 @@ func (st *routeStat) setNativeStats(s NativeTXStats) {
 	st.retransmits = s.Retransmits
 	st.sentHighest = uint32(s.Seq)
 	st.sentAny = true
+	st.keyframes = s.Keyframes
+	if s.Enc.Count > 0 || s.Tx.Count > 0 {
+		st.nativeEnc, st.nativeTx, st.nativeStages = s.Enc, s.Tx, true
+	}
 	now := st.now()
 	st.lastCount = now
 	// count() is not called on a native route (the Go pump is idle), so drive the sliding rate window
@@ -452,6 +459,9 @@ func (st *routeStat) snapshot() RouteStat {
 		out.Remote = &r
 	}
 	out.Stages = st.stages.Snapshot()
+	if st.nativeStages && out.Stages != nil { // native route: the source's natively computed enc/tx stages
+		out.Stages.EncDone, out.Stages.TxQueue = st.nativeEnc, st.nativeTx
+	}
 	return out
 }
 
