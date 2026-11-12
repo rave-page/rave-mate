@@ -63,11 +63,44 @@ func TestQualityModelCodecAndFamilyOrdering(t *testing.T) {
 }
 
 func TestQualityModelBounds(t *testing.T) {
-	if QualityTargetKbps("h264", "", 0, 0, 0, ContentUnknown) != budgetFloorKbps {
-		t.Fatal("degenerate geometry must floor")
+	// Unknown inputs default to 1080p60 (NOT the floor) - the 2026-11-12 regression.
+	if g := QualityTargetKbps("h264", "", 0, 0, 0, ContentUnknown); !approx(g, 12000, 10) {
+		t.Fatalf("degenerate inputs must default to 1080p60 (~12000), got %d", g)
 	}
 	if g := QualityTargetKbps("h264", "", 7680, 4320, 120, ContentHighMotion); g != budgetCeilKbps {
 		t.Fatalf("8K120 must clamp to ceiling %d, got %d", budgetCeilKbps, g)
+	}
+}
+
+// TestQualityModelRobustToUnknownFPS: the live regression - a 4K source advertised at fps 0 (PipeWire
+// before capture) must NOT collapse to the 1000-kbps floor; fps<=0 => nominal 60.
+func TestQualityModelRobustToUnknownFPS(t *testing.T) {
+	if g := QualityTargetKbps("h264", "nvenc", 3840, 2160, 0, ContentUnknown); !approx(g, 35000, 10) {
+		t.Fatalf("4K@fps0 H264 = %d, want ~35000 (NOT the floor)", g)
+	}
+	if g := QualityTargetKbps("hevc", "nvenc", 3840, 2160, 0, ContentUnknown); !approx(g, 22000, 10) {
+		t.Fatalf("4K@fps0 HEVC = %d, want ~22000", g)
+	}
+	// Unknown geometry AND fps => 1080p60 default, never the floor.
+	if g := QualityTargetKbps("hevc", "", 0, 0, 0, ContentUnknown); g <= budgetFloorKbps {
+		t.Fatalf("all-unknown must exceed the floor, got %d", g)
+	}
+}
+
+// TestAdaptiveBaseRobustAtOfferTime: the offer/governor path for a 4K60 HEVC route with a 50000
+// ceiling must yield ~22 Mbps and NEVER below ~15 Mbps, even when fps is unknown at offer time.
+func TestAdaptiveBaseRobustAtOfferTime(t *testing.T) {
+	// Unknown fps (0) must use the nominal 60 => ~22 Mbps, never the floor (the regression). A known
+	// LOW fps (30) legitimately targets fewer bits - that is correct, not a regression.
+	for _, fps := range []int{0, 60} {
+		g := AdaptiveBaseKbps(BitrateAuto, 50000, 50000, CodecHEVC, 3840, 2160, fps)
+		if g < 15000 {
+			t.Fatalf("4K HEVC auto (fps=%d, ceiling 50000) = %d, must never be < ~15000", fps, g)
+		}
+	}
+	// fps 60: ~22 Mbps (below the 50 ceiling => the model binds, not the ceiling).
+	if g := AdaptiveBaseKbps(BitrateAuto, 50000, 50000, CodecHEVC, 3840, 2160, 60); !approx(g, 22000, 12) {
+		t.Fatalf("4K60 HEVC auto = %d, want ~22000", g)
 	}
 }
 
