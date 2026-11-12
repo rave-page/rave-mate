@@ -35,7 +35,10 @@ func (m *tickMedia) SetCodecCaps(_, _ []string)           {}
 func (m *tickMedia) SetSyncPeer(string)                   {}
 func (m *tickMedia) Encoders() []string                   { return nil }
 func (m *tickMedia) LocalSources() []medialink.SourceDesc { return nil }
-func (m *tickMedia) SyncStats() []medialink.SyncStat      { return nil }
+func (m *tickMedia) ProcRuntime() medialink.ProcRuntimeSnapshot {
+	return medialink.ProcRuntimeSnapshot{}
+}
+func (m *tickMedia) SyncStats() []medialink.SyncStat { return nil }
 func (m *tickMedia) ClockQuality() medialink.ClockQuality {
 	return medialink.ClockQuality{Tier: medialink.TierMonotonic, Locked: true}
 }

@@ -97,15 +97,16 @@ const (
 // mediaTelemetry is the whole daemon/UI-facing surface mirrored up so poll-style reads
 // (Stats/SyncStats/ClockQuality/RemoteVideoSources/Receives/Instances/Encoders) stay local.
 type mediaTelemetry struct {
-	Routes       []medialink.RouteStat     `json:"routes,omitempty"`
-	Sync         []medialink.SyncStat      `json:"sync,omitempty"`
-	Clock        medialink.ClockQuality    `json:"clock"`
-	Encoders     []string                  `json:"encoders,omitempty"`
-	LocalSources []medialink.SourceDesc    `json:"localSources,omitempty"` // this node's advertised sources (ctl media-sources)
-	Remote       []mediaroute.RemoteSource `json:"remote,omitempty"`
-	Receives     []mediaroute.Receive      `json:"receives,omitempty"`
-	Cams         []webcam.Instance         `json:"cams,omitempty"`
-	CamRunning   bool                      `json:"camRunning,omitempty"` // local cam live → daemon advertises CapCam
+	Routes       []medialink.RouteStat          `json:"routes,omitempty"`
+	Proc         *medialink.ProcRuntimeSnapshot `json:"proc,omitempty"` // STEP-0: media-child Go GC/sched pauses
+	Sync         []medialink.SyncStat           `json:"sync,omitempty"`
+	Clock        medialink.ClockQuality         `json:"clock"`
+	Encoders     []string                       `json:"encoders,omitempty"`
+	LocalSources []medialink.SourceDesc         `json:"localSources,omitempty"` // this node's advertised sources (ctl media-sources)
+	Remote       []mediaroute.RemoteSource      `json:"remote,omitempty"`
+	Receives     []mediaroute.Receive           `json:"receives,omitempty"`
+	Cams         []webcam.Instance              `json:"cams,omitempty"`
+	CamRunning   bool                           `json:"camRunning,omitempty"` // local cam live → daemon advertises CapCam
 }
 
 // clockOffsetEvent mirrors the child media clock's Now() so the daemon's mediaClock - which the

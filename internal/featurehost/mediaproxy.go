@@ -235,6 +235,15 @@ func (p *MediaProxy) Stats() []medialink.RouteStat {
 func (p *MediaProxy) SyncStats() []medialink.SyncStat      { return p.h.snap().Sync }
 func (p *MediaProxy) ClockQuality() medialink.ClockQuality { return p.h.snap().Clock }
 
+// ProcRuntime returns the media CHILD's last-sampled Go GC/scheduler pauses (STEP-0). The child
+// samples in its own process; the daemon forwards the snapshot (nil before the first telemetry tick).
+func (p *MediaProxy) ProcRuntime() medialink.ProcRuntimeSnapshot {
+	if pr := p.h.snap().Proc; pr != nil {
+		return *pr
+	}
+	return medialink.ProcRuntimeSnapshot{}
+}
+
 // PushSecret sends (or drops, secret==nil) one peer's media AEAD key to the running child. Call on
 // peer connect/disconnect; the full set is also re-seeded via the spawn snapshot.
 func (p *MediaProxy) PushSecret(node string, secret []byte) {

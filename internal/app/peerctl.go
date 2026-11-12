@@ -420,6 +420,15 @@ func (c *appControl) MediaSources() string {
 
 // formatRoutes renders the route telemetry as a focused human-readable view (reuses RouteStat, the
 // same JSON `ctl perf` exposes). One block per route.
+// writeStage prints one pipeline stage's inter-frame interval distribution (ms) if it saw frames.
+func writeStage(b *strings.Builder, name string, s medialink.StageSnapshot) {
+	if s.Count == 0 {
+		return
+	}
+	fmt.Fprintf(b, "    stage %s ifi(ms) p50=%.1f p99=%.1f max=%.1f mean=%.1f  >25/50/100=%d/%d/%d  n=%d\n",
+		name, s.P50Ms, s.P99Ms, s.MaxMs, s.MeanMs, s.Over25, s.Over50, s.Over100, s.Count)
+}
+
 func formatRoutes(stats []medialink.RouteStat) string {
 	if len(stats) == 0 {
 		return "no active routes\n"
@@ -507,6 +516,14 @@ func formatRoutes(stats []medialink.RouteStat) string {
 			fmt.Fprintf(&b, "    jitterbuf depth=%d buffered=%d lateRate=%.2f policyDrops=%d\n",
 				jb.Depth, jb.Buffered, jb.LateRate, jb.PolicyDrops)
 		}
+		// STEP-0 per-stage inter-frame interval histograms (hang localization).
+		if st := s.Stages; st != nil {
+			writeStage(&b, "rx ", st.RxComplete) // transport output
+			writeStage(&b, "jb ", st.JBRelease)  // jitter release
+			writeStage(&b, "dec", st.DecSubmit)  // decode submit (backpressure)
+			writeStage(&b, "enc", st.EncDone)    // encoded AU available (send)
+			writeStage(&b, "tx ", st.TxQueue)    // packetized + queued (send)
+		}
 	}
 	return b.String()
 }
@@ -517,6 +534,26 @@ func (c *appControl) Routes() string {
 		return "media plane unavailable\n"
 	}
 	return formatRoutes(c.mediaCtl.Stats())
+}
+
+// MediaPerf reports the media-plane process's Go GC/scheduler pauses (STEP-0: whether the Go runtime
+// is the source of frame-path micro-hangs). In child mode this is the media child's runtime.
+func (c *appControl) MediaPerf() string {
+	if c.mediaCtl == nil {
+		return "media plane unavailable\n"
+	}
+	p := c.mediaCtl.ProcRuntime()
+	var b strings.Builder
+	b.WriteString("media-plane Go runtime pauses (delta since last sample):\n")
+	writePause(&b, "gc stop-the-world", p.GCPause)
+	writePause(&b, "sched latency    ", p.SchedLat)
+	return b.String()
+}
+
+// writePause prints one runtime pause distribution (ms).
+func writePause(b *strings.Builder, name string, p medialink.PauseDist) {
+	fmt.Fprintf(b, "  %s  p50=%.3f p99=%.3f max=%.3f  >1/5/10ms=%d/%d/%d  n=%d\n",
+		name, p.P50Ms, p.P99Ms, p.MaxMs, p.Over1ms, p.Over5ms, p.Over10ms, p.Count)
 }
 
 // resolveRemoteSource resolves (peer token, source token) to a (peerNodeID, sourceID) among the

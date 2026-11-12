@@ -59,7 +59,8 @@ type Control interface {
 	PairConfirm(nodeID string, accept bool) string         // local human's SAS verdict (same path as the UI confirm); never auto-accepts
 	Unpair(nodeID string) string                           // forget a remembered peer + close any live link
 	MediaSources() string                                  // local advertised sources + remote source adverts per peer
-	Routes() string                                        // active routes both directions: transport/codec/geometry/fps/bitrate + UDP stats
+	Routes() string                                        // active routes both directions: transport/codec/geometry/fps/bitrate + UDP stats + per-stage interval histograms
+	MediaPerf() string                                     // media-plane Go GC/scheduler pause distributions (STEP-0 hang evidence)
 	RouteStart(peer, source string) string                 // receiving side: request peer's source (same path as the UI)
 	RouteStop(peer, source string) string                  // receiving side: stop a route by source name, or "all"
 	RemoteScreenshot(nodeID, path string, vr bool) string  // screenshot a paired peer's app window (vr=VR-View) to a local PNG; status line
@@ -450,6 +451,8 @@ func handleConn(conn net.Conn, ctrl Control) {
 		fmt.Fprint(conn, ctrl.MediaSources()) // multi-line; read to EOF
 	case cmd == "ROUTES":
 		fmt.Fprint(conn, ctrl.Routes()) // multi-line; read to EOF
+	case cmd == "MEDIA-PERF":
+		fmt.Fprint(conn, ctrl.MediaPerf()) // multi-line; read to EOF
 	case strings.HasPrefix(cmd, "ROUTE-START "):
 		peer, source := cutFirstField(strings.TrimSpace(cmd[len("ROUTE-START "):]))
 		if peer == "" || source == "" {

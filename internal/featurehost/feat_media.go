@@ -333,8 +333,10 @@ func (f *mediaFeature) emitTelemetry() {
 			break
 		}
 	}
+	proc := f.router.ProcRuntime() // STEP-0: sample the media CHILD's Go runtime pauses here (right process)
 	f.rt.Emit(evMediaTelemetry, mediaTelemetry{
 		Routes:       f.router.Stats(),
+		Proc:         &proc,
 		Sync:         f.router.SyncStats(),
 		Clock:        f.router.ClockQuality(),
 		Encoders:     f.router.Encoders(),
