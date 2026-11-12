@@ -182,6 +182,8 @@ test {
     _ = @import("retxring.zig");
     _ = @import("playout.zig");
     _ = @import("hrtimer.zig");
+    _ = @import("reassembler.zig");
+    _ = @import("histogram.zig");
     _ = snd;
     if (builtin.os.tag == .linux) _ = @import("interop_test.zig"); // socket loopback: Linux only
 }
