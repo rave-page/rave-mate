@@ -486,7 +486,10 @@ func (rm *RouteManager) Encoders() []string {
 
 // Start binds the media listener, subscribes to the negotiation topics, and advertises.
 func (rm *RouteManager) Start(ctx context.Context) error {
-	ln, err := listenRange(rm.bindHost, rm.ports)
+	// §2.5: the TCP listener + the shared answerer UDP socket share ONE port (brief req 4). For an
+	// EPHEMERAL request (Ports [0], tests) the bind retries until a port is free for BOTH, so a running
+	// daemon holding UDP ports (incl. 0.0.0.0 ephemeral) can't flake a loopback test.
+	ln, upc, err := listenMediaSocket(rm.bindHost, rm.ports, rm.udp)
 	if err != nil {
 		return err
 	}
@@ -497,20 +500,11 @@ func (rm *RouteManager) Start(ctx context.Context) error {
 	// Advertise the bound port with the configured/auto host (ephemeral port for tests).
 	_, portStr, _ := net.SplitHostPort(ln.Addr().String())
 	rm.addr = net.JoinHostPort(rm.host, portStr)
-	// §2.5 UDP profile: bind the shared answerer UDP socket on the SAME port the TCP listener took
-	// (brief req 4) + start the token demux. Best-effort: a UDP bind failure leaves udp off (routes
-	// use TCP), never blocks the plane.
-	if rm.udp {
-		if tcpAddr, ok := ln.Addr().(*net.TCPAddr); ok {
-			if upc, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP(rm.bindHost), Port: tcpAddr.Port}); err == nil {
-				rm.mux = newUDPMux(upc, rm.serveUDPFirst)
-			} else {
-				rm.udp = false
-				rm.warnf("udp media socket bind failed - routes will use TCP", map[string]any{"error": err.Error()})
-			}
-		} else {
-			rm.udp = false
-		}
+	if upc != nil {
+		rm.mux = newUDPMux(upc, rm.serveUDPFirst)
+	} else if rm.udp {
+		rm.udp = false
+		rm.warnf("udp media socket bind failed - routes will use TCP", nil)
 	}
 	rm.unsub = []func(){
 		rm.bus.Subscribe(TopicOffer, rm.onOffer),
@@ -1126,6 +1120,24 @@ func (rm *RouteManager) pumpSource(ctx context.Context, session string, pa *pend
 	}
 	rm.trackRoute(session, ar)
 	rm.dropDuplicateSend(pa.peer, pa.offer.SourceID, session) // one send route per (peer, source): newest wins, bye the old
+	// Native send path (owner directive 2026-11-12): a source that can push its encoded AUs straight to
+	// the native sender takes over the per-frame path; the Go media pump + Go control/report loops do
+	// NOT run - the native sender owns its own socket, NACK, keepalive and liveness. The receiver rebinds
+	// its remote to the native socket on the native sender's first (strictly-newest) datagram. Anything
+	// unsupported (TCP, legacy peer, attach error) falls through to the Go pump unchanged.
+	if tx, ok := rm.tryAttachNativeTX(pa, udp, src); ok {
+		st.setTransportImpl("native")
+		rm.infof("route up (send) [native tx]", map[string]any{"session": session, "peer": pa.peer,
+			"source": pa.offer.SourceID, "stream": pa.stream, "transport": transportName(udp)})
+		if udp != nil {
+			udp.Close() // stop the Go answerer conn's media role; the native sender is the sole sender
+		}
+		rm.superviseNativeTX(rctx, cancel, tx, rio)
+		_ = src.Close()
+		rm.endRoute(session, conn, tx.Err(), "send")
+		return
+	}
+	st.setTransportImpl("go")
 	rm.infof("route up (send)", map[string]any{"session": session, "peer": pa.peer, "source": pa.offer.SourceID,
 		"stream": pa.stream, "transport": transportName(udp)})
 	go rm.guard("sendControl", func() { rm.sendControl(cancel, rio, src) })
@@ -1138,6 +1150,67 @@ func (rm *RouteManager) pumpSource(ctx context.Context, session string, pa *pend
 		udp.sendBye() // §2.5: notify the receiver of a clean end so it ends now, not via a liveness blackout
 	}
 	rm.endRoute(session, conn, err, "send")
+}
+
+// tryAttachNativeTX hands a native-capable source's encoded AU stream to the native sender when the
+// route is natively supported (UDP + per-route keys + the receiver's remote known). Returns (tx,true)
+// on success; (nil,false) → the caller runs the Go pump unchanged.
+func (rm *RouteManager) tryAttachNativeTX(pa *pendingAnswer, udp *udpConn, src Source) (NativeTX, bool) {
+	nts, ok := src.(NativeTXSource)
+	if !ok {
+		return nil, false
+	}
+	if udp == nil || pa.salt == nil { // TCP not native yet; legacy peer has no per-route nonce
+		return nil, false
+	}
+	raddr := udp.remoteAddr()
+	if raddr == nil {
+		return nil, false // receiver not bound yet
+	}
+	sec, ok := rm.secrets.MediaSecret(pa.peer)
+	if !ok {
+		return nil, false
+	}
+	sk, skp, rk, rkp, err := deriveRouteKeysRaw(sec, pa.salt, false) // answerer = responder
+	if err != nil {
+		return nil, false
+	}
+	codec := CodecH264
+	if pa.choice != nil {
+		codec = pa.choice.Codec
+	}
+	params := NativeTXParams{
+		Transport: TransportUDP, Codec: codec, Stream: pa.stream, BodyMax: dgDefaultPayload,
+		PeerAddr: raddr.String(), SocketFD: -1, Encrypt: pa.encrypt,
+		SendKey: sk, SendPrefix: skp, RecvKey: rk, RecvPrefix: rkp, Token: pa.token,
+		InitialSeq: udp.sendSeq(), BitrateKbps: pa.offer.Bitrate, FPS: int(pa.srcDesc.FPS),
+		StartupGrace: udpDefStartupGrace,
+	}
+	tx, err := nts.AttachNativeTX(params)
+	if err != nil {
+		rm.warnf("native tx attach failed - Go pump fallback", map[string]any{"session": pa.offer.Session, "error": err.Error()})
+		return nil, false
+	}
+	return tx, true
+}
+
+// superviseNativeTX supervises a native sender: 1 Hz stats into RouteStat, Done()/ctx → route end.
+func (rm *RouteManager) superviseNativeTX(ctx context.Context, cancel context.CancelFunc, tx NativeTX, rio *routeIO) {
+	defer cancel()
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			_ = tx.Close()
+			return
+		case <-tx.Done():
+			_ = tx.Close() // native ended on its own (blackout/fatal/bye) - free it
+			return
+		case <-t.C:
+			rio.st.setNativeStats(tx.Stats())
+		}
+	}
 }
 
 // sendControl is the send side's read loop: the peer's receiver reports, clock-sync pings, and
@@ -1332,6 +1405,9 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 	st := newRouteStat(ans.Session, peer, ans.Stream, "recv")
 	st.setEncrypted(encrypt)
 	st.setTransport(transportName(udp))
+	if tcp, ok := conn.(*Conn); ok { // STEP-0: first-byte arrival off the socket (localizes net vs read-loop)
+		tcp.SetFirstByteHook(func() { st.stages.NetArrive.Mark(monoNs()) })
+	}
 	// §3.2: the answered encode choice drives the recv-side stat tier + decode spec.
 	if ans.Caps != nil && len(ans.Caps.Encoders) == 1 {
 		if tier, sw, ok := EncoderTier(ans.Caps.Encoders[0]); ok {
@@ -1471,19 +1547,40 @@ func (s jbSink) Close() error         { return nil }
 // runJitter drains the §3.3 buffer into the sink at release pace. A sink error tears the route
 // down (conn close unblocks the recv loop).
 func (rm *RouteManager) runJitter(ctx context.Context, conn frameConn, jb *jitterBuffer, sink Sink, st *routeStat) {
+	const hitchNs = int64(50 * time.Millisecond) // log playout stalls above this (the rare long hitches)
+	var lastRel, lastHitch, prevWriteNs int64
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 		f, wake := jb.pop(rm.clock.Now())
 		if f != nil {
-			st.stages.JBRelease.Mark(monoNs()) // STEP-0: jitter buffer released a frame for playout
+			now := monoNs()
+			st.stages.JBRelease.Mark(now) // STEP-0: jitter buffer released a frame for playout
+			// Hitch log: a release interval > 50ms, attributing it to the prior sink write (decode/
+			// publish backpressure) vs a late wake/arrival - with the wall time, to correlate the rare
+			// long hitches against periodic tasks (gpumem sweep, 1Hz emit, Defender). Rate-limited 1/s.
+			if lastRel != 0 {
+				if gap := now - lastRel; gap > hitchNs && now-lastHitch > int64(time.Second) {
+					lastHitch = now
+					cause := "wake/arrival (frame not ready at deadline)"
+					if prevWriteNs > hitchNs {
+						cause = "sink write blocked (decode/publish backpressure)"
+					}
+					rm.warnf("playout hitch", map[string]any{"session": st.session, "stream": st.stream,
+						"gapMs": gap / 1e6, "prevWriteMs": prevWriteNs / 1e6, "cause": cause,
+						"wall": time.Now().Format("15:04:05.000")})
+				}
+			}
+			w0 := monoNs()
 			if err := sink.Write(f); err != nil {
 				rm.warnf("video sink write failed", map[string]any{"session": st.session, "error": err.Error()})
 				_ = conn.Close()
 				return
 			}
+			prevWriteNs = monoNs() - w0
 			st.stages.DecSubmit.Mark(monoNs()) // STEP-0: cadence of frames accepted by the decode/publish sink (backpressure)
+			lastRel = now
 			continue
 		}
 		if wake == 0 { // empty - wait for a push
@@ -1815,6 +1912,51 @@ func setNoDelay(c net.Conn) {
 	if tcp, ok := c.(*net.TCPConn); ok {
 		_ = tcp.SetNoDelay(true) // §2.5: latency-bound the send path
 	}
+}
+
+// listenMediaSocket binds the TCP listener and (when udp) the shared answerer UDP socket on the SAME
+// port. FIXED ports (production): a UDP-bind failure keeps the TCP listener with udp off (upc nil) -
+// the plane runs over TCP, prior behaviour. EPHEMERAL (Ports contains 0, tests): retry fresh ephemeral
+// ports until one is free for BOTH TCP and UDP, so a running daemon's UDP sockets never flake the gate.
+func listenMediaSocket(host string, ports []int, udp bool) (net.Listener, *net.UDPConn, error) {
+	ephemeral := false
+	for _, p := range ports {
+		if p == 0 {
+			ephemeral = true
+		}
+	}
+	tries := 1
+	if ephemeral {
+		tries = 16
+	}
+	var lastErr error
+	for i := 0; i < tries; i++ {
+		ln, err := listenRange(host, ports)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if !udp {
+			return ln, nil, nil
+		}
+		tcpAddr, ok := ln.Addr().(*net.TCPAddr)
+		if !ok {
+			return ln, nil, nil // non-TCP listener: udp off
+		}
+		upc, uerr := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP(host), Port: tcpAddr.Port})
+		if uerr == nil {
+			return ln, upc, nil
+		}
+		if !ephemeral {
+			return ln, nil, nil // fixed port, UDP taken: keep TCP (graceful), don't race a re-bind
+		}
+		_ = ln.Close() // ephemeral: this port's UDP is held elsewhere - free the TCP + try another
+		lastErr = uerr
+	}
+	if lastErr == nil {
+		lastErr = errors.New("medialink: no media socket")
+	}
+	return nil, nil, lastErr
 }
 
 func listenRange(host string, ports []int) (net.Listener, error) {

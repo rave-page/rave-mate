@@ -1,0 +1,139 @@
+/* ravemedia — native realtime media transport, SENDER C ABI. Mirror of src/root.zig exports.
+ * ABI v1 (owner directive 2026-11-12: the per-frame path is native, no Go runtime in the loop).
+ *
+ * Ownership split: Go negotiates the route (Offer/Answer), derives the per-route keys + token, then
+ * opens a native sender and hands it the derived material. The encode thread (Linux VA shim /
+ * Windows MF child) calls rm_tx_submit_au directly — non-blocking, no Go on the per-frame path. The
+ * sender owns its own TX thread(s) + a control-RX thread (UDP NACK/keepalive). Go only samples the
+ * lock-free stats block at ~1 Hz and pushes rate hints.
+ *
+ * Wire format is byte-exact with internal/medialink (udpframe.go / frame.go / transport.go); see
+ * .devnotes/ZIGMEDIA_TRANSPORT.md. Supports BOTH transports: UDP datagram profile (explicit-nonce
+ * AES-256-GCM, user-space fragmentation, NACK) and TCP (length-prefixed, implicit-counter GCM).
+ *
+ * ABI contract (confirmed 2026-11-12):
+ *  - DUAL PATH: a source either hands its AU stream to the native sender here (rm_tx_submit_au), OR,
+ *    when no native sender is attached, pushes into its own AU ring that the Go pump reads. The Go
+ *    hook (internal/medialink NativeTXSource.AttachNativeTX) decides per route and falls back to the
+ *    Go pump for anything unsupported (TCP until it lands, legacy peer, attach error).
+ *  - CONCURRENCY: rm_tx_set_rate and rm_tx_stats_get are safe to call concurrently with
+ *    rm_tx_submit_au (the stats block is lock-free; the rate is a benign racy write applied on the
+ *    next pacer reserve).
+ *  - AU FORMAT: submit AUs exactly as medialink.Frame.Payload carries them today - Annex-B with the
+ *    in-band parameter sets, the caller sets RM_FLAG_KEYFRAME on IDRs, NO separate CONFIG AU is
+ *    required (SPS/PPS ride the keyframe AU).
+ *  - LIFECYCLE: the IDR callback NEVER fires after rm_tx_close returns.
+ *  - SOCKET (UDP answerer): the native sender opens its OWN socket toward the receiver's address
+ *    (rm_open_params.peer_addr, socket_fd < 0) and starts at InitialSeq (continuing the Go handshake
+ *    conn's seq space), so its first datagram is strictly-newest at the receiver, which rebinds its
+ *    remote to the native socket (existing replay/rebind rule) - receiver->sender control (NACK/ping/
+ *    bye) then reaches the native socket. Alternatively Go hands a dup'd connected fd (socket_fd >= 0).
+ */
+#ifndef RAVEMEDIA_H
+#define RAVEMEDIA_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define RM_ABI_VERSION 1u
+
+uint32_t rm_abi_version(void);
+int rm_wire_selftest(void); /* 0 = wire core matches its goldens (integration sanity) */
+
+typedef enum { RM_TRANSPORT_UDP = 0, RM_TRANSPORT_TCP = 1 } rm_transport;
+
+/* = medialink.Codec (frame header codec byte). */
+typedef enum { RM_CODEC_H264 = 4, RM_CODEC_HEVC = 5, RM_CODEC_AV1 = 6 } rm_codec;
+
+/* Frame flags (= medialink.Flag); OR together. */
+#define RM_FLAG_KEYFRAME 0x01u
+#define RM_FLAG_CONFIG 0x02u /* SPS/PPS/extradata, not displayable */
+#define RM_FLAG_END 0x04u
+
+typedef enum {
+    RM_OK = 0,
+    RM_ERR_ARGS = -1,          /* bad params / abi mismatch */
+    RM_ERR_CRYPTO = -2,        /* key/cipher setup failed */
+    RM_ERR_SOCKET = -3,        /* socket/connect failed */
+    RM_ERR_SEQ_EXHAUSTED = -4, /* per-key datagram seq budget spent -> control plane renegotiates */
+    RM_ERR_CLOSED = -5,        /* sender already closed */
+    RM_ERR_UNIMPL = -6         /* not yet implemented (increment 2b) */
+} rm_status;
+
+/* rm_keys: the per-route AEAD material Go derived (routeKeySalt -> HKDF). The native side never sees
+ * the peerlink master secret. send_* = this sender's direction; recv_* authenticates the receiver's
+ * control datagrams (UDP NACK/ping). UDP uses the explicit nonce prefix; TCP ignores it and uses the
+ * lockstep counter nonce (the `initiator` parity selects the counter direction). encrypt=0 ->
+ * plaintext (both-local opt-out, token-gated only). */
+typedef struct {
+    uint8_t send_key[32];
+    uint32_t send_nonce_prefix; /* UDP explicit-nonce prefix; TCP: ignored */
+    uint8_t recv_key[32];
+    uint32_t recv_nonce_prefix;
+    uint32_t token;    /* routeToken: per-route demux + anti-injection */
+    int32_t encrypt;   /* 0 = plaintext, 1 = AES-256-GCM */
+    int32_t initiator; /* direction parity (TCP counter nonce; UDP uses the derived direction) */
+} rm_keys;
+
+/* rm_open_params fully specifies one sender route. Peer target is EITHER an already-open OS socket
+ * handed from Go (socket_fd >= 0; native takes ownership), OR native opens one to peer_addr
+ * (socket_fd < 0; peer_addr = sockaddr bytes). The UDP mux port the receiver dials is the one the
+ * Answer advertised, so when Go hands a bound/connected socket its local port MUST match that. */
+typedef struct {
+    uint32_t abi_version;    /* = RM_ABI_VERSION */
+    rm_transport transport;  /* UDP or TCP (the owner's route may be either) */
+    rm_codec codec;          /* payload codec -> frame header */
+    uint16_t stream;         /* negotiated media stream id */
+    int32_t body_max;        /* UDP fragment body cap (0 -> 1200, MTU-safe); ignored for TCP */
+    int64_t socket_fd;       /* OS socket handle (Windows SOCKET / POSIX fd); < 0 -> native opens one */
+    const uint8_t *peer_addr;/* sockaddr_in/in6 bytes when socket_fd < 0; else NULL */
+    int32_t peer_addr_len;
+    rm_keys keys;
+    double initial_rate_bytes_per_sec; /* pacer rate (0 = unpaced) */
+} rm_open_params;
+
+typedef struct rm_sender rm_sender; /* opaque */
+
+/* rm_idr_cb fires (off the submit thread) when the TX queue had to drop an AU -> the encoder should
+ * emit an IDR so the receiver resyncs. `user` is the opaque passed to rm_tx_open. */
+typedef void (*rm_idr_cb)(void *user);
+
+/* rm_tx_stats: lock-free snapshot Go samples at ~1 Hz (never crosses the frame path). */
+typedef struct {
+    uint64_t aus_submitted;
+    uint64_t aus_sent;
+    uint64_t aus_dropped;    /* queue-full drops (-> IDR requested) */
+    uint64_t datagrams_sent; /* UDP */
+    uint64_t bytes_sent;
+    uint64_t retransmits;    /* UDP NACK responses */
+    uint64_t seq;            /* current datagram seq (UDP) -> seq-budget watch */
+    int32_t queue_depth;     /* AUs queued now */
+    int32_t dead;            /* 1 = TX thread exited (seq exhausted / fatal socket) */
+} rm_tx_stats;
+
+/* rm_tx_open creates + starts a sender (its own TX thread + UDP control-RX). RM_OK + *out on success. */
+rm_status rm_tx_open(const rm_open_params *p, rm_idr_cb on_need_idr, void *user, rm_sender **out);
+
+/* rm_tx_submit_au hands ONE encoded access unit to the sender. NON-BLOCKING: copies into the bounded
+ * TX queue and returns at once; a full queue drops the OLDEST non-keyframe AU and fires on_need_idr.
+ * pts_ns = capture/encode PTS; flags = RM_FLAG_*. Safe from the encode thread. */
+rm_status rm_tx_submit_au(rm_sender *s, const uint8_t *au, size_t len, int64_t pts_ns, uint32_t flags);
+
+/* rm_tx_set_rate updates the pacer rate live (bytes/sec; 0 = unpaced) — the Go rate-hint path. */
+void rm_tx_set_rate(rm_sender *s, double bytes_per_sec);
+
+/* rm_tx_stats_get copies the current stats (lock-free). */
+void rm_tx_stats_get(rm_sender *s, rm_tx_stats *out);
+
+/* rm_tx_close stops the TX thread(s), sends a clean bye, and frees the sender. No callback fires
+ * after it returns. */
+void rm_tx_close(rm_sender *s);
+
+#ifdef __cplusplus
+}
+#endif
+#endif /* RAVEMEDIA_H */

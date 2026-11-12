@@ -20,9 +20,14 @@ var monoBase = time.Now()
 // monoNs returns monotonic nanoseconds since process start (time.Since uses the monotonic reading).
 func monoNs() int64 { return int64(time.Since(monoBase)) }
 
-// stageBucketsUpperMs are the inter-frame interval histogram upper bounds (ms). 60 fps = 16.67 ms
-// nominal; the fine buckets around there resolve jitter, the coarse tail catches hangs.
-var stageBucketsUpperMs = [...]float64{4, 8, 12, 16, 20, 25, 33, 50, 75, 100, 150, 200, 500, 1e12}
+// stageBucketsUpperMs are the inter-frame interval histogram upper bounds (ms). 1 ms resolution across
+// 10-30 ms (one frame period at 30/60 fps = 33/16.67 ms) so p50/p99 are meaningful around the cadence;
+// coarse below + a tail for hangs.
+var stageBucketsUpperMs = [...]float64{
+	4, 8,
+	10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+	33, 40, 50, 75, 100, 150, 200, 500, 1e12,
+}
 
 // StageHist is a lock-free inter-frame-interval histogram for one pipeline stage. Mark is realtime-safe
 // (single-writer per stage, atomics guard against any racing reader/writer); Snapshot is off-thread.
@@ -115,16 +120,18 @@ func (h *StageHist) percentileMs(n uint64, q float64) float64 {
 // own subset (the other stays zero → omitted from telemetry).
 type FrameStages struct {
 	// Receiver pipeline.
+	NetArrive  StageHist // first bytes of a frame readable off the socket (localizes network vs read-loop)
 	RxComplete StageHist // a media frame left the transport (reassembled, authenticated)
 	JBRelease  StageHist // the jitter buffer released it for playout
 	DecSubmit  StageHist // handed to the decoder / publish sink
 	// Sender pipeline.
 	EncDone StageHist // an encoded AU became available to the send loop
-	TxQueue StageHist // packetized + queued to the pacer
+	TxQueue StageHist // packetized + queued to the pacer (TCP: == the socket write return / "wire")
 }
 
 // StageStats is the telemetry snapshot of a route's stages (per RouteStat).
 type StageStats struct {
+	NetArrive  StageSnapshot `json:"net,omitempty"`
 	RxComplete StageSnapshot `json:"rx,omitempty"`
 	JBRelease  StageSnapshot `json:"jb,omitempty"`
 	DecSubmit  StageSnapshot `json:"dec,omitempty"`
@@ -138,7 +145,7 @@ func (f *FrameStages) Snapshot() *StageStats {
 		return nil
 	}
 	return &StageStats{
-		RxComplete: f.RxComplete.Snapshot(), JBRelease: f.JBRelease.Snapshot(), DecSubmit: f.DecSubmit.Snapshot(),
-		EncDone: f.EncDone.Snapshot(), TxQueue: f.TxQueue.Snapshot(),
+		NetArrive: f.NetArrive.Snapshot(), RxComplete: f.RxComplete.Snapshot(), JBRelease: f.JBRelease.Snapshot(),
+		DecSubmit: f.DecSubmit.Snapshot(), EncDone: f.EncDone.Snapshot(), TxQueue: f.TxQueue.Snapshot(),
 	}
 }

@@ -750,6 +750,14 @@ func (u *udpConn) scanNack(now int64) []nackItem {
 	return out
 }
 
+// sendSeq returns the encoder's NEXT datagram seq - handed to a native sender as InitialSeq so it
+// continues this conn's seq space (its first datagram is then strictly-newest at the receiver).
+func (u *udpConn) sendSeq() uint64 {
+	u.encMu.Lock()
+	defer u.encMu.Unlock()
+	return u.enc.seq
+}
+
 func (u *udpConn) buildControl(typ uint8, payload []byte) []byte {
 	u.encMu.Lock()
 	defer u.encMu.Unlock()
