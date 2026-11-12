@@ -74,17 +74,28 @@ is equivalent to the Go receiver): AEAD media decodes IN ORDER, large AU fragmen
   (2026-11-12, TCP, 4K60) showed GC is NOT the cause; frames leave the sender evenly (tx max 19.5 ms)
   but RELEASE unevenly at the receiver (jb tail: max 43-121 ms, dozens > 25 ms) - the Go path releases
   on arrival / a coarse Windows timer (time.Timer ~15.6 ms). The native receiver fixes it:
-  - `playout.zig` — PTS-locked scheduler: frame N releases at `t0_mono + (pts_N - pts0) + depth·interval`
-    on a monotonic clock, so release intervals equal the source cadence regardless of arrival bunching.
-    Bounded seq-ordered reorder buffer, wrap-aware; gap → hold-to-deadline then skip; adaptive depth
-    (late-rate, target ≤ 2). Allocation-free, clock injected. Tests prove PTS-locked spacing under
-    bunched arrivals, gap skip, and depth adaptation.
+  - `playout.zig` — PTS-locked scheduler. Release deadline = `pts + base + margin` on a monotonic clock,
+    where base = windowed-MIN transit (cancels the clock-epoch offset AND ignores the cold-start
+    straggler, so the epoch settles to steady state, not the first frame; slow-tracks drift) and margin
+    = windowed-MAX transit SPREAD + headroom (the delay is sized from the MEASURED arrival-jitter, not a
+    frame count: a 42 Mbps burstier stream gets a bigger margin than the even bar; clamped [1 frame,
+    cap]). Release intervals then equal the source cadence regardless of arrival bunching. Allocation-
+    free, monotonic clock injected. Tests: PTS-locked spacing under bunched arrivals, base settles past
+    a 500 ms cold-start straggler, margin sizes to the spread, gap handling.
   - `hrtimer.zig` — high-resolution wait: Linux `clock_nanosleep(ABSTIME, CLOCK_MONOTONIC)`, verified
     sub-2 ms in WSL (vs the Go ~15 ms coarse timer). Windows `CreateWaitableTimerEx(HIGH_RESOLUTION)`
     lands with the Windows socket layer.
-  - Remaining: Windows socket RX (Winsock in Zig) → reuse the wire core's reassembly → playout →
-    D3D11 decode → Spout publish in the native child, plus a TRUE `publish` interval histogram INSIDE
-    the child (acceptance: publish p99 ≤ 18 ms, zero > 25 ms on the bar source over 10 min).
+  - `reassembler.zig` — receiver reassembly (Zig port of the Go reassembler): fixed entry pool, drop-
+    oldest, bounded done-set (no straggler resurrection); fragment i at offset i*body_max (contiguous).
+    Allocation-free. Tests: single/multi-fragment, out-of-order, duplicate, drop-oldest.
+  - `histogram.zig` — lock-free inter-event interval histogram for the in-child PUBLISH metric
+    (acceptance: publish p99 ≤ 18 ms, zero > 25 ms on the bar over 10 min), 1 ms buckets around a frame.
+  - Remaining: the Windows platform wiring — Winsock RX (first-byte timestamps from the socket layer)
+    → reassembler → playout → D3D11 decode → Spout publish in the native child, with the publish
+    histogram on the publish thread; CreateWaitableTimerEx(HIGH_RESOLUTION) for the wait.
+  - Sender start-up note (confirmed from sus `enc max=502ms dropped=36`): the cold capture/encoder open
+    emits a ~500 ms first-second gap + a burst; the receiver's `base = min transit` already ignores it
+    (the playout epoch settles to steady state), so no extra start-up handling is needed on the receiver.
 - **4 — Windows sender** (MF encode child TX; Windows socket layer).
 
 ## Selection / fallback (STEP 3)
