@@ -180,6 +180,8 @@ test {
     _ = @import("pacer.zig");
     _ = @import("auqueue.zig");
     _ = @import("retxring.zig");
+    _ = @import("playout.zig");
+    _ = @import("hrtimer.zig");
     _ = snd;
     if (builtin.os.tag == .linux) _ = @import("interop_test.zig"); // socket loopback: Linux only
 }
