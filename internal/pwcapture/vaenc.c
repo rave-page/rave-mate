@@ -5,6 +5,7 @@
 #include "vaenc.h"
 
 #include <dlfcn.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -476,6 +477,8 @@ struct rva_enc {
 	int cur_qp;           /* current CQP (>= target_qp); encoded into pic_init_qp + the packed PPS */
 	long long qc_bits;    /* bits emitted in the current sub-window (~250ms) */
 	int qc_frames;        /* frames in the current sub-window */
+	int qc_pframes;       /* non-IDR frames in it (qc_bits counts only these) */
+	long long qc_idr_bits; /* last IDR's bits, amortized over the GOP by the controller input */
 	int qc_sub;           /* frames per sub-window (~fps/4): raise the ceiling fast, release slow */
 	int qc_under;         /* consecutive comfortable sub-windows (slow-release hysteresis streak) */
 	int rate_limited;     /* last controller verdict (cur_qp > target_qp): reported in feedback */
@@ -1365,14 +1368,24 @@ static int enc_emit(rva_enc *e, VASurfaceID sync, int pidx, int pidr, unsigned c
 		 * ceiling, releasing slowly toward target_qp when comfortably under. The next frame re-emits the
 		 * PPS with the new QP (no reopen). rate_limited = held above the quality target by the ceiling. */
 		if (off > 0 && e->fps > 0) {
-			e->qc_bits += (long long)off * 8;
+			/* IDR bits are amortized over the GOP (they are on the wire once per GOP): fed raw, one IDR
+			 * makes its sub-window read ~2x and the proportional step would pump quality every GOP. */
+			if (pidr)
+				e->qc_idr_bits = (long long)off * 8;
+			else
+				e->qc_bits += (long long)off * 8;
+			e->qc_pframes += !pidr;
 			if (++e->qc_frames >= e->qc_sub) {
-				int nq = rva_qp_next(e->cur_qp, e->target_qp, e->qc_bits, e->qc_frames, e->fps,
-					(long long)e->kbps * 1000, &e->qc_under);
-				e->cur_qp = nq;
-				e->rate_limited = e->cur_qp > e->target_qp;
+				if (e->qc_pframes > 0) {
+					long long eq = e->qc_bits * e->qc_frames / e->qc_pframes +
+					               e->qc_idr_bits * e->qc_frames / (e->gop > 0 ? e->gop : e->fps);
+					e->cur_qp = rva_qp_next(e->cur_qp, e->target_qp, eq, e->qc_frames, e->fps,
+						(long long)e->kbps * 1000, &e->qc_under);
+					e->rate_limited = e->cur_qp > e->target_qp;
+				}
 				e->qc_bits = 0;
 				e->qc_frames = 0;
+				e->qc_pframes = 0;
 			}
 		}
 	} else if (off > 0 && e->fps > 0) {
@@ -1476,6 +1489,7 @@ void rva_enc_set_bitrate(rva_enc *e, int kbps) {
 		 * ceiling takes effect cleanly on the next window (no RC param to resend). */
 		e->qc_bits = 0;
 		e->qc_frames = 0;
+		e->qc_pframes = 0;
 		e->qc_under = 0;
 		return;
 	}
@@ -1497,6 +1511,7 @@ void rva_enc_set_quality(rva_enc *e, int target_qp) {
 	e->rate_limited = e->cur_qp > e->target_qp;
 	e->qc_bits = 0;
 	e->qc_frames = 0;
+	e->qc_pframes = 0;
 	e->qc_under = 0;
 }
 
@@ -1517,18 +1532,21 @@ int rva_qp_next(int cur_qp, int target_qp, long long win_bits, int frames, int f
 	if (frames > 0 && fps > 0 && budget_bits > 0) {
 		double secs = (double)frames / (double)fps;
 		double rate = secs > 0 ? (double)win_bits / secs : 0.0; /* bits/sec over the sub-window */
-		if (rate > (double)budget_bits * 1.5) { /* far over: raise two steps, protect the 1s peak */
-			q += 2;
-			if (under)
-				*under = 0;
-		} else if (rate > (double)budget_bits * 1.1) { /* over the ceiling: raise one step */
-			q += 1;
+		if (rate > (double)budget_bits * 1.1) {
+			/* over the ceiling: raise PROPORTIONALLY (CQP: +6 QP ~ half the bits) to land at ~0.95x in
+			 * ONE sub-window - fixed +1/+2 steps took ~1 s to converge and the 1-s peak read 1.4x the
+			 * ceiling on a content change (rig, 1080p 10 Mbps). Capped at +8 per window. */
+			int step = (int)ceil(6.0 * log2(rate / ((double)budget_bits * 0.95)));
+			q += step < 1 ? 1 : step > 8 ? 8 : step;
 			if (under)
 				*under = 0;
 		} else if (rate < (double)budget_bits * 85 / 100) { /* comfortably under: slow release */
 			int u = (under ? *under : 0) + 1;
-			if (u >= 8) { /* ~2s at ~4 sub-windows/s before giving one QP of quality back */
-				q -= 1;
+			if (u >= 4) { /* ~1 s sustained before giving quality back (no pumping) */
+				/* release HALF the predicted headroom (to ~0.9x), >= 1: after a proportional raise the
+				 * old 1-QP-per-2s release left the route at ~50-60% of the ceiling for many seconds */
+				int rel = rate > 0 ? (int)(3.0 * log2((double)budget_bits * 0.9 / rate)) : 6;
+				q -= rel < 1 ? 1 : rel > 6 ? 6 : rel;
 				u = 0;
 			}
 			if (under)

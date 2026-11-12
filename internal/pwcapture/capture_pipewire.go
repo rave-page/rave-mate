@@ -4,7 +4,7 @@ package pwcapture
 
 /*
 #cgo CFLAGS: -I/usr/include/pipewire-0.3 -I/usr/include/spa-0.2 -I${SRCDIR}/../../native/zigmedia/include -D_REENTRANT
-#cgo LDFLAGS: -ldl -lpthread -lravemedia
+#cgo LDFLAGS: -ldl -lpthread -lm -lravemedia
 // libravemedia.a (native/zigmedia, Zig) provides the realtime TX C ABI. Its -L dir is supplied at
 // build time via CGO_LDFLAGS (the container build-script builds it to a writable prefix; a local build
 // points at native/zigmedia/zig-out/lib). The runtime is self-contained (no extra link deps).
@@ -544,6 +544,27 @@ func (s *pwSource) eglReady() bool { return C.rpw_egl_ready(s.h) != 0 }
 func (s *pwSource) robustStats() (repeats, ringSkips, startHolds, forcedIDRs int64) {
 	return int64(C.rpw_repeats(s.h)), int64(C.rpw_ring_skips(s.h)),
 		int64(C.rpw_start_holds(s.h)), int64(C.rpw_forced_idrs(s.h))
+}
+
+// startEncodeRawQP engages the VA encoder at a raw CQP value with a never-binding ceiling (tests: the
+// near-lossless reference stream for PSNR/SSIM). codec 0 = H.264, 1 = HEVC.
+func (s *pwSource) startEncodeRawQP(codec, qp int, node string) bool {
+	cnode := C.CString(node)
+	defer C.free(unsafe.Pointer(cnode))
+	if C.rpw_set_encode(s.h, C.int(codec), C.int(2000000), 0, 60, cnode, C.int(qp)) == 0 {
+		return false
+	}
+	s.mu.Lock()
+	s.encMode, s.encCodec = true, medialink.CodecH264
+	if codec == 1 {
+		s.encCodec = medialink.CodecHEVC
+	}
+	if s.done == nil {
+		s.done = make(chan struct{})
+	}
+	s.mu.Unlock()
+	C.rpw_request_keyframe(s.h)
+	return true
 }
 
 // reconnectCount is the stream re-arm counter (tests).
