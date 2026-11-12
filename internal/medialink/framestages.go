@@ -120,16 +120,18 @@ func (h *StageHist) percentileMs(n uint64, q float64) float64 {
 // own subset (the other stays zero → omitted from telemetry).
 type FrameStages struct {
 	// Receiver pipeline.
+	NetArrive  StageHist // first bytes of a frame readable off the socket (localizes network vs read-loop)
 	RxComplete StageHist // a media frame left the transport (reassembled, authenticated)
 	JBRelease  StageHist // the jitter buffer released it for playout
 	DecSubmit  StageHist // handed to the decoder / publish sink
 	// Sender pipeline.
 	EncDone StageHist // an encoded AU became available to the send loop
-	TxQueue StageHist // packetized + queued to the pacer
+	TxQueue StageHist // packetized + queued to the pacer (TCP: == the socket write return / "wire")
 }
 
 // StageStats is the telemetry snapshot of a route's stages (per RouteStat).
 type StageStats struct {
+	NetArrive  StageSnapshot `json:"net,omitempty"`
 	RxComplete StageSnapshot `json:"rx,omitempty"`
 	JBRelease  StageSnapshot `json:"jb,omitempty"`
 	DecSubmit  StageSnapshot `json:"dec,omitempty"`
@@ -143,7 +145,7 @@ func (f *FrameStages) Snapshot() *StageStats {
 		return nil
 	}
 	return &StageStats{
-		RxComplete: f.RxComplete.Snapshot(), JBRelease: f.JBRelease.Snapshot(), DecSubmit: f.DecSubmit.Snapshot(),
-		EncDone: f.EncDone.Snapshot(), TxQueue: f.TxQueue.Snapshot(),
+		NetArrive: f.NetArrive.Snapshot(), RxComplete: f.RxComplete.Snapshot(), JBRelease: f.JBRelease.Snapshot(),
+		DecSubmit: f.DecSubmit.Snapshot(), EncDone: f.EncDone.Snapshot(), TxQueue: f.TxQueue.Snapshot(),
 	}
 }

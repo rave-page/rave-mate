@@ -522,6 +522,7 @@ func formatRoutes(stats []medialink.RouteStat) string {
 		}
 		// STEP-0 per-stage inter-frame interval histograms (hang localization).
 		if st := s.Stages; st != nil {
+			writeStage(&b, "net", st.NetArrive)  // first bytes off the socket (TCP)
 			writeStage(&b, "rx ", st.RxComplete) // transport output
 			writeStage(&b, "jb ", st.JBRelease)  // jitter release
 			writeStage(&b, "dec", st.DecSubmit)  // decode submit (backpressure)

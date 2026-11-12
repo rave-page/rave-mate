@@ -1405,6 +1405,9 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 	st := newRouteStat(ans.Session, peer, ans.Stream, "recv")
 	st.setEncrypted(encrypt)
 	st.setTransport(transportName(udp))
+	if tcp, ok := conn.(*Conn); ok { // STEP-0: first-byte arrival off the socket (localizes net vs read-loop)
+		tcp.SetFirstByteHook(func() { st.stages.NetArrive.Mark(monoNs()) })
+	}
 	// §3.2: the answered encode choice drives the recv-side stat tier + decode spec.
 	if ans.Caps != nil && len(ans.Caps.Encoders) == 1 {
 		if tier, sw, ok := EncoderTier(ans.Caps.Encoders[0]); ok {
