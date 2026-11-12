@@ -40,6 +40,10 @@ const (
 	dgTypePing  = 1 // keepalive / reachability probe (cleartext, token-gated)
 	dgTypePong  = 2 // keepalive / reachability reply
 	dgTypeNack  = 3 // transport-level fragment NACK (cleartext, token-gated): resend these fragments
+	dgTypeBye   = 4 // clean end-of-stream: the sender is ending the route (source EOF / stop). The
+	//              // receiver ends immediately with errUDPEnded instead of waiting out the liveness
+	//              // window and reporting a blackout. Authenticated like every control type; a
+	//              // replayed bye is dropped by the replay window. Old peers ignore the unknown type.
 )
 
 // dgNackMax caps entries in one fragment-NACK datagram (hostile-length + bounded-work guard).

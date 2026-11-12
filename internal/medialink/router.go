@@ -206,15 +206,48 @@ type pendingOffer struct {
 }
 
 type activeRoute struct {
-	cancel   context.CancelFunc
-	conn     frameConn
-	stat     *routeStat
-	peer     string           // recv-side peer (dedup key)
-	sourceID string           // recv-side source (dedup key: one recv route per peer+source)
-	dir      string           // "send" | "recv"
-	jb       *jitterBuffer    // recv video routes (§3.3); nil otherwise
-	pipe     PipelineReporter // encode/decode child telemetry; nil = passthrough
-	udp      *udpConn         // non-nil on a UDP route (transport telemetry + congestion input)
+	cancel    context.CancelFunc
+	conn      frameConn
+	stat      *routeStat
+	peer      string           // recv-side peer (dedup key)
+	sourceID  string           // recv-side source (dedup key: one recv route per peer+source)
+	dir       string           // "send" | "recv"
+	jb        *jitterBuffer    // recv video routes (§3.3); nil otherwise
+	pipe      PipelineReporter // encode/decode child telemetry; nil = passthrough
+	udp       *udpConn         // non-nil on a UDP route (transport telemetry + congestion input)
+	tcpReason string           // why this route is on TCP although UDP was possible ("" = UDP route / not applicable)
+}
+
+// recvTCPReason explains, on the dialing (receive) side, why a route landed on TCP rather than the
+// §2.5 UDP datagram profile - shown on the Peers/ctl route line (brief item 2). Order matters: it is
+// evaluated the same way dialConn decides whether to even attempt UDP.
+func recvTCPReason(udpEnabled bool, ans Answer, salt []byte) string {
+	switch {
+	case !udpEnabled:
+		return "udp disabled locally"
+	case ans.Transport != TransportUDP:
+		return "peer selected tcp (no udp support)"
+	case salt == nil:
+		return "no per-route key (legacy peer)"
+	default:
+		return "udp unreachable (reachability handshake failed)"
+	}
+}
+
+// sendTCPReason explains, on the answering (send) side, why a route is on TCP rather than UDP.
+func sendTCPReason(udpReady bool, pa *pendingAnswer) string {
+	switch {
+	case !udpReady:
+		return "udp disabled locally"
+	case pa.salt == nil:
+		return "no per-route key (legacy peer)"
+	case !containsStr(pa.offer.Transports, TransportUDP):
+		return "peer did not offer udp"
+	case pa.transport == TransportUDP:
+		return "udp unreachable (peer fell back to tcp)"
+	default:
+		return "negotiated tcp"
+	}
 }
 
 // Options configures a RouteManager. Bus, Secrets, Self are required.
@@ -1064,6 +1097,9 @@ func (rm *RouteManager) pumpSource(ctx context.Context, session string, pa *pend
 		rio.rebuf = newRetransmitBuf(0, 0)
 	}
 	ar := &activeRoute{cancel: cancel, conn: conn, stat: st, udp: udp, dir: "send", peer: pa.peer, sourceID: pa.offer.SourceID}
+	if udp == nil {
+		ar.tcpReason = sendTCPReason(rm.udp && rm.mux != nil, pa) // why this send route is on TCP, not UDP (brief item 2)
+	}
 	if pr, ok := src.(PipelineReporter); ok {
 		ar.pipe = pr
 	}
@@ -1076,6 +1112,9 @@ func (rm *RouteManager) pumpSource(ctx context.Context, session string, pa *pend
 	}
 	err = rm.runSend(rctx, rio, src)
 	_ = src.Close()
+	if udp != nil {
+		udp.sendBye() // §2.5: notify the receiver of a clean end so it ends now, not via a liveness blackout
+	}
 	rm.endRoute(session, conn, err, "send")
 }
 
@@ -1298,6 +1337,9 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 	}
 	rio := &routeIO{conn: conn, st: st, caps: capsFromAnswer(ans)}
 	ar := &activeRoute{cancel: cancel, conn: conn, stat: st, udp: udp, dir: "recv", peer: peer, sourceID: po.sourceID}
+	if udp == nil {
+		ar.tcpReason = recvTCPReason(rm.udp, ans, salt) // why this recv route is on TCP, not UDP (brief item 2)
+	}
 	if pr, ok := final.(PipelineReporter); ok {
 		ar.pipe = pr
 	}
@@ -1354,7 +1396,13 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 		err = rm.runReceive(rctx, rio, final)
 	}
 	_ = final.Close()
-	if udp != nil && errors.Is(err, errUDPDead) {
+	if udp != nil && errors.Is(err, errUDPEnded) {
+		// §2.5: the SENDER signalled a clean end-of-stream (source EOF / route stop). End the route with
+		// the real reason instead of the misleading liveness "blackout"; the receive layer re-offers on
+		// its normal cadence if the source reappears.
+		rm.infof("remote source ended (clean end-of-stream) - route ended",
+			map[string]any{"session": ans.Session, "peer": peer})
+	} else if udp != nil && errors.Is(err, errUDPDead) {
 		// §2.5 mid-route UDP blackout. The route ends here; re-establishment is the RECEIVE layer's
 		// job (mediaroute auto-resume re-offers via StartReceive, and dialConn's reachability probe
 		// falls back to TCP if UDP is still blocked). The RouteManager must NOT re-offer directly:
@@ -1611,6 +1659,7 @@ func (rm *RouteManager) Stats() []RouteStat {
 			us := r.udp.Stats()
 			s.UDP = &us
 		}
+		s.TCPReason = r.tcpReason
 		out = append(out, s)
 	}
 	return out

@@ -216,6 +216,98 @@ func TestUDPConnNoSpuriousNacksOnReorder(t *testing.T) {
 	}
 }
 
+// TestUDPConnOneDirectionalStaysUp: a PURE RECEIVER (one-directional media, 0 loss → no NACKs) must
+// keep BOTH ends alive for well over the liveness window - the sender's liveness must be refreshed by
+// the receiver's keepalives, not by the (now-gone) spurious NACK stream. Repro for the ~4.5s blackout.
+func TestUDPConnOneDirectionalStaysUp(t *testing.T) {
+	a, b, _, _ := udpPair(t, nil, nil, true, func(c *udpConfig) {
+		c.Liveness = 1 * time.Second
+		c.Keepalive = 200 * time.Millisecond
+	})
+	defer a.Close()
+	defer b.Close()
+	stop := make(chan struct{})
+	go func() { // A sends media continuously; B never NACKs (0 loss) - only keepalives flow back.
+		tk := time.NewTicker(16 * time.Millisecond)
+		defer tk.Stop()
+		seq := uint32(0)
+		for {
+			select {
+			case <-stop:
+				return
+			case <-tk.C:
+			}
+			f := sampleFrame(seq, 1, 2000)
+			f.Flags = 0
+			if a.WriteFrame(f) != nil {
+				return
+			}
+			seq++
+		}
+	}()
+	defer close(stop)
+	deadline := time.After(4 * time.Second) // 4× the 1s liveness window
+	for {
+		select {
+		case <-deadline:
+			if a.isDead() {
+				t.Fatalf("SENDER blacked out on a one-directional 0-loss flow (liveness starved): %v", a.err())
+			}
+			if b.isDead() {
+				t.Fatalf("RECEIVER blacked out: %v", b.err())
+			}
+			return
+		default:
+		}
+		if _, err := b.ReadFrame(); err != nil {
+			t.Fatalf("receiver read failed before the deadline (blackout): %v", err)
+		}
+	}
+}
+
+// TestUDPConnByeEndsCleanlyNotBlackout: when the SENDER ends a route cleanly (source EOF / stop) and
+// sends a bye, the receiver ends PROMPTLY with errUDPEnded - not after the liveness window, and not
+// reported as a blackout. This is the §2.5 attributability fix for the "mystery 2 s blackout" that a
+// silently-closed sender produced (the real production trigger was a sender-side source/encoder end).
+func TestUDPConnByeEndsCleanlyNotBlackout(t *testing.T) {
+	a, b, _, _ := udpPair(t, nil, nil, true, func(c *udpConfig) {
+		c.Liveness = 2 * time.Second
+		c.Keepalive = 200 * time.Millisecond
+	})
+	defer a.Close()
+	defer b.Close()
+	for i := 0; i < 5; i++ { // bring the route up + bind B's remote
+		f := sampleFrame(uint32(i), 1, 500)
+		f.Flags = 0
+		if err := a.WriteFrame(f); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+	}
+	if got := readN(b, 1, time.Second); len(got) == 0 {
+		t.Fatal("receiver got no media - route not live before bye")
+	}
+	a.sendBye() // clean end-of-stream
+	start := time.Now()
+	var endErr error
+	for { // drain any buffered media, then the EOS must surface
+		f, err := b.ReadFrame()
+		if err != nil {
+			endErr = err
+			break
+		}
+		_ = f
+		if time.Since(start) > 1500*time.Millisecond {
+			t.Fatal("never saw route end after bye")
+		}
+	}
+	if endErr != errUDPEnded {
+		t.Fatalf("receiver did not get clean EOS: err=%v (want errUDPEnded)", endErr)
+	}
+	if el := time.Since(start); el > time.Second {
+		t.Fatalf("clean EOS took %v - should be prompt, not a liveness blackout (%v)", el, 2*time.Second)
+	}
+}
+
 func TestUDPConnKeepaliveLiveness(t *testing.T) {
 	// B→A fully blacked out: A receives nothing → A hits the liveness timeout and ReadFrame errors.
 	aToB := newImpairment(31)

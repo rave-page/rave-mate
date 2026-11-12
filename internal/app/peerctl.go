@@ -434,8 +434,12 @@ func formatRoutes(stats []medialink.RouteStat) string {
 		if s.Encrypted {
 			enc = "encrypted"
 		}
-		fmt.Fprintf(&b, "%s  peer=%s  stream=%d  %s/%s\n",
+		line1 := fmt.Sprintf("%s  peer=%s  stream=%d  %s/%s",
 			s.Direction, peerShort(s.Peer), s.Stream, transport, enc)
+		if transport == medialink.TransportTCP && s.TCPReason != "" { // why not UDP (brief item 2)
+			line1 += "  (" + s.TCPReason + ")"
+		}
+		fmt.Fprintln(&b, line1)
 		// Codec + engine.
 		engine := s.Encoder
 		if engine == "" {

@@ -34,6 +34,12 @@ var (
 // UDP blackout). The router uses it as the §-fallback trigger to renegotiate onto TCP (Unit 3).
 var errUDPDead = errors.New("medialink: udp route blackout (no datagrams within liveness window)")
 
+// errUDPEnded is returned by ReadFrame when the peer sent an explicit clean end-of-stream (dgTypeBye):
+// the remote source ended (EOF) or its route was stopped. Distinct from errUDPDead so the receiver
+// reports "remote source ended" immediately instead of waiting out the liveness window and logging a
+// (misleading) blackout. A stalled/crashed sender that cannot send a bye still surfaces as errUDPDead.
+var errUDPEnded = errors.New("medialink: remote source ended (clean end-of-stream)")
+
 var errConnClosed = errors.New("medialink: conn closed")
 
 // packetConn is the subset of net.PacketConn the udpConn needs (so the in-process impairment shim
@@ -387,6 +393,23 @@ func (u *udpConn) remoteAddr() net.Addr {
 	return nil
 }
 
+// sendBye tells the peer this side is ending the route cleanly (source EOF / route stop) so the
+// receiver ends with errUDPEnded immediately instead of waiting out the liveness window and reporting
+// a blackout. Best-effort and SYNCHRONOUS (the conn is about to close, so it bypasses the pacer and
+// the sendLoop, which may already be torn down). An old peer ignores the unknown datagram type, so a
+// mixed-version pair simply keeps the old 2 s blackout behaviour (no regression).
+func (u *udpConn) sendBye() {
+	r := u.remoteAddr()
+	if r == nil {
+		return // no authenticated remote: nothing to notify
+	}
+	b := u.buildControl(dgTypeBye, nil)
+	if b == nil {
+		return // encoder seq exhausted
+	}
+	_, _ = u.pc.WriteTo(b, r)
+}
+
 // sendControl queues a control datagram (never dropped silently; bounded channel).
 func (u *udpConn) sendControlDatagram(b []byte) {
 	select {
@@ -442,7 +465,8 @@ func (u *udpConn) handleDatagram(dg []byte, src net.Addr) {
 	// prevent replay. Only a STRICTLY-NEWEST datagram (stNew - a replay can't forge one) may rebind
 	// the remote, refresh liveness, and signal reachability. A gap-filling retransmit (stFill) is
 	// delivered for recovery but grants none of that leverage.
-	switch u.seqTrk.accept(h.Seq) {
+	st := u.seqTrk.accept(h.Seq)
+	switch st {
 	case stDup, stTooOld:
 		u.bump(&u.st.dup)
 		return // replay / duplicate / too-old: no rebind, no liveness, no reach, no processing
@@ -460,6 +484,18 @@ func (u *udpConn) handleDatagram(dg []byte, src net.Addr) {
 		u.onPong(chunk)
 	case dgTypeNack:
 		u.onNack(chunk)
+	case dgTypeBye:
+		// Clean end-of-stream: end the route now with errUDPEnded instead of a liveness blackout. Only a
+		// STRICTLY-NEWEST (stNew) bye gets this leverage - the real end-of-stream is always the newest
+		// datagram, and gating on stNew means a replayed or reordered (stFill) bye can never tear down a
+		// live or re-established route (same replay-hardening rule as rebind/liveness above).
+		if st == stNew {
+			u.setErr(errUDPEnded)
+			u.closeOnce.Do(func() {
+				close(u.done)
+				_ = u.pc.Close()
+			})
+		}
 	}
 }
 

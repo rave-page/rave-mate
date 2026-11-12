@@ -1334,6 +1334,8 @@ func fmtRouteStat(s medialink.RouteStat, resolve func(string) string) (title, de
 	}
 	if s.Transport == medialink.TransportUDP { // §2.5 UDP datagram profile (else the default TCP)
 		title += " [udp]"
+	} else if s.TCPReason != "" { // on TCP although UDP was possible: show WHY (brief item 2)
+		title += " [tcp: " + s.TCPReason + "]"
 	}
 	// UDP transport telemetry (loss/queuing-delay/NACK/retransmit/pacer/reassembly) - a technical
 	// diagnostic suffix (no translation); the TCP path has no datagram-level counters. "owdq" is the
