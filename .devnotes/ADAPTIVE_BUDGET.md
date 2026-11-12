@@ -102,6 +102,54 @@ ceilings. The receiver offers only decoders it holds (`preferDecoders`), and dec
   binding-reason + live model target need the decision stored on the route (the governor logs
   `maxKbps`).
 
+## Stage 2 (2026-11-12): regression fix + end-to-end items
+
+**REGRESSION FIX (commit b6da875).** Live 4K60 route got a 1000-kbps AUTO budget. Root cause:
+`QualityTargetKbps` returned the 1000 floor when `fps<=0`, and a PipeWire source advertises
+`3840x2160@0` (fps unknown until a capture is active), so BOTH the offer and the recv governor
+(same model) computed 1000. Fix, robust by construction: `fps<=0 => 60`, unknown geometry =>
+1080p, unknown codec => h264 (least efficient). The auto budget never drops below the geometry's
+quality-safe value on its own account; only user/link/VRAM/congestion may, with a visible reason.
+`assertBudgetSane` logs when a model target is <2000 kbps. 4K60 HEVC auto with a 50000 ceiling now
+= ~22 Mbps (fps 0 or 60); H264 ~35. Tests cover fps-0 offer, unknown geometry, 4K60 >=15/~22.
+
+**Item 2 (commit 4731ff7)** budget follows the CODED size per tick: the governors take a
+`budget(codedH)` closure; `capBudgetToCoded` lowers the emitted bitrate to the coded-size model
+under a cap and restores on lift.
+**Item 4 (commit 1e1d07f)** static link ceiling = interface speed x `linkFracPct` (default 50%),
+folded into the budget closure; Linux reads /sys/class/net/<if>/speed, Windows returns 0 (congestion
+controller bounds it; GetAdaptersAddresses is a follow-up).
+**Item 5 (commit d7ad691)** the recv governor records its decision LOCK-FREE (atomic pointer, not
+the per-frame st.mu) and ctl routes shows `budget mode=auto target=.. model=.. reason=..`.
+**Item 6 (commit d58e0f8)** ffmpeg constant-quality-with-ceiling (`rcFor`): nvenc -cq, amf QVBR,
+qsv -global_quality, x264/x265/svtav1 -crf, capped at maxrate; VA/MF keep their paths.
+**Item 7 (commit 0edb9c7)** gpubudget self footprint: sweep ALL processes (not top-24) + a
+synchronous sample for ctl, so `self=<MB>` instead of `self=?`.
+
+### Realtime-path rule (CLAUDE.md 2026-11-12)
+All budget work is control/policy at ~1 Hz (governor tick, meta/stats channels) - off the frame
+path. Item 5's governor->ctl handoff is a lock-free atomic pointer (no shared lock with per-frame
+count()). Encoder per-frame rate control stays native (the ffmpeg child's own RC, or the VA/MF
+child). The deferred feedback wire field (item 1) is designed as PLAIN NUMBERS so a native Zig
+transport can apply it via a small control op.
+
+### Deferred items 1 + 3 (with design)
+- **Item 1 (feedback loop live)**: the AdaptiveBudget QP bump needs the SENDER's `EncoderFeedback`
+  (AvgQP, RateLimited) at the RECEIVER's governor. DESIGN (decision: keep receiver-authoritative -
+  the Linux agent is building VA to fill PipelineStats.Feedback for the receiver + consume
+  QualityTarget; a sender->receiver meta field is the smallest change): add a `MetaFeedback` meta
+  type carrying two plain numbers (`qp int`, `rl uint8` 0/1) - NO Go types on the wire, so a native
+  Zig transport applies it via a control op - sent sender->receiver on the report cadence (<=few Hz),
+  authenticated like all meta on AEAD routes. The receiver's governor holds a PERSISTENT
+  `*AdaptiveBudget` (for hysteresis) and calls `Step(..., Feedback{Present,AvgQP,RateLimited})` each
+  tick, bumping the ceiling toward the user/link limit while RateLimited (tested in isolation).
+  Not wired: the meta type + the sender send point + the receiver store + the persistent controller
+  in the governor (the governor's `budget(codedH)` closure currently creates a fresh stateless model
+  per call). ~1 governor refactor + 1 meta field.
+- **Item 3 (aggregate link sharing)**: `SplitLinkCeiling` (tested) is ready; wiring needs tracking
+  concurrent routes per peer/link and re-splitting on start/stop, feeding each route's governor a
+  per-route link ceiling. Not wired.
+
 ## Verify live (lead)
 
 On the rig (sus Linux → DJ PC, 4K60 VRChat): `rave-mate ctl routes` shows per route `budget
