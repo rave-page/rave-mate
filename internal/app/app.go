@@ -1895,7 +1895,7 @@ func run(parent context.Context, serviceMode bool) error {
 	}
 
 	if serviceMode {
-		ctl := &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, mediaCaps: mediaCapsPlan, mediaRoutes: mediaRoutesCtl, vram: vramBudget.Budget, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, workers: workers, quit: cancel}
+		ctl := &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, disc: disc, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, mediaCtl: mediaCtl, mediaCaps: mediaCapsPlan, mediaRoutes: mediaRoutesCtl, vram: vramBudget.Budget, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, workers: workers, quit: cancel}
 		remotectl.RegisterScreenshot(remoteCtl, ctl)  // peer-driven app/VR-View screenshot (VR works headless)
 		remotectl.RegisterVRDiag(remoteCtl, ctl)      // peer-driven VR input/binding diagnostics
 		remotectl.RegisterPerf(remoteCtl, ctl)        // peer-driven perf diagnosis (remote-perf)
