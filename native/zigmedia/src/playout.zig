@@ -116,15 +116,36 @@ pub const Playout = struct {
         p.margin_ns = want;
     }
 
-    /// due returns the next releasable frame (deadline <= now_mono, seq order) or null.
+    /// due returns the next releasable frame (deadline <= now_mono, seq order) or null. On a gap below
+    /// the head (lower-seq frames missing, e.g. a dropped fragment still being NACK-recovered) it HOLDS
+    /// the head until the first missing frame's would-be deadline (the NACK recovery window), so a
+    /// fragment recovered within the margin is still released IN ORDER - not released-late-then-dropped.
+    /// Past that deadline it skips the gap forward (live stream: latency beats completeness).
     pub fn due(p: *Playout, now_mono: i64) ?Item {
         if (p.n == 0) return null;
         const h = p.buf[0];
+        if (h.seq != p.next_seq) {
+            const gap: i64 = @intCast(h.seq -% p.next_seq);
+            const miss_pts = h.pts_ns - gap * p.interval_ns; // first missing frame's estimated pts
+            if (now_mono < miss_pts + p.base + p.margin_ns) return null; // hold for NACK recovery
+            p.next_seq = h.seq; // recovery window expired: drop the gap, release the head
+        }
         if (now_mono < p.deadline(h.pts_ns)) return null;
         p.popHead();
         p.next_seq = h.seq +% 1;
         p.released += 1;
         return h;
+    }
+
+    /// nextDeadline accounts for a gap-held head (wake at the missing frame's recovery deadline).
+    pub fn nextDeadlineGap(p: *const Playout) i64 {
+        if (p.n == 0) return std.math.maxInt(i64);
+        const h = p.buf[0];
+        if (h.seq != p.next_seq) {
+            const gap: i64 = @intCast(h.seq -% p.next_seq);
+            return (h.pts_ns - gap * p.interval_ns) + p.base + p.margin_ns;
+        }
+        return p.deadline(h.pts_ns);
     }
 
     /// nextDeadline is the monotonic time to wake for the next release (max i64 when empty).

@@ -13,7 +13,7 @@ const aead = @import("aead.zig");
 const wire = @import("wire.zig");
 const snd = @import("sender.zig");
 
-pub const abi_version: u32 = 1;
+pub const abi_version: u32 = 2;
 
 const alloc = std.heap.c_allocator;
 
@@ -36,6 +36,7 @@ const RmKeys = extern struct {
 };
 const RmOpenParams = extern struct {
     abi_version: u32,
+    struct_size: u32,
     transport: c_int,
     codec: c_int,
     stream: u16,
@@ -45,6 +46,9 @@ const RmOpenParams = extern struct {
     peer_addr_len: i32,
     keys: RmKeys,
     initial_rate_bytes_per_sec: f64,
+    initial_seq: u64,
+    fps: i32,
+    startup_grace_ns: i64,
 };
 const RmTxStats = extern struct {
     aus_submitted: u64,
@@ -105,7 +109,8 @@ export fn rm_tx_open(p: ?*const RmOpenParams, on_need_idr: ?IdrCb, user: ?*anyop
     const params = p orelse return RM_ERR_ARGS;
     const o = out orelse return RM_ERR_ARGS;
     o.* = null;
-    if (params.abi_version != abi_version) return RM_ERR_ARGS;
+    if (params.abi_version != abi_version) return RM_ERR_ARGS; // version skew: reject before any field use
+    if (params.struct_size != @sizeOf(RmOpenParams)) return RM_ERR_ARGS; // layout skew (same-version build drift)
     if (params.transport != 0) return RM_ERR_UNIMPL; // TCP: next follow-up
     const k = params.keys;
     const cfg = snd.Config{
@@ -120,6 +125,9 @@ export fn rm_tx_open(p: ?*const RmOpenParams, on_need_idr: ?IdrCb, user: ?*anyop
         .recv_key = k.recv_key,
         .recv_prefix = k.recv_nonce_prefix,
         .rate_bps = params.initial_rate_bytes_per_sec,
+        .initial_seq = params.initial_seq, // continue the Go conn's seq space (strictly-newest at the receiver)
+        .fps = params.fps,
+        .startup_grace_ns = if (params.startup_grace_ns > 0) params.startup_grace_ns else snd.default_startup_grace_ns,
     };
     const fd_res = openSocket(params) catch return RM_ERR_SOCKET;
     const s = snd.Sender.open(alloc, cfg, fd_res.fd, fd_res.own) catch {
@@ -170,6 +178,33 @@ export fn rm_tx_stats_get(s: ?*snd.Sender, out: ?*RmTxStats) void {
 }
 export fn rm_tx_close(s: ?*snd.Sender) void {
     if (s) |sender| sender.close();
+}
+
+test "rm_tx_open rejects ABI version + struct-size skew before opening a socket" {
+    var out: ?*snd.Sender = null;
+    var p = RmOpenParams{
+        .abi_version = 1, // a stale v1 caller
+        .struct_size = @sizeOf(RmOpenParams),
+        .transport = 0,
+        .codec = 5,
+        .stream = 1,
+        .body_max = 1200,
+        .socket_fd = -1,
+        .peer_addr = null,
+        .peer_addr_len = 0,
+        .keys = std.mem.zeroes(RmKeys),
+        .initial_rate_bytes_per_sec = 0,
+        .initial_seq = 0,
+        .fps = 60,
+        .startup_grace_ns = 0,
+    };
+    try std.testing.expectEqual(RM_ERR_ARGS, rm_tx_open(&p, null, null, &out));
+    try std.testing.expectEqual(@as(?*snd.Sender, null), out);
+    // Correct version, wrong size (same-version build drift) is caught too.
+    p.abi_version = abi_version;
+    p.struct_size = @sizeOf(RmOpenParams) - 8;
+    try std.testing.expectEqual(RM_ERR_ARGS, rm_tx_open(&p, null, null, &out));
+    try std.testing.expectEqual(@as(?*snd.Sender, null), out);
 }
 
 test {

@@ -46,6 +46,10 @@ fn fixtureKeys() struct { ks: keys.KeySchedule, token: u32 } {
 }
 
 fn openNativeSender(recv_addr: SockaddrIn, encrypt: bool) !*snd.Sender {
+    return openNativeSenderSeq(recv_addr, encrypt, 0);
+}
+
+fn openNativeSenderSeq(recv_addr: SockaddrIn, encrypt: bool, initial_seq: u64) !*snd.Sender {
     const fk = fixtureKeys();
     const fd = try snd.udpSocket();
     try snd.udpConnect(fd, @ptrCast(&recv_addr), @sizeOf(SockaddrIn));
@@ -61,8 +65,32 @@ fn openNativeSender(recv_addr: SockaddrIn, encrypt: bool) !*snd.Sender {
         .recv_key = fk.ks.recv.key,
         .recv_prefix = fk.ks.recv.prefix,
         .rate_bps = 0,
+        .initial_seq = initial_seq,
     };
     return snd.Sender.open(testing.allocator, cfg, fd, true);
+}
+
+test "native sender continues InitialSeq: first datagram seq == InitialSeq" {
+    const r = try bindEphemeral();
+    defer snd.closeFd(r.fd);
+    const initial_seq: u64 = 0x12340000;
+    const sender = try openNativeSenderSeq(r.addr, true, initial_seq);
+    defer sender.close();
+    sender.submit("seqtest", 1, snd.flag_keyframe);
+
+    // The first datagram out of the worker (a keepalive ping or the media, whichever the single worker
+    // emits first) MUST carry seq == initial_seq - that strictly-newest first datagram is what makes
+    // the Go receiver rebind its remote to the native socket. Loopback preserves single-sender order.
+    var buf: [2048]u8 = undefined;
+    const deadline = nowMs() + 3000;
+    while (nowMs() < deadline) {
+        const rn = linux.recvfrom(r.fd, &buf, buf.len, 0, null, null);
+        if (linux.errno(rn) != .SUCCESS) continue;
+        const h = wire.Header.decode(buf[0..rn]) catch continue;
+        try testing.expectEqual(initial_seq, h.seq);
+        return;
+    }
+    return error.NoDatagram;
 }
 
 // decodeMedia authenticates (AEAD) + parses a media datagram, returning (frame_seq, frag_idx,
@@ -245,34 +273,36 @@ fn onFrame(user: ?*anyopaque, ptr: [*]const u8, len: usize, pts: i64) callconv(.
     if (len > 0) g_rx_lastbyte = ptr[len - 1];
 }
 
-test "end-to-end: native sender -> native receiver, frames delivered through playout" {
-    g_rx_count = 0;
-    const fk = fixtureKeys();
-    // Receiver keys: dialer (initiator) opens the sender's media (s2c) + seals control (c2s).
+// openNativeReceiver pairs with openNativeSender (answerer=responder): the receiver is the dialer
+// (initiator=true), opens the sender's media (s2c) and seals control (c2s).
+fn openNativeReceiver(fd: i32) !*Receiver {
     var master: [32]u8 = undefined;
     for (&master, 0..) |*b, i| b.* = @intCast(i + 1);
     var sb: [64]u8 = undefined;
     const nonces = ([_]u8{0xAA} ** 16) ++ ([_]u8{0xBB} ** 16);
     @memcpy(sb[0..32], &nonces);
     @memcpy(sb[32..40], "route-99");
-    const ks_rcv = keys.deriveUdp(&master, sb[0..40], true); // dialer
-
-    const r = try bindEphemeral();
-    const rx = try Receiver.open(testing.allocator, r.fd, .{
+    const ks = keys.deriveUdp(&master, sb[0..40], true);
+    return Receiver.open(testing.allocator, fd, .{
         .encrypt = true,
-        .token = fk.token,
-        .open_key = ks_rcv.recv.key, // s2c: opens the answerer's media
-        .open_prefix = ks_rcv.recv.prefix,
-        .send_key = ks_rcv.send.key, // c2s: seals control to the sender
-        .send_prefix = ks_rcv.send.prefix,
+        .token = fixtureKeys().token,
+        .open_key = ks.recv.key,
+        .open_prefix = ks.recv.prefix,
+        .send_key = ks.send.key,
+        .send_prefix = ks.send.prefix,
         .body_max = 1200,
         .fps = 60,
     });
+}
+
+test "end-to-end: native sender -> native receiver, frames delivered through playout" {
+    g_rx_count = 0;
+    const r = try bindEphemeral();
+    const rx = try openNativeReceiver(r.fd);
     rx.on_frame = onFrame;
     defer rx.close();
     defer snd.closeFd(r.fd);
-
-    const sender = try openNativeSender(r.addr, true); // answerer
+    const sender = try openNativeSender(r.addr, true);
     defer sender.close();
 
     const n_aus = 12;
@@ -281,14 +311,40 @@ test "end-to-end: native sender -> native receiver, frames delivered through pla
         var au: [8]u8 = undefined;
         au[0] = 0xAA;
         au[7] = @intCast(i);
-        sender.submit(&au, @as(i64, i) + 1, if (i == 0) snd.flag_keyframe else 0);
-        sleepMs(8);
+        sender.submit(&au, @as(i64, i) * 16_666_667, if (i == 0) snd.flag_keyframe else 0);
+        sleepMs(16);
     }
-    // Wait out the playout margin + delivery.
     const deadline = nowMs() + 3000;
     while (g_rx_count < n_aus and nowMs() < deadline) sleepMs(10);
-    try testing.expect(g_rx_count >= n_aus - 1); // allow the very first/last to be in flight
+    try testing.expect(g_rx_count >= n_aus - 1);
     try testing.expect(rx.deliveredCount() >= n_aus - 1);
+}
+
+test "loss recovery: a dropped fragment is recovered via NACK (all frames delivered)" {
+    g_rx_count = 0;
+    const r = try bindEphemeral();
+    const rx = try openNativeReceiver(r.fd);
+    rx.on_frame = onFrame;
+    rx.drop_frame = 2; // drop fragment 1 of frame 2 once (simulates a NIC drop)
+    rx.drop_frag = 1;
+    defer rx.close();
+    defer snd.closeFd(r.fd);
+    const sender = try openNativeSender(r.addr, true);
+    defer sender.close();
+
+    // 6 large AUs (3000 B → 3 fragments each); frame 3 arriving overtakes frame 2 → NACK its hole.
+    var big: [3000]u8 = undefined;
+    for (&big, 0..) |*b, j| b.* = @intCast(j & 0xff);
+    const n_aus = 6;
+    var i: u32 = 0;
+    while (i < n_aus) : (i += 1) {
+        sender.submit(&big, @as(i64, i) * 16_666_667, if (i == 0) snd.flag_keyframe else 0);
+        sleepMs(16);
+    }
+    const deadline = nowMs() + 4000;
+    while (g_rx_count < n_aus and nowMs() < deadline) sleepMs(10);
+    try testing.expect(g_rx_count >= n_aus); // ALL frames delivered, including the NACK-recovered one
+    try testing.expect(sender.snapshot().retransmits >= 1); // the receiver's NACK drove a retransmit
 }
 
 fn nowMs() i64 {
