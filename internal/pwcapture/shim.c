@@ -15,6 +15,7 @@
  * SPA POD builders/parsers are header-only inline; only the pw_, egl, gl and gbm symbols are
  * dlopen'd, so nothing is load-time linked. */
 #include "shim.h"
+#include "vaenc.h"
 
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -252,6 +253,7 @@ struct rpw_capture {
 	int has_frame;
 	int fatal;
 	int need_reconnect; /* stream hit ERROR (producer restart) - re-arm the connection */
+	int va_probed;      /* RPW_VA_PROBE: VA import probe already run (once) */
 	long dropped;
 	long dmabuf_skipped;
 	long reconnects;
@@ -601,20 +603,31 @@ static void on_param_changed(void *data, uint32_t id, const struct spa_pod *para
 		 * multi-plane (DCC metadata) at 4K, which mesa's eglCreateImageKHR rejects here
 		 * (EGL_BAD_MATCH) - a documented 4K limitation (see devnote; zero-copy dmabuf->VAAPI is the
 		 * fix). LINEAR kept only as a last resort. */
-		uint64_t pick = DRM_FORMAT_MOD_INVALID, linear = DRM_FORMAT_MOD_INVALID;
+		/* Prefer the first tiled (non-LINEAR) modifier the producer+EGL share - this is the
+		 * producer's native modifier (0x...a6bf04 on radeonsi GFX11), which VA's DRM_PRIME_2 import
+		 * accepts (incl. its DCC metadata plane). LINEAR last (mislabelled by libfunnel). */
+		uint64_t pick = DRM_FORMAT_MOD_INVALID, firsttiled = DRM_FORMAT_MOD_INVALID;
+		int prefer_linear = getenv("RPW_PREFER_LINEAR") != NULL;
 		for (uint32_t i = 0; i < nvals; i++) {
 			uint64_t m = mods[i];
 			if (!egl_supports_mod(c, raw.format, m))
 				continue;
 			if (m == DRM_FORMAT_MOD_LINEAR) {
-				linear = m;
+				if (prefer_linear) {
+					pick = m;
+					break;
+				}
 				continue;
 			}
-			pick = m;
-			break;
+			if (firsttiled == DRM_FORMAT_MOD_INVALID)
+				firsttiled = m;
+			if (!prefer_linear) {
+				pick = m;
+				break;
+			}
 		}
 		if (pick == DRM_FORMAT_MOD_INVALID)
-			pick = linear;
+			pick = firsttiled;
 		if (pick == DRM_FORMAT_MOD_INVALID) {
 			DBG("fixate: no common modifier for fmt %d\n", raw.format);
 			return;
@@ -654,6 +667,26 @@ static void on_process(void *data) {
 	if (sb->n_datas >= 1) {
 		struct spa_data *d = &sb->datas[0];
 		if (d->type == SPA_DATA_DmaBuf) {
+			if (!c->va_probed && getenv("RPW_VA_PROBE")) { /* one-shot go/no-go for the VA import path */
+				c->va_probed = 1;
+				int np = sb->n_datas < RPW_MAX_PLANES ? (int)sb->n_datas : RPW_MAX_PLANES;
+				int fds[RPW_MAX_PLANES];
+				unsigned offs[RPW_MAX_PLANES], strs[RPW_MAX_PLANES];
+				for (int p = 0; p < np; p++) {
+					fds[p] = sb->datas[p].fd;
+					offs[p] = sb->datas[p].chunk ? sb->datas[p].chunk->offset : 0;
+					strs[p] = sb->datas[p].chunk ? sb->datas[p].chunk->stride : 0;
+				}
+				const char *node = getenv("RPW_EGL_DEVICE");
+				if (!node || !*node)
+					node = "/dev/dri/renderD128";
+				unsigned char cn[12];
+				memset(cn, 0, sizeof(cn));
+				int r = rva_import_probe(node, spa_to_drm_fourcc(c->fmt), c->modifier, c->width, c->height, np, fds, offs, strs, cn);
+				fprintf(stderr, "RVA_PROBE rc=%d planes=%d mod=0x%llx %dx%d TL=%d,%d,%d TR=%d,%d,%d BL=%d,%d,%d BR=%d,%d,%d\n",
+					r, np, (unsigned long long)c->modifier, c->width, c->height,
+					cn[0], cn[1], cn[2], cn[3], cn[4], cn[5], cn[6], cn[7], cn[8], cn[9], cn[10], cn[11]);
+			}
 			if (!egl_import_frame(c, sb)) {
 				c->dmabuf_skipped++;
 				c->dropped++;

@@ -148,3 +148,34 @@ unit-test sample carries mixed types to lock the regression.
    - the §6 zero-copy path; only if the EGL readback can't hold 4K60.
 3. **YUV camera formats** (NV12/YUY2) so `Video/Source` cameras are capturable too.
 4. Multi-GPU EGL device selection (match the VAAPI render-node pick).
+
+## 4K60: VA-API native zero-copy engine (feat/pw-4k, 2026-11-12)
+
+The EGL readback path cannot do 4K60 (import rejects multi-plane DCC; RGBA readback is CPU-bound
+~36fps). **Decision: Option A — zero-copy dmabuf -> VA-API in-process** (`internal/pwcapture/vaenc.c`,
+libva/libva-drm dlopen'd). B (fix EGL + GPU NV12 readback) was rejected: its precondition is fixing
+the same 4K DCC import EGL fundamentally rejects.
+
+Precondition probes (sus, RX 7900 XTX, vainfo): libva 2.24 (`libva.so.2`/`libva-drm.so.2`); H264
+Main/High + HEVC Main/Main10 + AV1 = **VAEntrypointEncSlice** (full, no LP); **VAEntrypointVideoProc**
+present. libfunnel 4K producer fixates AMD GFX11 modifier `0x200000028a6bf04`; plane count grows with
+size: **1080p = 2 planes** (color + DCC), **4K = 3 planes** (color + DCC + DCC_RETILE display aux).
+
+VA import probe (`rva_import_probe`: dmabuf -> DRM_PRIME_2 VASurface -> VPP RGB->NV12 (+VA_MIRROR_
+VERTICAL; the GL producer renders bottom-up) -> vaDeriveImage NV12 -> corner read):
+- **1080p (2-plane DCC): rc=0, corners CORRECT** (TL red / TR green / BL blue / BR white, within YUV
+  roundtrip tolerance). **VA imports the DCC dmabuf that EGL's eglCreateImageKHR rejected.**
+- **4K (3-plane DCC_RETILE): import fails** (`invalid parameter`; the 2-plane cap gives 3/4 corners,
+  `{0,last}` = `resource allocation failed`). The driver's retile layout is not VA-importable here.
+- **Producer `AMD_DEBUG=nodcc` => 1-plane tiled (`0x200000028a01f04`) at BOTH 1080p and 4K, rc=0,
+  ALL corners CORRECT.** So 4K is pixel-correct with a non-DCC producer buffer.
+- LINEAR (modifier 0) rejected: libfunnel mislabels a tiled buffer as linear (garbage via both EGL
+  and VA).
+
+**Conclusion:** VA import + VPP works and is pixel-correct. 1080p works with DCC as-is. **4K requires a
+non-DCC producer buffer** (`AMD_DEBUG=nodcc` on VRChat/Spout2PW, or any single-plane tiled dmabuf) -
+a producer-side allocation choice the consumer can't override (the driver adds DCC per AMD_DEBUG, not
+per the negotiated modifier). The shim imports 1-plane + 2-plane layouts and rejects 3-plane with a
+clear error. Zero-copy => CPU is control + the compressed-bitstream readback only (well under the
+1.5-core budget). Engine build (NV12 -> H.264 EncSlice, packed headers, CBR, IDR/reconnect, Annex-B)
+follows.
