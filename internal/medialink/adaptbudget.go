@@ -164,9 +164,10 @@ func (rm *RouteManager) adaptiveBase(codec Codec, w, h, fps int) int {
 }
 
 // budgetKbpsFn returns the per-route closure the governors call each tick: the adaptive model
-// bitrate for a CODED height (aspect-preserved, capped by the user ceiling / fixed value). codedH<=0
-// or >=nominal => nominal. Lets the governor's bitrate follow a live resolution cap (item 2).
-func (rm *RouteManager) budgetKbpsFn(codec Codec, w, h, fps int) func(codedH int) int {
+// bitrate for a CODED height (aspect-preserved, capped by the user ceiling / fixed value), further
+// capped by the static link ceiling (item 4; 0 = none). codedH<=0 or >=nominal => nominal. Lets the
+// governor's bitrate follow a live resolution cap (item 2) and never exceed the link fraction.
+func (rm *RouteManager) budgetKbpsFn(codec Codec, w, h, fps, linkCeilKbps int) func(codedH int) int {
 	return func(codedH int) int {
 		ch, cw := h, w
 		if codedH > 0 && codedH < h {
@@ -175,7 +176,11 @@ func (rm *RouteManager) budgetKbpsFn(codec Codec, w, h, fps int) func(codedH int
 				cw = w * codedH / h
 			}
 		}
-		return rm.adaptiveBase(codec, cw, ch, fps)
+		b := rm.adaptiveBase(codec, cw, ch, fps)
+		if linkCeilKbps > 0 && linkCeilKbps < b {
+			b = linkCeilKbps
+		}
+		return b
 	}
 }
 

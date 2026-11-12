@@ -150,6 +150,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 		GovernorBaseKbps:   func() int { return liveCfg().Bitrate() },
 		BudgetMode:         func() string { return liveCfg().BitrateModeString() },
 		BudgetUserCeilKbps: func() int { return liveCfg().UserBitrateCeilKbps() },
+		BudgetLinkFracPct:  func() int { return liveCfg().LinkFractionPct() },
 	})
 	if len(in.Encoders) > 0 || len(in.Decoders) > 0 {
 		f.router.SetCodecCaps(withVAAPINativeEncoders(in.Encoders), in.Decoders)
