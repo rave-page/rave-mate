@@ -2747,7 +2747,9 @@ func resolveAPIBase() string {
 // pair with RAVE_MATE_CTL_ADDR so the control socket is isolated too).
 func Dir() (string, error) {
 	if v := strings.TrimSpace(os.Getenv("RAVE_MATE_CONFIG_DIR")); v != "" {
-		if err := os.MkdirAll(v, 0o755); err != nil {
+		// 0700: the dir holds the node identity keypair + remembered peers (and, on Linux where
+		// secureseal is a no-op, the raw Ed25519 seed in the 0600 bbolt file) - owner-only.
+		if err := os.MkdirAll(v, 0o700); err != nil {
 			return "", err
 		}
 		return v, nil
@@ -2765,7 +2767,10 @@ func Dir() (string, error) {
 		return "", err
 	}
 	dir := filepath.Join(base, appDirName)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// 0700: owner-only - the dir holds the node identity keypair + remembered peers (Linux has no
+	// DPAPI, so the identity seed sits raw in the 0600 bbolt file here). MkdirAll won't tighten an
+	// existing dir; the sensitive file itself is 0600 regardless (store.Open).
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
 	return dir, nil
