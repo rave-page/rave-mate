@@ -48,19 +48,19 @@
 #define RPW_MAX_MODS 64
 #define RPW_MAX_PLANES 4
 
-/* Lock-free SPSC AU ring (encode path): the PipeWire loop thread (producer) hands encoded AUs to the
- * Go consumer (rpw_wait_au) without a mutex on the per-frame path, so a jittery downstream (packetize/
- * pace/send) can be absorbed instead of forcing the single-slot newest-wins drop that caused the live
- * stutter. Bounded by COUNT (AU_RING_N) AND BYTES (AU_RING_MAXBYTES). Buffers are preallocated
- * (AU_RING_SLOT_INIT) and only realloc on a rare oversize AU - no steady-state malloc. Overflow policy:
- * the consumer is behind by more than the ring (a real stall, not jitter) => DROP-NEWEST (keep the
- * queued oldest frames the consumer will read next; a lock-free SPSC producer cannot advance the
- * consumer's read index to drop-oldest without a race) AND force an IDR on the next encoded frame +
- * count it, because dropping any AU breaks the inter-frame reference chain - never silently drop a
- * P-frame without a keyframe to resync. */
-#define AU_RING_N 3
-#define AU_RING_SLOT_INIT (4 * 1024 * 1024) /* 4 MB/slot preallocation (>> a 4K IDR) */
-#define AU_RING_MAXBYTES (16 * 1024 * 1024) /* byte ceiling on queued AUs */
+/* Lock-free SPSC AU ring (encode path): the encode thread (producer) hands encoded AUs to the Go
+ * consumer (rpw_wait_au) without a mutex on the per-frame path, so a jittery/stalled downstream
+ * (packetize/pace/send, a receiver hiccup blocking TCP) is absorbed. Bounded by COUNT (AU_RING_N =
+ * 200 ms at 60 fps: rides through the 20-140 ms receiver stalls measured on the rig) AND BYTES
+ * (AU_RING_MAXBYTES). Slots start at AU_RING_SLOT_INIT and only realloc on a rare larger AU. Overflow
+ * policy: the encode thread checks for room BEFORE encoding and SKIPS the frame when full (pre-encode:
+ * the frame never enters the encoder, so the reference chain stays intact - no IDR, no keyframe storm;
+ * counted as ring_skips). Only a post-encode byte-cap miss drops an AU, which forces ONE IDR (no
+ * further forcing while that IDR is outstanding). */
+#define AU_RING_N 12
+#define AU_RING_SLOT_INIT (512 * 1024)       /* 512 KB/slot start (a 4K P ~100 KB); grows rarely */
+#define AU_RING_MAXBYTES (32 * 1024 * 1024)  /* byte ceiling on queued AUs */
+#define AU_RING_HEADROOM (4 * 1024 * 1024)   /* pre-encode room check: > any single AU */
 
 struct au_slot {
 	unsigned char *buf;
@@ -194,11 +194,23 @@ struct egl_api {
 };
 static struct egl_api E;
 static int egl_loaded = -1;
+static pthread_mutex_t egl_load_mu = PTHREAD_MUTEX_INITIALIZER;
 
+static int egl_load_locked(void);
+
+/* egl_load: one-time dlopen, serialized. Unguarded, a capture started concurrently with another
+ * (daemon restart = every route at once) read the in-progress 0 as "no EGL", built a SHM-only offer,
+ * and a dmabuf-only producer then failed every link ("no more input formats") forever. */
 static int egl_load(void) {
-	if (egl_loaded != -1)
-		return egl_loaded;
-	egl_loaded = 0;
+	pthread_mutex_lock(&egl_load_mu);
+	if (egl_loaded == -1)
+		egl_loaded = egl_load_locked();
+	int r = egl_loaded;
+	pthread_mutex_unlock(&egl_load_mu);
+	return r;
+}
+
+static int egl_load_locked(void) {
 	void *le = dlopen("libEGL.so.1", RTLD_NOW | RTLD_GLOBAL);
 	void *lg = dlopen("libGLESv2.so.2", RTLD_NOW | RTLD_GLOBAL);
 	void *lb = dlopen("libgbm.so.1", RTLD_NOW | RTLD_GLOBAL);
@@ -244,7 +256,6 @@ static int egl_load(void) {
 		return 0;
 	}
 	E.ok = 1;
-	egl_loaded = 1;
 	return 1;
 }
 
@@ -263,6 +274,72 @@ static uint32_t spa_to_drm_fourcc(enum spa_video_format f) {
 static const enum spa_video_format OFFER_FORMATS[] = {
 	SPA_VIDEO_FORMAT_BGRA, SPA_VIDEO_FORMAT_RGBA, SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_RGBx};
 #define N_OFFER (sizeof(OFFER_FORMATS) / sizeof(OFFER_FORMATS[0]))
+
+/* ---- native per-AU interval histogram (lock-free; single writer = the encode thread) ---------------
+ * Same bucket bounds as medialink.stageBucketsUpperMs (framestages.go) so the native enc/tx stages read
+ * exactly like the Go-pump stages in `ctl routes`. Marked on the encode thread (relaxed atomics, no
+ * lock, no alloc); rpw_hist_snap computes the percentiles at Go's <= 1 Hz sample, off the frame path. */
+#define RPW_HIST_NB 32
+static const double rpw_hist_ub_ms[RPW_HIST_NB] = {
+	4, 8,
+	10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+	33, 40, 50, 75, 100, 150, 200, 500, 1e12};
+
+struct rpw_hist {
+	_Atomic long long last; /* mono ns of the previous mark (0 = none) */
+	_Atomic unsigned long long n, sum_ns, max_ns, o25, o50, o100;
+	_Atomic unsigned long long b[RPW_HIST_NB];
+};
+
+static void rpw_hist_mark(struct rpw_hist *h, long long now) {
+	long long prev = atomic_exchange_explicit(&h->last, now, memory_order_relaxed);
+	if (prev == 0 || now <= prev)
+		return;
+	unsigned long long d = (unsigned long long)(now - prev);
+	atomic_fetch_add_explicit(&h->n, 1, memory_order_relaxed);
+	atomic_fetch_add_explicit(&h->sum_ns, d, memory_order_relaxed);
+	if (d > atomic_load_explicit(&h->max_ns, memory_order_relaxed)) /* single writer: plain max */
+		atomic_store_explicit(&h->max_ns, d, memory_order_relaxed);
+	double ms = (double)d / 1e6;
+	if (ms > 25)
+		atomic_fetch_add_explicit(&h->o25, 1, memory_order_relaxed);
+	if (ms > 50)
+		atomic_fetch_add_explicit(&h->o50, 1, memory_order_relaxed);
+	if (ms > 100)
+		atomic_fetch_add_explicit(&h->o100, 1, memory_order_relaxed);
+	for (int i = 0; i < RPW_HIST_NB; i++) {
+		if (ms <= rpw_hist_ub_ms[i]) {
+			atomic_fetch_add_explicit(&h->b[i], 1, memory_order_relaxed);
+			break;
+		}
+	}
+}
+
+/* rpw_hist_pct: upper bound of the bucket holding quantile q (bucket-approximated, like StageHist). */
+static double rpw_hist_pct(struct rpw_hist *h, unsigned long long n, double q) {
+	unsigned long long target = (unsigned long long)(q * (double)n), cum = 0;
+	for (int i = 0; i < RPW_HIST_NB; i++) {
+		cum += atomic_load_explicit(&h->b[i], memory_order_relaxed);
+		if (cum >= target)
+			return rpw_hist_ub_ms[i];
+	}
+	return rpw_hist_ub_ms[RPW_HIST_NB - 1];
+}
+
+static void rpw_hist_snap(struct rpw_hist *h, rpw_stage_snap *o) {
+	memset(o, 0, sizeof(*o));
+	unsigned long long n = atomic_load_explicit(&h->n, memory_order_relaxed);
+	o->count = n;
+	o->max_ms = (double)atomic_load_explicit(&h->max_ns, memory_order_relaxed) / 1e6;
+	o->over25 = atomic_load_explicit(&h->o25, memory_order_relaxed);
+	o->over50 = atomic_load_explicit(&h->o50, memory_order_relaxed);
+	o->over100 = atomic_load_explicit(&h->o100, memory_order_relaxed);
+	if (n == 0)
+		return;
+	o->mean_ms = (double)atomic_load_explicit(&h->sum_ns, memory_order_relaxed) / 1e6 / (double)n;
+	o->p50_ms = rpw_hist_pct(h, n, 0.50);
+	o->p99_ms = rpw_hist_pct(h, n, 0.99);
+}
 
 /* ---- capture state -------------------------------------------------------------------------- */
 struct rpw_capture {
@@ -291,6 +368,12 @@ struct rpw_capture {
 	long dropped;
 	long dmabuf_skipped;
 	long reconnects;
+	/* reconnect backoff: a link that errors again without delivering a frame (negotiation failure,
+	 * wrong target) doubles the delay 50 ms -> 2 s instead of churning ~40 reconnects/s forever. */
+	_Atomic long frames_seen;     /* buffers seen by on_process (loop thread +=) */
+	long frames_at_reconnect;     /* frames_seen at the last reconnect (Go thread) */
+	int reconnect_backoff_ms;     /* current backoff (Go thread) */
+	long long next_reconnect_ns;  /* mono_ns before which no reconnect is issued (Go thread) */
 
 	/* ---- vaapi-native encode mode (production: rpw_set_encode; also RPW_VA_ENC env for the harness) */
 	int enc_mode;        /* 0 = readback RGBA; 1 = fused dmabuf->VA encode (AU in slot) */
@@ -344,7 +427,21 @@ struct rpw_capture {
 	 * source time (not bunched by the callback's own timing). grid_drops = sub-grid frames paced out
 	 * (deliberate rate-cap, PRE-encode -> no reference break, no IDR; surfaced as RateCapped). */
 	long long enc_grid_next; /* next grid PTS (ns); 0 = uninitialised */
+	long long grid_last_pts, grid_src_iv; /* loop thread: last frame PTS + source interval EMA (ns) */
 	long grid_drops;
+	int enc_src_w, enc_src_h; /* source dims the encoder was built for (recreate on change) */
+	/* robustness (encode thread writes, getters read): */
+	_Atomic int streaming;   /* pw stream STREAMING (loop thread): cadence repeats only while live */
+	long repeats;            /* cadence AUs emitted without a new source frame (static/slow/hitch) */
+	long ring_skips;         /* frames skipped PRE-encode because the AU ring was full (no ref break) */
+	long start_holds;        /* frames skipped pre-encode while the route's first AU was unconsumed */
+	long forced_idrs;        /* IDRs forced by a post-encode drop (byte cap) - at most one per episode */
+	int enc_sync;            /* RPW_ENC_SYNC: emit every frame synchronously (no 1-frame pipeline) */
+	/* native-path telemetry (encode thread writes; Go samples <= 1 Hz): per-AU interval histograms of
+	 * the encoder output (enc) and the native-sender hand-off (tx), keyframes, AU bytes. */
+	struct rpw_hist h_enc, h_tx;
+	long enc_keyframes;
+	long long enc_bytes;
 
 	/* Native realtime TX (unit 3): when the router attaches a native sender (UDP route + per-route
 	 * keys), the encode thread submits AUs straight to it (rm_tx_submit_au) instead of the AU ring ->
@@ -447,10 +544,28 @@ static int au_ring_push(struct rpw_capture *c, const unsigned char *au, int aule
 	return 0;
 }
 
+/* au_ring_room: 1 when two more AUs fit (one encode step can emit the pipelined previous frame AND
+ * flush the current one) incl. byte headroom. Producer-side, lock-free. */
+static int au_ring_room(struct rpw_capture *c) {
+	unsigned t = atomic_load_explicit(&c->ring_tail, memory_order_relaxed);
+	unsigned h = atomic_load_explicit(&c->ring_head, memory_order_acquire);
+	long qb = atomic_load_explicit(&c->ring_bytes, memory_order_relaxed);
+	return (t - h) + 2 <= AU_RING_N && qb + 2 * AU_RING_HEADROOM <= AU_RING_MAXBYTES;
+}
+
+/* au_ring_first_unconsumed: the route's first AU (the IDR) is queued but not yet read. Route start-up:
+ * the consumer is still opening (TCP slow start, receiver decoder open); encoding on would only queue
+ * stale frames (latency burst) or overflow (drop burst + IDR storm, the live "36 drops in the first
+ * second"). Hold - skip pre-encode - until it is read; the next encoded frame is then fresh. */
+static int au_ring_first_unconsumed(struct rpw_capture *c) {
+	return atomic_load_explicit(&c->ring_head, memory_order_acquire) == 0 &&
+	       atomic_load_explicit(&c->ring_tail, memory_order_relaxed) > 0;
+}
+
 /* egl_setup_display: open the render node, GBM device, EGL display + GLES context (NOT current),
  * and query dmabuf modifiers per offered format. Runs on the caller thread in rpw_start. */
 static void egl_setup_display(struct rpw_capture *c, const char *node) {
-	if (!egl_load())
+	if (getenv("RPW_SHM_ONLY") || !egl_load()) /* RPW_SHM_ONLY: test hook (SHM-only offer) */
 		return;
 	c->drm_fd = open(node, O_RDWR | O_CLOEXEC);
 	if (c->drm_fd < 0) {
@@ -502,6 +617,29 @@ static void egl_setup_display(struct rpw_capture *c, const char *node) {
 	}
 	c->egl_ready = 1;
 	DBG("egl: display ready, mods[BGRA]=%d (allowDcc=%d)\n", c->n_mods[0], allow_dcc);
+}
+
+/* egl_teardown releases whatever egl_setup_display built (also a partial setup). Not with the
+ * context current on a live loop thread (callers: rpw_stop after the loop stopped, or a retry when
+ * egl_ready == 0, i.e. never made current). */
+static void egl_teardown(struct rpw_capture *c) {
+	if (E.ok) {
+		if (c->egl_ctx)
+			E.DestroyContext(c->dpy, c->egl_ctx);
+		if (c->dpy)
+			E.Terminate(c->dpy);
+		if (c->gbm)
+			E.gbm_device_destroy(c->gbm);
+	}
+	if (c->drm_fd >= 0)
+		close(c->drm_fd);
+	c->egl_ctx = NULL;
+	c->dpy = NULL;
+	c->gbm = NULL;
+	c->drm_fd = -1;
+	c->egl_ready = 0;
+	c->egl_current = 0;
+	memset(c->n_mods, 0, sizeof(c->n_mods));
 }
 
 /* egl_make_current binds the context to the CURRENT (loop) thread, once. */
@@ -871,7 +1009,11 @@ static void on_param_changed(void *data, uint32_t id, const struct spa_pod *para
 	c->fmt = raw.format;
 	c->modifier = pmod ? raw.modifier : DRM_FORMAT_MOD_INVALID;
 	c->is_dmabuf = (pmod != NULL);
+	c->force_idr = 1; /* (re)negotiated = new producer/pool: resume on an IDR */
 	pthread_mutex_unlock(&c->mu);
+	c->enc_grid_next = 0; /* loop-thread-owned: re-prime the PTS grid (new producer = new PTS origin) */
+	c->grid_last_pts = 0;
+	c->grid_src_iv = 0;
 	DBG("format: %dx%d fmt=%d dmabuf=%d mod=0x%llx\n", c->width, c->height, c->fmt, c->is_dmabuf, (unsigned long long)c->modifier);
 	request_buffers(c, c->is_dmabuf);
 }
@@ -902,7 +1044,15 @@ static int enc_ensure(struct rpw_capture *c) {
 		} else {
 			c->coded_w = ow;
 			c->coded_h = oh;
+			c->enc_src_w = c->width;
+			c->enc_src_h = c->height;
 		}
+	}
+	if (c->enc && (c->width != c->enc_src_w || c->height != c->enc_src_h)) {
+		/* producer came back at another size: rebuild at the new coded size (fresh encoder => IDR) */
+		rva_enc_free(c->enc);
+		c->enc = NULL;
+		return enc_ensure(c);
 	}
 	if (!c->enc)
 		return 0;
@@ -941,6 +1091,8 @@ static int enc_ensure(struct rpw_capture *c) {
 				c->enc = ne;
 				c->coded_w = ow;
 				c->coded_h = oh;
+				c->enc_src_w = c->width;
+				c->enc_src_h = c->height;
 				c->enc_maxh = want_maxh;
 			}
 		}
@@ -948,9 +1100,48 @@ static int enc_ensure(struct rpw_capture *c) {
 	return idr;
 }
 
-/* enc_thread_main: the dedicated encode thread. Blocks on the pending slot, encodes (VPP + VA submit +
- * vaSyncSurface + map + emit - the blocking that used to stall the callback), pushes the AU to the
- * ring, then requeues the pw buffer under the loop lock. */
+/* enc_emit_au hands one encoded AU downstream: the native sender (non-blocking; it owns its bounded
+ * queue + drop + IDR callback) or the Go AU ring. A post-encode ring miss (byte cap only - room was
+ * checked pre-encode) drops the AU and forces ONE IDR. Encode thread. */
+static void enc_emit_au(struct rpw_capture *c, rm_sender *tx, unsigned char *au, int aulen, int kf, long long pts) {
+	rpw_hist_mark(&c->h_enc, mono_ns());
+	c->enc_bytes += aulen;
+	if (kf)
+		c->enc_keyframes++;
+	if (tx) {
+		rm_tx_submit_au(tx, au, (size_t)aulen, (int64_t)pts, (uint32_t)(kf ? RM_FLAG_KEYFRAME : 0));
+		rpw_hist_mark(&c->h_tx, mono_ns()); /* queued to the native sender (== Go-pump "tx" stage) */
+		c->enc_aus++;
+		return;
+	}
+	if (au_ring_push(c, au, aulen, kf, pts)) {
+		pthread_mutex_lock(&c->mu);
+		if (!c->force_idr) {
+			c->force_idr = 1;
+			c->forced_idrs++;
+		}
+		pthread_mutex_unlock(&c->mu);
+		return;
+	}
+	pthread_mutex_lock(&c->mu);
+	pthread_cond_signal(&c->cv);
+	pthread_mutex_unlock(&c->mu);
+}
+
+/* enc_thread_main: the dedicated encode thread. Waits for the callback's hand-off (newest buffer),
+ * encodes (VPP + VA submit + sync + map - the blocking that used to stall the PipeWire callback), emits
+ * the AU, requeues the pw buffer under the loop lock.
+ *
+ * Cadence (period p = 1/negotiated fps): the encoder pipelines (frame N is emitted when N+1 is
+ * submitted), so a source that slows, hitches or goes static would hold its last frame back and starve
+ * the route (receiver: gap, then burst). The thread therefore also wakes on deadlines:
+ *  - pipelined frame still pending at t_submit + 1.5p (next frame late) => flush it now;
+ *  - nothing pending, no real frame for 1.5p (hitch) - or the source runs slower than ~0.8x the rate -
+ *    and no AU for p => re-encode the last frame (P-skip, tiny) so the route keeps the full cadence.
+ *    Only while the stream is STREAMING; a vanished producer stops repeats (receiver holds).
+ *  - a real frame arriving after a gap >= 1.5p (or the first) is flushed at once instead of waiting a
+ *    period in the pipeline.
+ * PTS: each AU carries ITS frame's capture PTS (strictly increasing); repeats advance by p. */
 static void *enc_thread_main(void *arg) {
 	struct rpw_capture *c = arg;
 	/* best-effort elevated scheduling so the encode is not starved under load (both usually need
@@ -960,10 +1151,38 @@ static void *enc_thread_main(void *arg) {
 	sp.sched_priority = 10;
 	if (pthread_setschedparam(pthread_self(), SCHED_RR, &sp) != 0)
 		setpriority(PRIO_PROCESS, 0, -5); /* fall back to a nice bump (also best-effort) */
+	/* encode-thread-local cadence state (ns, CLOCK_MONOTONIC) */
+	long long t_real = 0, t_emit = 0, t_sub = 0, src_iv = 0, last_pts = 0, pend_pts = 0;
+	int enc_pend = 0; /* encoder holds a submitted, not yet emitted frame */
+	struct rva_enc *enc_seen = NULL;
 	for (;;) {
+		long long period = 1000000000LL / (c->enc_fps > 0 ? c->enc_fps : 60);
+		long long dl = 0;
 		pthread_mutex_lock(&c->enc_mu);
-		while (!c->enc_pending && !c->enc_stop)
-			pthread_cond_wait(&c->enc_cv, &c->enc_mu);
+		for (;;) {
+			dl = 0;
+			if (c->enc_pending || c->enc_stop)
+				break;
+			if (c->enc && c->enc == enc_seen) {
+				if (enc_pend) {
+					dl = t_sub + period * 3 / 2;
+				} else if (t_emit && atomic_load_explicit(&c->streaming, memory_order_relaxed)) {
+					long long gate = src_iv > period * 5 / 4 ? 0 : period * 3 / 2; /* slow source: even fill */
+					dl = t_emit + period;
+					if (t_real + gate > dl)
+						dl = t_real + gate;
+				}
+			}
+			if (!dl) {
+				pthread_cond_wait(&c->enc_cv, &c->enc_mu);
+				continue;
+			}
+			if (mono_ns() >= dl)
+				break;
+			struct timespec ts = {(time_t)(dl / 1000000000LL), (long)(dl % 1000000000LL)};
+			if (pthread_cond_timedwait(&c->enc_cv, &c->enc_mu, &ts) != 0 && !c->enc_pending)
+				break; /* deadline */
+		}
 		struct pw_buffer *buf = c->enc_pending;
 		c->enc_pending = NULL;
 		int stop = c->enc_stop;
@@ -983,29 +1202,91 @@ static void *enc_thread_main(void *arg) {
 
 		if (stop)
 			break; /* shutting down: drop any held buffer - pw_stream_destroy frees the pool */
-		if (!buf)
+		unsigned char *au = NULL;
+		int aulen = 0, kf = 0;
+		if (!buf) { /* cadence deadline: flush the pending frame, or repeat the last one */
+			if (!c->enc || c->enc != enc_seen)
+				continue;
+			if (!tx && (!au_ring_room(c) || au_ring_first_unconsumed(c))) {
+				/* downstream stalled / start-up hold: never queue cadence fill (a stale burst later) */
+				t_emit = dl ? dl : mono_ns();
+				if (enc_pend)
+					t_sub = mono_ns(); /* re-check the pending flush in 1.5p, not in a busy loop */
+				continue;
+			}
+			int idr = enc_pend ? 0 : enc_ensure(c);
+			if (c->enc != enc_seen) /* enc_ensure rebuilt it (size/quality change): wait for real input */
+				continue;
+			int was_pend = enc_pend;
+			int rc = was_pend ? rva_enc_flush(c->enc, &au, &aulen, &kf) : rva_enc_repeat(c->enc, idr, &au, &aulen, &kf);
+			enc_pend = 0;
+			long long tn = mono_ns();
+			t_emit = (dl && tn - dl < period) ? dl : tn; /* stay on the ideal grid (no encode-time drift) */
+			if (rc == 0 && aulen > 0) {
+				long long apts = was_pend ? pend_pts : last_pts + period;
+				if (apts <= last_pts)
+					apts = last_pts + 1;
+				last_pts = apts;
+				if (!was_pend)
+					c->repeats++;
+				enc_emit_au(c, tx, au, aulen, kf, apts);
+			}
 			continue;
-		int idr = enc_ensure(c);
-		if (c->enc) {
-			unsigned char *au = NULL;
-			int aulen = 0, kf = 0;
-			if (rva_enc_frame(c->enc, fourcc, mod, w, h, np, fds, off, str, flip, idr, &au, &aulen, &kf) == 0 && aulen > 0) {
-				c->import_ok = 1;
-				rva_enc_feedback(c->enc, &c->fb_present, &c->fb_avg_qp, &c->fb_rate_limited);
-				if (tx) {
-					/* native realtime path: submit the AU straight to the Zig sender (non-blocking; it
-					 * owns the bounded TX queue + drop-oldest + IDR callback). The Go pump never runs. */
-					rm_tx_submit_au(tx, au, (size_t)aulen, (int64_t)pts, (uint32_t)(kf ? RM_FLAG_KEYFRAME : 0));
-				} else if (au_ring_push(c, au, aulen, kf, pts)) { /* Go-ring fallback path */
-					c->force_idr = 1;
-				} else {
-					pthread_mutex_lock(&c->mu);
-					pthread_cond_signal(&c->cv);
-					pthread_mutex_unlock(&c->mu);
+		}
+		long long now = mono_ns();
+		/* start-up hold / downstream stall: skip PRE-encode (frame never enters the encoder => no
+		 * reference break, no IDR). The pending pipelined frame is untouched. */
+		if (!tx && au_ring_first_unconsumed(c)) {
+			c->start_holds++;
+		} else if (!tx && !au_ring_room(c)) {
+			c->ring_skips++;
+			c->dropped++;
+		} else {
+			int idr = enc_ensure(c);
+			if (c->enc != enc_seen) { /* new/rebuilt encoder: empty pipeline */
+				enc_seen = c->enc;
+				enc_pend = 0;
+				t_emit = 0;
+			}
+			if (c->enc) {
+				long long gap = t_real ? now - t_real : 0;
+				if (t_real) { /* source interval estimate (clamped: one hitch must not flip the mode) */
+					long long g = gap < 2 * period ? gap : 2 * period;
+					src_iv = src_iv ? (src_iv * 7 + g) / 8 : g;
 				}
-			} else {
-				c->dropped++;
-				c->enc_drops++;
+				int prev_pend = enc_pend;
+				long long prev_pts = pend_pts;
+				int sync_now = c->enc_sync || gap == 0 || gap >= period * 3 / 2;
+				if (pts <= 0)
+					pts = now;
+				int rc = rva_enc_frame(c->enc, fourcc, mod, w, h, np, fds, off, str, flip, idr, &au, &aulen, &kf);
+				if (rc == 0) {
+					c->import_ok = 1;
+					rva_enc_feedback(c->enc, &c->fb_present, &c->fb_avg_qp, &c->fb_rate_limited);
+					enc_pend = 1;
+					pend_pts = pts;
+					t_sub = now;
+					t_real = now;
+					if (aulen > 0 && prev_pend) { /* the previous frame, emitted by this submit */
+						long long apts = prev_pts > last_pts ? prev_pts : last_pts + 1;
+						last_pts = apts;
+						t_emit = now;
+						enc_emit_au(c, tx, au, aulen, kf, apts);
+					}
+					if (sync_now) {
+						/* first frame / after a gap: emit THIS frame now, not one period later */
+						if (rva_enc_flush(c->enc, &au, &aulen, &kf) == 0 && aulen > 0) {
+							long long apts = pend_pts > last_pts ? pend_pts : last_pts + 1;
+							last_pts = apts;
+							t_emit = mono_ns();
+							enc_emit_au(c, tx, au, aulen, kf, apts);
+						}
+						enc_pend = 0;
+					}
+				} else {
+					c->dropped++;
+					c->enc_drops++;
+				}
 			}
 		}
 		/* requeue the held buffer from this thread (pw_stream is not thread-safe -> lock the loop). */
@@ -1037,6 +1318,7 @@ static void on_process(void *data) {
 	}
 	if (!last)
 		return;
+	atomic_fetch_add_explicit(&c->frames_seen, 1, memory_order_relaxed);
 	struct spa_buffer *sb = last->buffer;
 	if (sb->n_datas >= 1) {
 		struct spa_data *d = &sb->datas[0];
@@ -1083,16 +1365,31 @@ static void on_process(void *data) {
 					if (c->enc_fps > 0) {
 						long long period = 1000000000LL / c->enc_fps;
 						long long tol = period / 4;
-						if (c->enc_grid_next == 0) {
-							c->enc_grid_next = gpts + period; /* prime on the first frame (accepted) */
+						/* source interval EMA (clamped to 2p): decimate ONLY a source that really runs
+						 * faster than the rate (VRChat 120 -> 60). A ~rate source with arrival jitter (no
+						 * header PTS: the arrival clock) must pass every frame - gating it on the grid
+						 * dropped every other frame of a 4K60 libfunnel source (capFps 30). */
+						if (c->grid_last_pts > 0 && gpts > c->grid_last_pts) {
+							long long d = gpts - c->grid_last_pts;
+							if (d > 2 * period)
+								d = 2 * period;
+							c->grid_src_iv = c->grid_src_iv ? (c->grid_src_iv * 7 + d) / 8 : d;
+						}
+						c->grid_last_pts = gpts;
+						if (c->grid_src_iv == 0 || c->grid_src_iv > period * 3 / 4) {
+							c->enc_grid_next = gpts + period; /* pass-through; keep the grid primed */
+						} else if (c->enc_grid_next == 0 || gpts + 4 * period < c->enc_grid_next) {
+							/* prime on the first frame; re-prime when PTS jumped BACK (new producer /
+							 * clock origin) instead of pacing everything out until it catches up */
+							c->enc_grid_next = gpts + period;
 						} else if (gpts + tol < c->enc_grid_next) {
 							PW.stream_queue(c->stream, last); /* sub-grid: pace it out (pre-encode skip) */
 							c->grid_drops++;
 							return;
 						} else {
 							c->enc_grid_next += period;
-							while (c->enc_grid_next <= gpts + tol) /* catch up after a gap / slow source */
-								c->enc_grid_next += period;
+							if (c->enc_grid_next <= gpts + tol) /* catch up after a gap / slow source */
+								c->enc_grid_next += ((gpts + tol - c->enc_grid_next) / period + 1) * period;
 						}
 					}
 					int np = sb->n_datas < RPW_MAX_PLANES ? (int)sb->n_datas : RPW_MAX_PLANES;
@@ -1114,7 +1411,7 @@ static void on_process(void *data) {
 					c->enc_p_w = c->width;
 					c->enc_p_h = c->height;
 					c->enc_p_flip = want_flip(c, sb);
-					c->enc_p_pts = buffer_pts(sb);
+					c->enc_p_pts = gpts; /* capture PTS, else arrival (monotonic) - never 0 */
 					c->enc_pending = last; /* handed off; the thread requeues it */
 					pthread_cond_signal(&c->enc_cv);
 					pthread_mutex_unlock(&c->enc_mu);
@@ -1139,6 +1436,7 @@ static void on_state_changed(void *data, enum pw_stream_state old, enum pw_strea
 	(void)old;
 	struct rpw_capture *c = data;
 	DBG("state: %d%s%s\n", state, error ? " err=" : "", error ? error : "");
+	atomic_store_explicit(&c->streaming, state == PW_STREAM_STATE_STREAMING, memory_order_relaxed);
 	/* ERROR means the producer vanished mid-stream (VRChat/producer restart) and AUTOCONNECT does
 	 * NOT recover from ERROR - flag a reconnect; rpw_wait_frame (Go thread) re-arms the stream. */
 	if (state == PW_STREAM_STATE_ERROR) {
@@ -1162,6 +1460,11 @@ static const struct pw_stream_events stream_events = {
 static void do_reconnect(struct rpw_capture *c) {
 	PW.tl_lock(c->loop);
 	PW.stream_disconnect(c->stream);
+	if (!c->egl_ready) { /* SHM-only offer can never link a dmabuf producer: retry the EGL setup */
+		egl_teardown(c);
+		const char *rn = getenv("RPW_EGL_DEVICE");
+		egl_setup_display(c, rn && *rn ? rn : "/dev/dri/renderD128");
+	}
 	uint8_t fb[4096];
 	struct spa_pod_builder b = SPA_POD_BUILDER_INIT(fb, sizeof(fb));
 	const struct spa_pod *params[N_OFFER + 1];
@@ -1173,6 +1476,36 @@ static void do_reconnect(struct rpw_capture *c) {
 	DBG("reconnect #%ld\n", c->reconnects);
 }
 
+/* reconnect_or_backoff: called with c->mu held and need_reconnect set; releases c->mu. Re-arms the
+ * stream now, or - while the backoff runs - sleeps (<= timeout_ms) and leaves need_reconnect set for the
+ * next call. A reconnect that delivered no frame since the previous one doubles the backoff (50 ms ->
+ * 2 s); any delivered frame resets it, so a real producer restart (VRChat hitch) re-arms immediately. */
+static void reconnect_or_backoff(struct rpw_capture *c, long timeout_ms) {
+	long long now = mono_ns();
+	if (now < c->next_reconnect_ns) {
+		pthread_mutex_unlock(&c->mu);
+		long long d = c->next_reconnect_ns - now, cap = (long long)timeout_ms * 1000000LL;
+		if (d > cap)
+			d = cap;
+		struct timespec ts = {(time_t)(d / 1000000000LL), (long)(d % 1000000000LL)};
+		nanosleep(&ts, NULL);
+		return;
+	}
+	c->need_reconnect = 0;
+	pthread_mutex_unlock(&c->mu);
+	long seen = atomic_load_explicit(&c->frames_seen, memory_order_relaxed);
+	if (c->reconnects > 0 && seen == c->frames_at_reconnect) {
+		c->reconnect_backoff_ms = c->reconnect_backoff_ms ? c->reconnect_backoff_ms * 2 : 50;
+		if (c->reconnect_backoff_ms > 2000)
+			c->reconnect_backoff_ms = 2000;
+	} else {
+		c->reconnect_backoff_ms = 0;
+	}
+	c->frames_at_reconnect = seen;
+	c->next_reconnect_ns = mono_ns() + (long long)c->reconnect_backoff_ms * 1000000LL;
+	do_reconnect(c);
+}
+
 struct rpw_capture *rpw_start(const char *target_node) {
 	if (!rpw_available())
 		return NULL;
@@ -1182,11 +1515,16 @@ struct rpw_capture *rpw_start(const char *target_node) {
 	pthread_mutex_init(&c->mu, NULL);
 	pthread_cond_init(&c->cv, NULL);
 	pthread_mutex_init(&c->enc_mu, NULL);
-	pthread_cond_init(&c->enc_cv, NULL);
+	pthread_condattr_t ca; /* encode-thread cadence deadlines are CLOCK_MONOTONIC (mono_ns) */
+	pthread_condattr_init(&ca);
+	pthread_condattr_setclock(&ca, CLOCK_MONOTONIC);
+	pthread_cond_init(&c->enc_cv, &ca);
+	pthread_condattr_destroy(&ca);
 	c->modifier = DRM_FORMAT_MOD_INVALID;
 	c->drm_fd = -1;
 	c->flip_default = getenv("RPW_FLIP_V") != NULL; /* default no-flip (Spout2PW/DX, PipeWire convention) */
 	c->pending_maxh = -1;                           /* -1 = no live coded-height cap pending */
+	c->enc_sync = getenv("RPW_ENC_SYNC") != NULL;
 
 	const char *rn = getenv("RPW_EGL_DEVICE");
 	egl_setup_display(c, rn && *rn ? rn : "/dev/dri/renderD128");
@@ -1245,19 +1583,15 @@ int rpw_wait_frame(struct rpw_capture *c, unsigned char *dst, int cap, int *w, i
 	}
 	pthread_mutex_lock(&c->mu);
 	if (c->need_reconnect && !c->has_frame) {
-		c->need_reconnect = 0;
-		pthread_mutex_unlock(&c->mu);
-		do_reconnect(c); /* Go thread: safe to lock the pw thread-loop */
-		return 0;        /* treated as a timeout by Next -> keeps the route alive, retries */
+		reconnect_or_backoff(c, timeout_ms); /* Go thread: safe to lock the pw thread-loop; unlocks mu */
+		return 0;                           /* treated as a timeout by Next -> keeps the route alive */
 	}
 	while (!c->has_frame && !c->fatal && !c->need_reconnect) {
 		if (pthread_cond_timedwait(&c->cv, &c->mu, &ts) != 0)
 			break;
 	}
 	if (c->need_reconnect && !c->has_frame) {
-		c->need_reconnect = 0;
-		pthread_mutex_unlock(&c->mu);
-		do_reconnect(c);
+		reconnect_or_backoff(c, timeout_ms);
 		return 0;
 	}
 	if (c->fatal && !c->has_frame) {
@@ -1360,9 +1694,7 @@ int rpw_wait_au(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int 
 			continue; /* producer raced in: dequeue it */
 		}
 		if (c->need_reconnect) {
-			c->need_reconnect = 0;
-			pthread_mutex_unlock(&c->mu);
-			do_reconnect(c);
+			reconnect_or_backoff(c, timeout_ms); /* unlocks mu */
 			return 0;
 		}
 		if (c->fatal) {
@@ -1432,6 +1764,26 @@ long rpw_enc_aus(struct rpw_capture *c) { return c ? c->enc_aus : 0; }
 long rpw_enc_drops(struct rpw_capture *c) { return c ? c->enc_drops : 0; }
 long rpw_cap_frames(struct rpw_capture *c) { return c ? c->cap_frames : 0; }
 long rpw_reconnects(struct rpw_capture *c) { return c ? c->reconnects : 0; }
+int rpw_egl_ready(struct rpw_capture *c) { return c ? c->egl_ready : 0; }
+long rpw_repeats(struct rpw_capture *c) { return c ? c->repeats : 0; }
+long rpw_ring_skips(struct rpw_capture *c) { return c ? c->ring_skips : 0; }
+long rpw_start_holds(struct rpw_capture *c) { return c ? c->start_holds : 0; }
+long rpw_forced_idrs(struct rpw_capture *c) { return c ? c->forced_idrs : 0; }
+long rpw_enc_keyframes(struct rpw_capture *c) { return c ? c->enc_keyframes : 0; }
+long long rpw_enc_bytes(struct rpw_capture *c) { return c ? c->enc_bytes : 0; }
+void rpw_native_stages(struct rpw_capture *c, rpw_stage_snap *enc, rpw_stage_snap *tx) {
+	if (!c) {
+		if (enc)
+			memset(enc, 0, sizeof(*enc));
+		if (tx)
+			memset(tx, 0, sizeof(*tx));
+		return;
+	}
+	if (enc)
+		rpw_hist_snap(&c->h_enc, enc);
+	if (tx)
+		rpw_hist_snap(&c->h_tx, tx);
+}
 int rpw_import_ok(struct rpw_capture *c) { return c ? c->import_ok : 0; }
 int rpw_coded_w(struct rpw_capture *c) { return c ? c->coded_w : 0; }
 int rpw_coded_h(struct rpw_capture *c) { return c ? c->coded_h : 0; }
@@ -1470,7 +1822,8 @@ int rpw_attach_native_tx(struct rpw_capture *c, int transport, int codec, int st
                          const unsigned char *send_key, unsigned send_prefix,
                          const unsigned char *recv_key, unsigned recv_prefix,
                          unsigned token, double initial_rate_bps,
-                         unsigned long long initial_seq, int fps, long long startup_grace_ns) {
+                         unsigned long long initial_seq, int fps, long long startup_grace_ns,
+                         long long media_clock_ns) {
 	if (!c || c->native_tx || !send_key || !recv_key)
 		return 0;
 	struct addrinfo hints, *res = NULL;
@@ -1501,6 +1854,7 @@ int rpw_attach_native_tx(struct rpw_capture *c, int transport, int codec, int st
 	p.initial_seq = (uint64_t)initial_seq; /* continue the Go handshake conn's seq space -> receiver rebinds */
 	p.fps = (int32_t)fps;
 	p.startup_grace_ns = (int64_t)startup_grace_ns; /* 0 -> native default */
+	p.media_clock_ns = (int64_t)media_clock_ns; /* ABI v3: PTS into the Go media-clock domain (0 = local mono) */
 	rm_sender *s = NULL;
 	rm_status st = rm_tx_open(&p, native_idr_cb, c, &s);
 	freeaddrinfo(res);
@@ -1573,17 +1927,8 @@ void rpw_stop(struct rpw_capture *c) {
 	if (c->enc) /* loop stopped: no more on_process, safe to tear down the VA encode session */
 		rva_enc_free(c->enc);
 	au_ring_free(c); /* loop stopped: no more producer; release the ring buffers */
-	/* EGL teardown: the context was made current on the loop thread, now stopped. Best-effort. */
-	if (c->egl_ready) {
-		if (c->egl_ctx)
-			E.DestroyContext(c->dpy, c->egl_ctx);
-		if (c->dpy)
-			E.Terminate(c->dpy);
-		if (c->gbm)
-			E.gbm_device_destroy(c->gbm);
-		if (c->drm_fd >= 0)
-			close(c->drm_fd);
-	}
+	/* EGL teardown (also a partial setup): the context was made current on the loop thread, now stopped. */
+	egl_teardown(c);
 	free(c->rbscratch);
 	free(c->slot);
 	pthread_mutex_destroy(&c->mu);

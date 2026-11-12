@@ -382,9 +382,11 @@ int main(int argc, char **argv) {
 			fps_t0 = tn;
 			fps_f0 = frame;
 		}
-		// stdin mode: grab the latest decoded frame (non-blocking; the reader thread fills the mailbox).
-		// The present cadence stays even regardless of ffmpeg's bursts - frame-hold between source frames.
-		if (mode == M_STDIN) {
+		// stdin mode: wait (paced) for the FIRST decoded frame; afterwards the upload of the next source
+		// frame runs right AFTER each present (below), in the sleep slack - uploading 33 MB at 4K before
+		// the present made every new-source-frame present ~6 ms late (present max 23 ms). Frame-hold
+		// between source frames keeps the cadence even regardless of ffmpeg's bursts.
+		if (mode == M_STDIN && !g_have_frame) {
 			int done = 0;
 			int ready = stdin_grab(&done);
 			if (!ready) {
@@ -441,6 +443,14 @@ int main(int argc, char **argv) {
 			funnel_stream_enqueue(stream, buf);
 			ival_tick(&iv, now_s());
 			frame++;
+			if (mode == M_STDIN) { /* prepare the next present: upload the newest source frame now */
+				int done = 0;
+				stdin_grab(&done);
+				if (done) {
+					eof = 1;
+					break;
+				}
+			}
 		}
 		next += period;
 		double dt = next - now_s();

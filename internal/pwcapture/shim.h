@@ -69,6 +69,26 @@ long rpw_enc_aus(struct rpw_capture *c);
 long rpw_enc_drops(struct rpw_capture *c);
 long rpw_cap_frames(struct rpw_capture *c);
 long rpw_reconnects(struct rpw_capture *c);
+/* rpw_egl_ready: 1 = dmabuf (EGL modifier) offer built; 0 = SHM-only offer (a dmabuf-only producer
+ * such as libfunnel/Spout2PW can never link). */
+int rpw_egl_ready(struct rpw_capture *c);
+/* robustness counters: cadence repeats (static/slow/hitching source), pre-encode skips on a full AU
+ * ring (downstream stall; no reference break), start-up holds (first AU unconsumed), forced IDRs. */
+long rpw_repeats(struct rpw_capture *c);
+long rpw_ring_skips(struct rpw_capture *c);
+long rpw_start_holds(struct rpw_capture *c);
+long rpw_forced_idrs(struct rpw_capture *c);
+
+/* native-path telemetry, sampled by Go at <= 1 Hz: one stage's per-AU interval distribution (ms),
+ * computed natively from a lock-free histogram (same buckets as medialink.StageHist). */
+typedef struct {
+	unsigned long long count, over25, over50, over100;
+	double mean_ms, p50_ms, p99_ms, max_ms;
+} rpw_stage_snap;
+/* rpw_native_stages: enc = AUs leaving the encoder, tx = AUs queued to the native sender. */
+void rpw_native_stages(struct rpw_capture *c, rpw_stage_snap *enc, rpw_stage_snap *tx);
+long rpw_enc_keyframes(struct rpw_capture *c);
+long long rpw_enc_bytes(struct rpw_capture *c);
 int rpw_import_ok(struct rpw_capture *c);
 int rpw_coded_w(struct rpw_capture *c);
 int rpw_coded_h(struct rpw_capture *c);
@@ -87,7 +107,8 @@ int rpw_attach_native_tx(struct rpw_capture *c, int transport, int codec, int st
                          const unsigned char *send_key, unsigned send_prefix,
                          const unsigned char *recv_key, unsigned recv_prefix,
                          unsigned token, double initial_rate_bps,
-                         unsigned long long initial_seq, int fps, long long startup_grace_ns);
+                         unsigned long long initial_seq, int fps, long long startup_grace_ns,
+                         long long media_clock_ns);
 void rpw_native_tx_set_rate(struct rpw_capture *c, double bytes_per_sec);
 void rpw_native_tx_stats(struct rpw_capture *c, rm_tx_stats *out);
 void rpw_native_tx_close(struct rpw_capture *c);

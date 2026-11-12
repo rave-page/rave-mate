@@ -46,6 +46,16 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
                   const int *fds, const unsigned *offsets, const unsigned *strides,
                   int flip, int force_idr, unsigned char **au, int *au_len, int *keyframe);
 
+/* rva_enc_flush emits the pipelined pending frame (submitted by the last rva_enc_frame, not yet emitted)
+ * without a new input: a slow/stalled source must not hold its last frame back. *au_len = 0 when
+ * nothing was pending. 0 ok, <0 error. */
+int rva_enc_flush(rva_enc *e, unsigned char **au, int *au_len, int *keyframe);
+
+/* rva_enc_repeat emits one cadence AU without a new input: the pending frame if any (= flush), else a
+ * synchronous re-encode of the last frame's VPP output (P-skip, tiny; force_idr makes it an IDR). Keeps a
+ * static/slow/hitching source at the negotiated cadence. -1 when no frame was ever encoded. */
+int rva_enc_repeat(rva_enc *e, int force_idr, unsigned char **au, int *au_len, int *keyframe);
+
 /* rva_enc_set_bitrate updates the live target bitrate (kbps): the CBR target in legacy mode, or the
  * constant-quality CEILING in quality mode. Applied on the next encoded frame (no reopen). */
 void rva_enc_set_bitrate(rva_enc *e, int kbps);

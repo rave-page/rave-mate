@@ -124,4 +124,11 @@ func TestSetNativeStatsIntoRouteStat(t *testing.T) {
 	if s.Frames != 42 || s.Bytes != 1000 || s.Retransmits != 2 || s.HighestSeq != 50 || s.TransportImpl != "native" {
 		t.Fatalf("native stats not reflected: %+v", s)
 	}
+	// The Go pump never marks enc/tx on a native route: the source's native stages + keyframes must show.
+	enc := StageSnapshot{Count: 600, MeanMs: 16.7, P50Ms: 17, P99Ms: 18, MaxMs: 19}
+	st.setNativeStats(NativeTXStats{AUsSent: 43, Keyframes: 5, Enc: enc, Tx: enc})
+	s = st.snapshot()
+	if s.Keyframes != 5 || s.Stages == nil || s.Stages.EncDone != enc || s.Stages.TxQueue != enc {
+		t.Fatalf("native stages/keyframes not reflected: kf=%d stages=%+v", s.Keyframes, s.Stages)
+	}
 }
