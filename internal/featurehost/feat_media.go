@@ -137,7 +137,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 	encDevResolver := NewEncodeDeviceResolver(liveCfg, f.vram.Budget, nil, rt.Log)
 	f.router = medialink.New(medialink.Options{
 		Self: in.Self, Bus: mediaBusAdapter{f.bus}, Secrets: f.secrets, Clock: f.clock,
-		Log: rt.Log, Encoder: encFac, Decoder: decFac, UDP: true, // §2.5 UDP profile (falls back to TCP)
+		Log: rt.Log, Encoder: encFac, Decoder: decFac, UDP: in.MediaCfg.UDPEnabled(), // §2.5 UDP profile (falls back to TCP; mediaLink.transport="tcp" disables)
 		EncodeMaxHeight: in.MediaCfg.MaxHeight,
 		EncodePolicy: func() (string, string) {
 			c := liveCfg()

@@ -747,7 +747,7 @@ func run(parent context.Context, serviceMode bool) error {
 	medialink.OnResolutionCapChange = mfenc.NoteDecodeResizeGrace // decoder re-init grace on a cap change
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,
-		Encoder: encFac, Decoder: decFac, UDP: true, // §2.5 UDP datagram profile (reachability-gated, TCP fallback)
+		Encoder: encFac, Decoder: decFac, UDP: cfg.Features.MediaLink.UDPEnabled(), // §2.5 UDP datagram profile (reachability-gated, TCP fallback; mediaLink.transport="tcp" disables)
 		EncodeMaxHeight:    cfg.Features.MediaLink.MaxHeight,
 		EncodePolicy:       mediaEncodePolicy(mediaLinkCfg),
 		EncodeDevice:       featurehost.NewEncodeDeviceResolver(mediaLinkCfg, vramBudget.Budget, nil, log),
