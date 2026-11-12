@@ -1547,19 +1547,40 @@ func (s jbSink) Close() error         { return nil }
 // runJitter drains the §3.3 buffer into the sink at release pace. A sink error tears the route
 // down (conn close unblocks the recv loop).
 func (rm *RouteManager) runJitter(ctx context.Context, conn frameConn, jb *jitterBuffer, sink Sink, st *routeStat) {
+	const hitchNs = int64(50 * time.Millisecond) // log playout stalls above this (the rare long hitches)
+	var lastRel, lastHitch, prevWriteNs int64
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 		f, wake := jb.pop(rm.clock.Now())
 		if f != nil {
-			st.stages.JBRelease.Mark(monoNs()) // STEP-0: jitter buffer released a frame for playout
+			now := monoNs()
+			st.stages.JBRelease.Mark(now) // STEP-0: jitter buffer released a frame for playout
+			// Hitch log: a release interval > 50ms, attributing it to the prior sink write (decode/
+			// publish backpressure) vs a late wake/arrival - with the wall time, to correlate the rare
+			// long hitches against periodic tasks (gpumem sweep, 1Hz emit, Defender). Rate-limited 1/s.
+			if lastRel != 0 {
+				if gap := now - lastRel; gap > hitchNs && now-lastHitch > int64(time.Second) {
+					lastHitch = now
+					cause := "wake/arrival (frame not ready at deadline)"
+					if prevWriteNs > hitchNs {
+						cause = "sink write blocked (decode/publish backpressure)"
+					}
+					rm.warnf("playout hitch", map[string]any{"session": st.session, "stream": st.stream,
+						"gapMs": gap / 1e6, "prevWriteMs": prevWriteNs / 1e6, "cause": cause,
+						"wall": time.Now().Format("15:04:05.000")})
+				}
+			}
+			w0 := monoNs()
 			if err := sink.Write(f); err != nil {
 				rm.warnf("video sink write failed", map[string]any{"session": st.session, "error": err.Error()})
 				_ = conn.Close()
 				return
 			}
+			prevWriteNs = monoNs() - w0
 			st.stages.DecSubmit.Mark(monoNs()) // STEP-0: cadence of frames accepted by the decode/publish sink (backpressure)
+			lastRel = now
 			continue
 		}
 		if wake == 0 { // empty - wait for a push
