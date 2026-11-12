@@ -1469,7 +1469,8 @@ int rpw_attach_native_tx(struct rpw_capture *c, int transport, int codec, int st
                          const char *peer_host, const char *peer_port, int encrypt,
                          const unsigned char *send_key, unsigned send_prefix,
                          const unsigned char *recv_key, unsigned recv_prefix,
-                         unsigned token, double initial_rate_bps) {
+                         unsigned token, double initial_rate_bps,
+                         unsigned long long initial_seq, int fps, long long startup_grace_ns) {
 	if (!c || c->native_tx || !send_key || !recv_key)
 		return 0;
 	struct addrinfo hints, *res = NULL;
@@ -1480,6 +1481,7 @@ int rpw_attach_native_tx(struct rpw_capture *c, int transport, int codec, int st
 		return 0;
 	rm_open_params p;
 	memset(&p, 0, sizeof(p));
+	p.struct_size = (uint32_t)sizeof(rm_open_params); /* ABI v2 layout guard */
 	p.abi_version = RM_ABI_VERSION;
 	p.transport = (transport == 1) ? RM_TRANSPORT_TCP : RM_TRANSPORT_UDP;
 	p.codec = (codec == 5) ? RM_CODEC_HEVC : (codec == 6) ? RM_CODEC_AV1 : RM_CODEC_H264;
@@ -1496,6 +1498,9 @@ int rpw_attach_native_tx(struct rpw_capture *c, int transport, int codec, int st
 	p.keys.encrypt = encrypt ? 1 : 0;
 	p.keys.initiator = 0; /* the sender is the answerer (responder); send = s2c */
 	p.initial_rate_bytes_per_sec = initial_rate_bps;
+	p.initial_seq = (uint64_t)initial_seq; /* continue the Go handshake conn's seq space -> receiver rebinds */
+	p.fps = (int32_t)fps;
+	p.startup_grace_ns = (int64_t)startup_grace_ns; /* 0 -> native default */
 	rm_sender *s = NULL;
 	rm_status st = rm_tx_open(&p, native_idr_cb, c, &s);
 	freeaddrinfo(res);

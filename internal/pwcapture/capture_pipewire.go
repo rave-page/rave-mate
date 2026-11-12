@@ -370,7 +370,7 @@ func (s *pwSource) AttachNativeTX(p medialink.NativeTXParams) (medialink.NativeT
 	rateBps := C.double(float64(p.BitrateKbps) * 1000 / 8) // kbps -> bytes/sec (0 = unpaced)
 	if C.rpw_attach_native_tx(s.h, C.int(transport), C.int(p.Codec), C.int(p.Stream), C.int(p.BodyMax),
 		chost, cport, C.int(enc), sk, C.uint(p.SendPrefix), rk, C.uint(p.RecvPrefix),
-		C.uint(p.Token), rateBps) == 0 {
+		C.uint(p.Token), rateBps, C.ulonglong(p.InitialSeq), C.int(p.FPS), C.longlong(int64(p.StartupGrace))) == 0 {
 		return nil, errors.New("pwcapture: rpw_attach_native_tx failed")
 	}
 	tx := &pwNativeTX{s: s, done: make(chan struct{})}
