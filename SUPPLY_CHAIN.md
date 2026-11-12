@@ -179,6 +179,7 @@ shipped artifact - it only produces the binary.
 |---|---|---|
 | Debian 13 base | `debian:trixie-20261027-slim` (shared with `spout2pw/contrib/build`) | digest `sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4` + apt snapshot `20261027T000000Z` (snapshot.debian.org). |
 | Go toolchain | `go.dev/dl/go1.26.6.linux-amd64.tar.gz` (the version `go.mod` pins) | hard-pinned `sha256:708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89`. |
+| Zig toolchain | `ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz` (builds `native/zigmedia` -> `libravemedia.a`, the realtime TX C ABI the `-tags pipewire` shim links; same version as the Windows Zig natives) | hard-pinned `sha256:70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00`. Build-time only; the static lib is linked into the Linux sender, not shipped as a separate artifact. |
 
 apt build deps (cgo: Fyne/Gio/oto need a C toolchain + GL/X11/Wayland even for the headless
 `--service` binary, which still links the GUI): the CI Linux set (`gcc pkg-config

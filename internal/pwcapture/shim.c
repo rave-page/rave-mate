@@ -16,15 +16,18 @@
  * dlopen'd, so nothing is load-time linked. */
 #include "shim.h"
 #include "vaenc.h"
+#include <ravemedia.h> /* native realtime TX (zigmedia C ABI); -I set in capture_pipewire.go cgo CFLAGS */
 
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <netdb.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/resource.h>
+#include <sys/socket.h>
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
@@ -342,6 +345,11 @@ struct rpw_capture {
 	 * (deliberate rate-cap, PRE-encode -> no reference break, no IDR; surfaced as RateCapped). */
 	long long enc_grid_next; /* next grid PTS (ns); 0 = uninitialised */
 	long grid_drops;
+
+	/* Native realtime TX (unit 3): when the router attaches a native sender (UDP route + per-route
+	 * keys), the encode thread submits AUs straight to it (rm_tx_submit_au) instead of the AU ring ->
+	 * Go pump. NULL = the Go-ring fallback path. Set under enc_mu before the encode thread reads it. */
+	rm_sender *native_tx;
 	/* pending-frame metadata (captured from the buffer in the callback; the buffer stays valid while
 	 * held, but copying keeps the thread off the spa_buffer). */
 	int enc_p_np, enc_p_fds[RPW_MAX_PLANES];
@@ -970,6 +978,7 @@ static void *enc_thread_main(void *arg) {
 		uint64_t mod = c->enc_p_mod;
 		int w = c->enc_p_w, h = c->enc_p_h, flip = c->enc_p_flip;
 		long long pts = c->enc_p_pts;
+		rm_sender *tx = c->native_tx; /* native-TX switch, read under enc_mu */
 		pthread_mutex_unlock(&c->enc_mu);
 
 		if (stop)
@@ -983,7 +992,11 @@ static void *enc_thread_main(void *arg) {
 			if (rva_enc_frame(c->enc, fourcc, mod, w, h, np, fds, off, str, flip, idr, &au, &aulen, &kf) == 0 && aulen > 0) {
 				c->import_ok = 1;
 				rva_enc_feedback(c->enc, &c->fb_present, &c->fb_avg_qp, &c->fb_rate_limited);
-				if (au_ring_push(c, au, aulen, kf, pts)) {
+				if (tx) {
+					/* native realtime path: submit the AU straight to the Zig sender (non-blocking; it
+					 * owns the bounded TX queue + drop-oldest + IDR callback). The Go pump never runs. */
+					rm_tx_submit_au(tx, au, (size_t)aulen, (int64_t)pts, (uint32_t)(kf ? RM_FLAG_KEYFRAME : 0));
+				} else if (au_ring_push(c, au, aulen, kf, pts)) { /* Go-ring fallback path */
 					c->force_idr = 1;
 				} else {
 					pthread_mutex_lock(&c->mu);
@@ -1437,6 +1450,94 @@ long rpw_cap_drops(struct rpw_capture *c) { return c ? c->cap_drops : 0; }
 /* grid drops: frames paced out by the PTS-grid (source faster than the negotiated rate) - deliberate. */
 long rpw_grid_drops(struct rpw_capture *c) { return c ? c->grid_drops : 0; }
 
+/* ---- Native realtime TX (unit 3): hand the encode thread's AU stream to the Zig sender ---- */
+
+/* native_idr_cb: the Zig sender dropped an AU (queue full) -> force an IDR so the receiver resyncs.
+ * Fires on the sender's thread; sets the flag under c->mu, which enc_ensure reads it under. */
+static void native_idr_cb(void *user) {
+	struct rpw_capture *c = user;
+	pthread_mutex_lock(&c->mu);
+	c->force_idr = 1;
+	pthread_mutex_unlock(&c->mu);
+}
+
+/* rpw_attach_native_tx opens a native sender from the per-route params Go derived + switches the
+ * encode thread onto it (rm_tx_submit_au). peer_host/peer_port are resolved here (native opens its own
+ * socket; socket_fd < 0). Returns 1 on success (native path engaged), 0 on failure (Go keeps the ring
+ * fallback). Call AFTER rpw_set_encode. codec: 4=H.264 5=HEVC 6=AV1; transport: 0=UDP 1=TCP. */
+int rpw_attach_native_tx(struct rpw_capture *c, int transport, int codec, int stream, int body_max,
+                         const char *peer_host, const char *peer_port, int encrypt,
+                         const unsigned char *send_key, unsigned send_prefix,
+                         const unsigned char *recv_key, unsigned recv_prefix,
+                         unsigned token, double initial_rate_bps) {
+	if (!c || c->native_tx || !send_key || !recv_key)
+		return 0;
+	struct addrinfo hints, *res = NULL;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = (transport == 1) ? SOCK_STREAM : SOCK_DGRAM;
+	if (getaddrinfo(peer_host, peer_port, &hints, &res) != 0 || !res)
+		return 0;
+	rm_open_params p;
+	memset(&p, 0, sizeof(p));
+	p.abi_version = RM_ABI_VERSION;
+	p.transport = (transport == 1) ? RM_TRANSPORT_TCP : RM_TRANSPORT_UDP;
+	p.codec = (codec == 5) ? RM_CODEC_HEVC : (codec == 6) ? RM_CODEC_AV1 : RM_CODEC_H264;
+	p.stream = (uint16_t)stream;
+	p.body_max = body_max;
+	p.socket_fd = -1; /* native opens its own socket toward peer_addr */
+	p.peer_addr = (const uint8_t *)res->ai_addr;
+	p.peer_addr_len = (int32_t)res->ai_addrlen;
+	memcpy(p.keys.send_key, send_key, 32);
+	p.keys.send_nonce_prefix = send_prefix;
+	memcpy(p.keys.recv_key, recv_key, 32);
+	p.keys.recv_nonce_prefix = recv_prefix;
+	p.keys.token = token;
+	p.keys.encrypt = encrypt ? 1 : 0;
+	p.keys.initiator = 0; /* the sender is the answerer (responder); send = s2c */
+	p.initial_rate_bytes_per_sec = initial_rate_bps;
+	rm_sender *s = NULL;
+	rm_status st = rm_tx_open(&p, native_idr_cb, c, &s);
+	freeaddrinfo(res);
+	if (st != RM_OK || !s)
+		return 0;
+	pthread_mutex_lock(&c->enc_mu);
+	c->native_tx = s;
+	pthread_mutex_unlock(&c->enc_mu);
+	pthread_mutex_lock(&c->mu);
+	c->force_idr = 1; /* open the native stream with an IDR */
+	pthread_mutex_unlock(&c->mu);
+	return 1;
+}
+
+/* rpw_native_tx_set_rate updates the native pacer (bytes/sec). */
+void rpw_native_tx_set_rate(struct rpw_capture *c, double bytes_per_sec) {
+	if (c && c->native_tx)
+		rm_tx_set_rate(c->native_tx, bytes_per_sec);
+}
+
+/* rpw_native_tx_stats copies the sender's lock-free counters (zeroed if not attached). */
+void rpw_native_tx_stats(struct rpw_capture *c, rm_tx_stats *out) {
+	if (!out)
+		return;
+	if (c && c->native_tx)
+		rm_tx_stats_get(c->native_tx, out);
+	else
+		memset(out, 0, sizeof(*out));
+}
+
+/* rpw_native_tx_close stops + frees the native sender; the encode thread reverts to the ring. */
+void rpw_native_tx_close(struct rpw_capture *c) {
+	if (!c)
+		return;
+	pthread_mutex_lock(&c->enc_mu);
+	rm_sender *s = c->native_tx;
+	c->native_tx = NULL;
+	pthread_mutex_unlock(&c->enc_mu);
+	if (s)
+		rm_tx_close(s); /* no callback fires after this returns */
+}
+
 void rpw_stop(struct rpw_capture *c) {
 	if (!c)
 		return;
@@ -1449,6 +1550,10 @@ void rpw_stop(struct rpw_capture *c) {
 		pthread_mutex_unlock(&c->enc_mu);
 		pthread_join(c->enc_thread, NULL);
 		c->enc_thread_on = 0;
+	}
+	if (c->native_tx) { /* encode thread joined -> no more submits; close the native sender */
+		rm_tx_close(c->native_tx);
+		c->native_tx = NULL;
 	}
 	if (c->stream) {
 		PW.stream_disconnect(c->stream);

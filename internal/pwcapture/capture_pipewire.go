@@ -3,8 +3,11 @@
 package pwcapture
 
 /*
-#cgo CFLAGS: -I/usr/include/pipewire-0.3 -I/usr/include/spa-0.2 -D_REENTRANT
-#cgo LDFLAGS: -ldl -lpthread
+#cgo CFLAGS: -I/usr/include/pipewire-0.3 -I/usr/include/spa-0.2 -I${SRCDIR}/../../native/zigmedia/include -D_REENTRANT
+#cgo LDFLAGS: -ldl -lpthread -lravemedia
+// libravemedia.a (native/zigmedia, Zig) provides the realtime TX C ABI. Its -L dir is supplied at
+// build time via CGO_LDFLAGS (the container build-script builds it to a writable prefix; a local build
+// points at native/zigmedia/zig-out/lib). The runtime is self-contained (no extra link deps).
 #include <stdlib.h>
 #include "shim.h"
 #include "vaenc.h"
@@ -13,8 +16,10 @@ import "C"
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"sync"
 	"time"
 	"unsafe"
@@ -39,6 +44,7 @@ var (
 	_ medialink.KeyframeSource     = (*pwSource)(nil)
 	_ medialink.RateControlSource  = (*pwSource)(nil)
 	_ medialink.PipelineReporter   = (*pwSource)(nil)
+	_ medialink.NativeTXSource     = (*pwSource)(nil)
 )
 
 // openCapture starts a PipeWire capture of nodeName and returns it as a medialink.Source. Frames
@@ -333,6 +339,116 @@ func (s *pwSource) PipeStats() medialink.PipelineStats {
 		QualityTarget: quality, BudgetKbps: kbps,
 		Feedback: medialink.EncoderFeedback{
 			Present: present != 0, AvgQP: float64(avgQP), RateLimited: rateLimited != 0},
+	}
+}
+
+// AttachNativeTX implements medialink.NativeTXSource: hand the encode thread's AU stream to the native
+// Zig sender (realtime path, no Go pump). The router calls this for a UDP route with per-route keys;
+// on failure the caller keeps the AU-ring -> Go pump fallback. Per-frame AUs then go capture -> VA
+// encode -> rm_tx_submit_au with no Go heap on the path; Go only supervises (SetRate/Stats/Done).
+func (s *pwSource) AttachNativeTX(p medialink.NativeTXParams) (medialink.NativeTX, error) {
+	if !s.encMode {
+		return nil, errors.New("pwcapture: AttachNativeTX before encode engaged")
+	}
+	host, port, err := net.SplitHostPort(p.PeerAddr)
+	if err != nil {
+		return nil, fmt.Errorf("pwcapture: native TX peer %q: %w", p.PeerAddr, err)
+	}
+	chost, cport := C.CString(host), C.CString(port)
+	defer C.free(unsafe.Pointer(chost))
+	defer C.free(unsafe.Pointer(cport))
+	transport := 0
+	if p.Transport == medialink.TransportTCP {
+		transport = 1
+	}
+	enc := 0
+	if p.Encrypt {
+		enc = 1
+	}
+	sk := (*C.uchar)(unsafe.Pointer(&p.SendKey[0]))
+	rk := (*C.uchar)(unsafe.Pointer(&p.RecvKey[0]))
+	rateBps := C.double(float64(p.BitrateKbps) * 1000 / 8) // kbps -> bytes/sec (0 = unpaced)
+	if C.rpw_attach_native_tx(s.h, C.int(transport), C.int(p.Codec), C.int(p.Stream), C.int(p.BodyMax),
+		chost, cport, C.int(enc), sk, C.uint(p.SendPrefix), rk, C.uint(p.RecvPrefix),
+		C.uint(p.Token), rateBps) == 0 {
+		return nil, errors.New("pwcapture: rpw_attach_native_tx failed")
+	}
+	tx := &pwNativeTX{s: s, done: make(chan struct{})}
+	go tx.watch()
+	if s.log != nil {
+		s.log.Info(source, "native TX attached", map[string]any{
+			"node": s.node, "peer": p.PeerAddr, "transport": p.Transport, "stream": p.Stream})
+	}
+	return tx, nil
+}
+
+// pwNativeTX is the running native sender handle the router supervises (medialink.NativeTX).
+type pwNativeTX struct {
+	s        *pwSource
+	done     chan struct{}
+	doneOnce sync.Once
+	mu       sync.Mutex
+	err      error
+}
+
+// SetRate updates the native pacer (kbps -> bytes/sec); fps is advisory (not used by the pacer).
+func (t *pwNativeTX) SetRate(kbps, fps int) {
+	if kbps > 0 {
+		C.rpw_native_tx_set_rate(t.s.h, C.double(float64(kbps)*1000/8))
+	}
+}
+
+// Stats snapshots the native sender's lock-free counters.
+func (t *pwNativeTX) Stats() medialink.NativeTXStats {
+	var st C.rm_tx_stats
+	C.rpw_native_tx_stats(t.s.h, &st)
+	return medialink.NativeTXStats{
+		AUsSubmitted: uint64(st.aus_submitted), AUsSent: uint64(st.aus_sent),
+		AUsDropped: uint64(st.aus_dropped), DatagramsSent: uint64(st.datagrams_sent),
+		BytesSent: uint64(st.bytes_sent), Retransmits: uint64(st.retransmits),
+		Seq: uint64(st.seq), QueueDepth: int(st.queue_depth), Dead: st.dead != 0,
+	}
+}
+
+func (t *pwNativeTX) Done() <-chan struct{} { return t.done }
+
+func (t *pwNativeTX) Err() error { t.mu.Lock(); defer t.mu.Unlock(); return t.err }
+
+// Close stops + frees the native sender (clean bye); idempotent.
+func (t *pwNativeTX) Close() error {
+	C.rpw_native_tx_close(t.s.h)
+	t.finish(nil)
+	return nil
+}
+
+func (t *pwNativeTX) finish(err error) {
+	t.doneOnce.Do(func() {
+		if err != nil {
+			t.mu.Lock()
+			t.err = err
+			t.mu.Unlock()
+		}
+		close(t.done)
+	})
+}
+
+// watch closes Done when the native sender ends (dead flag), the capture closes, or Close is called.
+func (t *pwNativeTX) watch() {
+	tk := time.NewTicker(500 * time.Millisecond)
+	defer tk.Stop()
+	for {
+		select {
+		case <-t.done:
+			return
+		case <-t.s.done:
+			t.finish(errors.New("pwcapture: capture closed"))
+			return
+		case <-tk.C:
+			if t.Stats().Dead {
+				t.finish(errors.New("pwcapture: native TX ended (dead)"))
+				return
+			}
+		}
 	}
 }
 
