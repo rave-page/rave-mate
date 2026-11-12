@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -610,6 +611,19 @@ func (rm *RouteManager) Advertise() {
 	if raw, err := json.Marshal(ad); err == nil {
 		rm.bus.Publish(TopicAdvert, raw)
 	}
+}
+
+// LocalSources snapshots this node's currently-registered media sources (read-only; drives
+// `ctl media-sources`). Stable order by ID so the listing is deterministic.
+func (rm *RouteManager) LocalSources() []SourceDesc {
+	rm.mu.Lock()
+	out := make([]SourceDesc, 0, len(rm.sources))
+	for _, s := range rm.sources {
+		out = append(out, s.desc)
+	}
+	rm.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }
 
 // RemoteAdverts snapshots the last advert seen from each peer.

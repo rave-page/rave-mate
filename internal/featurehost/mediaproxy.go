@@ -227,7 +227,8 @@ func (p *MediaProxy) SetCodecCaps(enc, dec []string) {
 func (p *MediaProxy) SetSyncPeer(node string) {
 	_ = p.h.host.Send(evMediaSyncPeer, syncPeerEvent{Node: node})
 }
-func (p *MediaProxy) Encoders() []string { return p.h.snap().Encoders }
+func (p *MediaProxy) Encoders() []string                   { return p.h.snap().Encoders }
+func (p *MediaProxy) LocalSources() []medialink.SourceDesc { return p.h.snap().LocalSources }
 func (p *MediaProxy) Stats() []medialink.RouteStat {
 	return p.h.snap().Routes
 }
