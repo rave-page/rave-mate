@@ -1,13 +1,13 @@
 {
-  "version": "nightly-f776064",
-  "build": 416,
-  "commit": "f776064",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-416-20261112-f776064.exe",
-  "sha256": "5cce81284c2b319c021c817e6716852085aa17d84d4cccf38db65ea04e519407",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-416-20261112-f776064.exe",
-  "installer_sha256": "c074ffafa3d72c38dbdc91f9bad57ad4125297ace10f0608a160bdbafc11e0d2",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-416-20261112-f776064",
-  "linux_sha256": "7c3cd26abcdaa512471bc46147e2c1226e478d7d4f3264f080e06677ababd97b",
+  "version": "nightly-d6dc2fb",
+  "build": 418,
+  "commit": "d6dc2fb",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-418-20261112-d6dc2fb.exe",
+  "sha256": "ffac1f9f5d3a746161488bc158ef87c26b65f778f2d279fbaa359c744e5cb7e8",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-418-20261112-d6dc2fb.exe",
+  "installer_sha256": "bac5ce25309c4edf9e9c3c577631e50d7a2adb8080966aae382108e7c9d19c87",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-418-20261112-d6dc2fb",
+  "linux_sha256": "4d25ea7037d6803cb3712f8c6062c600c23c8be14f843e81d3e8bd5a9bf953bf",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-11-12T02:52:53Z",
-  "notes": "Merge feat/pw-4k: zero-copy dmabuf->VA-API encoder (harness-level), PipeWire targeting fix notes"
+  "released": "2026-11-12T04:05:17Z",
+  "notes": "Merge feat/pw-4k: native H.264 VA-API engine in routes, flip + 60 fps fixes, DCC filter"
 }
