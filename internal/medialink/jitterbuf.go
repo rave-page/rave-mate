@@ -42,6 +42,9 @@ const (
 	jbHistBinNs      = 1_000_000     // lateness histogram bin (1 ms)
 	jbHistSlices     = 10            // sliding window = 10 slices
 	jbStatMinutes    = 10            // "last 10 min" telemetry window
+	jbShiftWinNs     = 1_000_000_000 // base-shift detector window (every frame late for this long)
+	jbShiftMinFrames = 30            // min arrivals in the window before a shift can be declared
+	jbShiftCap       = 1024          // shift deque + miss-time ring bound
 
 	// Memory guards (pending-frame caps). INTRA streams (raw RGBA / MJPEG) have no decode
 	// dependency, so deep buffering buys nothing - a couple of frames is plenty and keeps the
@@ -108,6 +111,7 @@ type JitterStats struct {
 	Misses10m  uint64  // frames missing at their deadline, last 10 min
 	Repeats10m uint64  // release intervals > 1.5 frames, counted in repeated frames, last 10 min
 	Repeats    uint64  // total repeated frames
+	Rebases    uint64  // sustained transit shifts absorbed (clock/PTS-domain step, not a stall)
 }
 
 // MarginEvent is the last margin grow (for the "playout hitch" log line).
@@ -116,6 +120,8 @@ type MarginEvent struct {
 	FromNs, ToNs   int64
 	ObservedLateNs int64
 }
+
+type jbTransit struct{ at, tr int64 }
 
 type jbSample struct {
 	at   int64 // arrival ns (prune key)
@@ -135,6 +141,14 @@ func (r *minuteRing) add(now int64, k uint64) {
 		r.min[i], r.n[i] = m, 0
 	}
 	r.n[i] += k
+}
+
+func (r *minuteRing) sub(at int64, k uint64) {
+	m := at / 60e9
+	i := int(m % jbStatMinutes)
+	if r.min[i] == m && r.n[i] >= k {
+		r.n[i] -= k
+	}
 }
 
 func (r *minuteRing) sum(now int64) uint64 {
@@ -273,6 +287,12 @@ type jitterBuffer struct {
 	waitKey    bool
 
 	misses10m, repeats10m minuteRing
+
+	// Base-shift detector: rolling 1 s min of transit (monotonic deque, bounded) + recent miss times.
+	shiftQ          []jbTransit
+	missAt          []int64 // miss arrival times inside the shift window (bounded jbShiftCap)
+	marginBeforeRun int64   // margin before the first miss of the current run
+	rebases         uint64
 
 	late        uint64
 	repeats     uint64
@@ -426,13 +446,22 @@ func (b *jitterBuffer) accountLateness(f *Frame, arrival int64) {
 	if warm {
 		return // startup transients: no histogram, no grow, no miss count
 	}
+	if b.detectShift(arrival, arrival-f.PTS) {
+		return // base re-anchored: this frame is on the new schedule, not a miss
+	}
 	b.hist.add(arrival, lateness)
 	if lateness > b.longPeakAt(arrival) {
 		b.longPeak, b.longPeakT = lateness, arrival
 	}
 	if miss {
+		if b.lastMiss == 0 || arrival-b.lastMiss > jbShiftWinNs {
+			b.marginBeforeRun = b.margin
+		}
 		b.late++
 		b.misses10m.add(arrival, 1)
+		if len(b.missAt) < jbShiftCap {
+			b.missAt = append(b.missAt, arrival)
+		}
 		b.lastMiss = arrival
 		want := int64(float64(lateness)*b.preset.GrowFactor) + jbHeadroomNs
 		if want > b.preset.MaxNs {
@@ -461,6 +490,57 @@ func (b *jitterBuffer) accountLateness(f *Frame, arrival int64) {
 		b.margin -= step
 		b.decays++
 	}
+}
+
+// detectShift re-anchors the base when EVERY frame for jbShiftWinNs (>= jbShiftMinFrames arrivals)
+// arrived > 2 intervals above the min-transit base: a stall always ends with an on-time burst tail (min lateness ~0), a clock / PTS-domain step
+// never does. The run's misses are un-counted, its margin growth reverted and the lateness history
+// dropped (it measured the step, not the network). Returns true when it re-anchored. Caller holds mu.
+func (b *jitterBuffer) detectShift(now, transit int64) bool {
+	q := b.shiftQ
+	for len(q) > 0 && q[len(q)-1].tr >= transit {
+		q = q[:len(q)-1]
+	}
+	if len(q) >= jbShiftCap {
+		q = q[1:]
+	}
+	q = append(q, jbTransit{at: now, tr: transit})
+	for len(q) > 0 && now-q[0].at > jbShiftWinNs {
+		q = q[1:]
+	}
+	b.shiftQ = q
+	k := 0
+	for k < len(b.missAt) && now-b.missAt[k] > jbShiftWinNs {
+		k++
+	}
+	b.missAt = b.missAt[k:]
+	if now-b.startAt < b.warmupNs+jbShiftWinNs {
+		return false
+	}
+	recentMin := q[0].tr
+	if recentMin-b.base() <= 2*b.interval {
+		return false
+	}
+	n := 0
+	for i := len(b.samples) - 1; i >= 0 && now-b.samples[i].at <= jbShiftWinNs; i-- {
+		n++
+	}
+	if n < jbShiftMinFrames {
+		return false
+	}
+	for _, at := range b.missAt {
+		b.late--
+		b.misses10m.sub(at, 1)
+	}
+	b.missAt = b.missAt[:0]
+	if b.marginBeforeRun > 0 {
+		b.margin = b.marginBeforeRun
+	}
+	b.bucketStart, b.bucketMin, b.bucketHas, b.prevMins = now, recentMin, true, b.prevMins[:0]
+	b.hist = newLatHist(b.preset)
+	b.longPeak, b.longPeakT, b.lastMiss = 0, 0, 0
+	b.rebases++
+	return true
 }
 
 // targetLocked is the decay target: lateness quantile (peak-hold presets: worst recent stall ×
@@ -664,5 +744,6 @@ func (b *jitterBuffer) statsAt(now int64) JitterStats {
 		Preset: b.preset.Name, PlayoutMs: float64(b.margin) / 1e6,
 		TargetMs: float64(b.targetLocked(now)) / 1e6, MaxMs: float64(b.preset.MaxNs) / 1e6,
 		Misses10m: b.misses10m.sum(now), Repeats10m: b.repeats10m.sum(now), Repeats: b.repeats,
+		Rebases: b.rebases,
 	}
 }

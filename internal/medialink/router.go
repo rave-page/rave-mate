@@ -1504,7 +1504,7 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 			defer close(done) // always unblock the waiter below, even if runJitter panics
 			rm.guard("runJitter", func() { rm.runJitter(rctx, conn, jb, final, st) })
 		}()
-		err = rm.runReceive(rctx, rio, jbSink{jb: jb, clock: rm.clock})
+		err = rm.runReceive(rctx, rio, jbSink{jb: jb})
 		cancel()
 		<-done
 	} else {
@@ -1553,13 +1553,15 @@ func (rm *RouteManager) playoutPreset() PlayoutPreset {
 	return ParsePlayoutPreset(rm.playout())
 }
 
-// jbSink feeds the recv loop into the jitter buffer (arrival = media clock at read).
+// jbSink feeds the recv loop into the jitter buffer. Arrival + release times use the RAW monotonic
+// clock, never the disciplined media clock: a sync-lock offset step would shift every transit sample
+// at once and read as a run of misses until the min-transit base window rolled over (live: 355
+// misses in the first seconds). The base absorbs any constant PTS-domain offset.
 type jbSink struct {
-	jb    *jitterBuffer
-	clock ClockSource
+	jb *jitterBuffer
 }
 
-func (s jbSink) Write(f *Frame) error { s.jb.push(f, s.clock.Now()); return nil }
+func (s jbSink) Write(f *Frame) error { s.jb.push(f, monoNs()); return nil }
 func (s jbSink) Close() error         { return nil }
 
 // runJitter drains the §3.3 buffer into the sink at release pace. A sink error tears the route
@@ -1571,7 +1573,7 @@ func (rm *RouteManager) runJitter(ctx context.Context, conn frameConn, jb *jitte
 		if ctx.Err() != nil {
 			return
 		}
-		f, wake := jb.pop(rm.clock.Now())
+		f, wake := jb.pop(monoNs())
 		if f != nil {
 			now := monoNs()
 			st.stages.JBRelease.Mark(now) // STEP-0: jitter buffer released a frame for playout
@@ -1587,7 +1589,7 @@ func (rm *RouteManager) runJitter(ctx context.Context, conn frameConn, jb *jitte
 					}
 					cur, ev := jb.marginInfo()
 					before, after := cur, cur
-					if ev.At != 0 && rm.clock.Now()-ev.At < int64(2*time.Second) {
+					if ev.At != 0 && monoNs()-ev.At < int64(2*time.Second) {
 						before, after = ev.FromNs, ev.ToNs // this hitch grew the playout margin
 					}
 					rm.warnf("playout hitch", map[string]any{"session": st.session, "stream": st.stream,
@@ -1615,7 +1617,7 @@ func (rm *RouteManager) runJitter(ctx context.Context, conn frameConn, jb *jitte
 			}
 			continue
 		}
-		wait := time.Duration(wake - rm.clock.Now())
+		wait := time.Duration(wake - monoNs())
 		if wait <= 0 {
 			continue
 		}
@@ -1830,7 +1832,7 @@ func (rm *RouteManager) Stats() []RouteStat {
 	for _, r := range rm.active {
 		s := r.stat.snapshot()
 		if r.jb != nil {
-			js := r.jb.statsAt(rm.clock.Now())
+			js := r.jb.statsAt(monoNs())
 			s.JB = &js
 		}
 		if r.pipe != nil {
