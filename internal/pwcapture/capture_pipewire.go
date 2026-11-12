@@ -103,13 +103,18 @@ func (s *pwSource) Next(ctx context.Context) (*medialink.Frame, error) {
 			s.buf = make([]byte, 1920*1080*4) // grown on -2
 		}
 		var w, hh C.int
-		n := int(C.rpw_wait_frame(s.h, (*C.uchar)(unsafe.Pointer(&s.buf[0])), C.int(len(s.buf)), &w, &hh, 200))
+		var cpts C.longlong
+		n := int(C.rpw_wait_frame(s.h, (*C.uchar)(unsafe.Pointer(&s.buf[0])), C.int(len(s.buf)), &w, &hh, &cpts, 200))
 		buf := s.buf
 		s.mu.Unlock()
 		switch {
 		case n > 0:
+			pts := int64(cpts) // capture-clock PTS from the buffer; 0 => stamp now
+			if pts == 0 {
+				pts = time.Now().UnixNano()
+			}
 			return &medialink.Frame{Kind: medialink.KindVideo, Codec: medialink.CodecNRGBA,
-				Payload: buf[:n], PTS: time.Now().UnixNano()}, nil
+				Payload: buf[:n], PTS: pts}, nil
 		case n == 0:
 			continue // timeout: re-check ctx + the producer may be mid-reconnect (VRChat restart)
 		case n == -2: // buffer too small - grow to the real frame size and retry
@@ -208,7 +213,8 @@ func (s *pwSource) nextAU(ctx context.Context) (*medialink.Frame, error) {
 			s.aubuf = make([]byte, 1<<20) // grown on -2
 		}
 		var w, hh, kf C.int
-		n := int(C.rpw_wait_au(s.h, (*C.uchar)(unsafe.Pointer(&s.aubuf[0])), C.int(len(s.aubuf)), &w, &hh, &kf, 200))
+		var cpts C.longlong
+		n := int(C.rpw_wait_au(s.h, (*C.uchar)(unsafe.Pointer(&s.aubuf[0])), C.int(len(s.aubuf)), &w, &hh, &kf, &cpts, 200))
 		buf := s.aubuf
 		s.mu.Unlock()
 		switch {
@@ -217,8 +223,12 @@ func (s *pwSource) nextAU(ctx context.Context) (*medialink.Frame, error) {
 			s.auBytes += uint64(n)
 			s.auCount++
 			s.tmu.Unlock()
+			pts := int64(cpts) // capture-clock PTS from the buffer; 0 => stamp now
+			if pts == 0 {
+				pts = time.Now().UnixNano()
+			}
 			f := &medialink.Frame{Kind: medialink.KindVideo, Codec: s.encCodec,
-				Payload: buf[:n], PTS: time.Now().UnixNano()}
+				Payload: buf[:n], PTS: pts}
 			if kf != 0 {
 				f.Flags |= medialink.FlagKeyframe
 			}

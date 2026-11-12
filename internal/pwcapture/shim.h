@@ -17,9 +17,9 @@ int rpw_available(void);
 struct rpw_capture *rpw_start(const char *target_node);
 
 /* rpw_wait_frame blocks up to timeout_ms for the next frame, converts it to RGBA (Go NRGBA order)
- * into dst. Returns bytes written (>0, == *w * *h * 4), 0 on timeout, -1 on fatal stream error,
- * -2 when cap is too small (sets *w,*h to the needed dims; the frame is kept for the next call). */
-int rpw_wait_frame(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int *h, long timeout_ms);
+ * into dst. Sets the capture PTS (ns, 0 if none) in *pts. Returns bytes written (>0, == *w * *h * 4),
+ * 0 on timeout, -1 on fatal stream error, -2 when cap is too small (sets *w,*h; frame kept). */
+int rpw_wait_frame(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int *h, long long *pts, long timeout_ms);
 
 /* rpw_dropped returns the drop-oldest counter (frames the producer delivered that no Next consumed,
  * plus frames skipped because their buffer type isn't supported - e.g. DMA-BUF before EGL). */
@@ -36,9 +36,10 @@ long rpw_dmabuf_skipped(struct rpw_capture *c);
  * 0 = VA unavailable (fall back to rpw_wait_frame + ffmpeg). */
 int rpw_set_encode(struct rpw_capture *c, int codec, int kbps, int max_h, int fps, const char *node);
 
-/* rpw_wait_au returns one Annex-B AU into dst (blocks up to timeout_ms), sets *keyframe and the CODED
- * dims in *w/*h. >0 bytes, 0 timeout, -1 fatal, -2 cap too small (dims set, AU kept). */
-int rpw_wait_au(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int *h, int *keyframe, long timeout_ms);
+/* rpw_wait_au returns one Annex-B AU into dst (blocks up to timeout_ms), sets *keyframe, the CODED
+ * dims in *w/*h, and the capture PTS (ns, 0 if the buffer carried none) in *pts. >0 bytes, 0 timeout,
+ * -1 fatal, -2 cap too small (dims set, AU kept). */
+int rpw_wait_au(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int *h, int *keyframe, long long *pts, long timeout_ms);
 
 /* rpw_request_keyframe forces an IDR on the next encoded frame (PLI / route start / reconnect). */
 void rpw_request_keyframe(struct rpw_capture *c);

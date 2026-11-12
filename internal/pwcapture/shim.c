@@ -29,6 +29,7 @@
 #include <pipewire/pipewire.h>
 #include <spa/param/video/format-utils.h>
 #include <spa/param/video/raw.h>
+#include <spa/buffer/meta.h>
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -277,6 +278,9 @@ struct rpw_capture {
 	long enc_drops;      /* frames dropped on the encode path (newest-wins + encode errors) */
 	long cap_frames;     /* dmabuf frames seen in encode mode */
 	int import_ok;       /* 1 once a dmabuf imported+encoded at least once (va-dmabuf path live) */
+	int flip_default;    /* RPW_FLIP_V: default vertical flip when the buffer carries no transform meta.
+	                      * 0 = top-down (Spout2PW/DX + PipeWire convention); 1 = bottom-up (GL producer) */
+	long long slot_pts;  /* capture-clock PTS (ns) of the AU/frame in slot (from SPA_META_Header) */
 
 	/* EGL (dmabuf import) - display/context built in rpw_start (no current); made current lazily
 	 * on the loop thread in on_process. */
@@ -366,8 +370,34 @@ static int egl_ensure_current(struct rpw_capture *c) {
 	return 1;
 }
 
-/* egl_import_frame imports a dmabuf spa_buffer via EGL, reads it back to RGBA (vertically flipped:
- * GL readback is bottom-up, the dmabuf top row is image-top), stores it in the slot. Loop thread. */
+/* want_flip decides whether to vertically flip THIS buffer so the output is image-top-first.
+ * Signal priority: an explicit SPA_META_VideoTransform on the buffer (honour it - Flipped180 = a
+ * vertical mirror), else the per-source default (RPW_FLIP_V / flip_default). The default is 0 =
+ * top-down, correct for Spout2PW (DX-origin) and the PipeWire raw-video convention; a GL-origin
+ * producer (bottom-up, e.g. our libfunnel test) sets flip_default=1. Both the readback and the VA
+ * paths call this so they always agree. */
+static int want_flip(struct rpw_capture *c, struct spa_buffer *sb) {
+	struct spa_meta_videotransform *vt =
+		spa_buffer_find_meta_data(sb, SPA_META_VideoTransform, sizeof(*vt));
+	if (vt) {
+		/* Honour only the vertical-mirror transforms; a rotation/horizontal-only transform is not a
+		 * vertical flip, so fall back to the default (and it would need VPP rotation we don't do). */
+		return vt->transform == SPA_META_TRANSFORMATION_Flipped180;
+	}
+	return c->flip_default;
+}
+
+/* buffer_pts returns the buffer's capture PTS (ns) from SPA_META_Header, or 0 when absent/invalid
+ * (caller stamps a wall-clock time). Correct inter-frame timing for a variable-framerate source. */
+static long long buffer_pts(struct spa_buffer *sb) {
+	struct spa_meta_header *h = spa_buffer_find_meta_data(sb, SPA_META_Header, sizeof(*h));
+	if (h && h->pts > 0)
+		return (long long)h->pts;
+	return 0;
+}
+
+/* egl_import_frame imports a dmabuf spa_buffer via EGL, reads it back to RGBA, stores it in the slot
+ * (vertically flipped per want_flip). Loop thread. */
 static int egl_import_frame(struct rpw_capture *c, struct spa_buffer *sb) {
 	if (!egl_ensure_current(c) || c->width <= 0)
 		return 0;
@@ -464,11 +494,17 @@ static int egl_import_frame(struct rpw_capture *c, struct spa_buffer *sb) {
 		c->slot_cap = need;
 	}
 	int row = c->width * 4;
-	for (int y = 0; y < c->height; y++)
-		memcpy(c->slot + (size_t)y * row, c->rbscratch + (size_t)(c->height - 1 - y) * row, row);
+	int flip = want_flip(c, sb);
+	if (flip) {
+		for (int y = 0; y < c->height; y++)
+			memcpy(c->slot + (size_t)y * row, c->rbscratch + (size_t)(c->height - 1 - y) * row, row);
+	} else {
+		memcpy(c->slot, c->rbscratch, (size_t)c->height * row);
+	}
 	if (c->has_frame)
 		c->dropped++;
 	c->has_frame = 1;
+	c->slot_pts = buffer_pts(sb);
 	pthread_cond_signal(&c->cv);
 	pthread_mutex_unlock(&c->mu);
 	return 1;
@@ -537,8 +573,11 @@ static struct spa_pod *build_dmabuf_format(struct spa_pod_builder *b, struct rpw
 	spa_pod_builder_pop(b, &f1);
 	spa_pod_builder_add(b, SPA_FORMAT_VIDEO_size,
 		SPA_POD_CHOICE_RANGE_Rectangle(&SPA_RECTANGLE(1920, 1080), &SPA_RECTANGLE(1, 1), &SPA_RECTANGLE(8192, 8192)), 0);
+	/* Default framerate 60: a rate-pacing producer (libfunnel/Spout2PW) delivers at the NEGOTIATED
+	 * rate, so offering 30 capped a 120 fps game at 30. 60 is our sender cap; a slower source still
+	 * delivers its own rate (range min 0). */
 	spa_pod_builder_add(b, SPA_FORMAT_VIDEO_framerate,
-		SPA_POD_CHOICE_RANGE_Fraction(&SPA_FRACTION(30, 1), &SPA_FRACTION(0, 1), &SPA_FRACTION(240, 1)), 0);
+		SPA_POD_CHOICE_RANGE_Fraction(&SPA_FRACTION(60, 1), &SPA_FRACTION(0, 1), &SPA_FRACTION(240, 1)), 0);
 	return spa_pod_builder_pop(b, &f0);
 }
 
@@ -554,7 +593,7 @@ static struct spa_pod *build_shm_format(struct spa_pod_builder *b) {
 		SPA_FORMAT_VIDEO_size, SPA_POD_CHOICE_RANGE_Rectangle(
 			&SPA_RECTANGLE(1920, 1080), &SPA_RECTANGLE(1, 1), &SPA_RECTANGLE(8192, 8192)),
 		SPA_FORMAT_VIDEO_framerate, SPA_POD_CHOICE_RANGE_Fraction(
-			&SPA_FRACTION(30, 1), &SPA_FRACTION(0, 1), &SPA_FRACTION(240, 1)));
+			&SPA_FRACTION(60, 1), &SPA_FRACTION(0, 1), &SPA_FRACTION(240, 1)));
 }
 
 /* n_enum_formats: how many Format objects we advertise (dmabuf per format where EGL has modifiers,
@@ -585,7 +624,7 @@ static struct spa_pod *fixate_format(struct spa_pod_builder *b, enum spa_video_f
 	spa_pod_builder_add(b, SPA_FORMAT_VIDEO_size,
 		SPA_POD_CHOICE_RANGE_Rectangle(&SPA_RECTANGLE(1920, 1080), &SPA_RECTANGLE(1, 1), &SPA_RECTANGLE(8192, 8192)), 0);
 	spa_pod_builder_add(b, SPA_FORMAT_VIDEO_framerate,
-		SPA_POD_CHOICE_RANGE_Fraction(&SPA_FRACTION(30, 1), &SPA_FRACTION(0, 1), &SPA_FRACTION(240, 1)), 0);
+		SPA_POD_CHOICE_RANGE_Fraction(&SPA_FRACTION(60, 1), &SPA_FRACTION(0, 1), &SPA_FRACTION(240, 1)), 0);
 	return spa_pod_builder_pop(b, &f0);
 }
 
@@ -770,8 +809,10 @@ static void on_process(void *data) {
 					}
 					unsigned char *au = NULL;
 					int aulen = 0, kf = 0;
+					int flip = want_flip(c, sb);
+					long long pts = buffer_pts(sb);
 					if (rva_enc_frame(c->enc, spa_to_drm_fourcc(c->fmt), c->modifier, c->width, c->height,
-						np, efds, eoff, estr, idr, &au, &aulen, &kf) == 0 && aulen > 0) {
+						np, efds, eoff, estr, flip, idr, &au, &aulen, &kf) == 0 && aulen > 0) {
 						c->import_ok = 1;
 						pthread_mutex_lock(&c->mu);
 						if (aulen > c->slot_cap) {
@@ -785,6 +826,7 @@ static void on_process(void *data) {
 							memcpy(c->slot, au, aulen);
 							c->slot_len = aulen;
 							c->slot_keyframe = kf;
+							c->slot_pts = pts;
 							if (c->has_frame) {
 								c->dropped++;
 								c->enc_drops++;
@@ -864,6 +906,7 @@ struct rpw_capture *rpw_start(const char *target_node) {
 	pthread_cond_init(&c->cv, NULL);
 	c->modifier = DRM_FORMAT_MOD_INVALID;
 	c->drm_fd = -1;
+	c->flip_default = getenv("RPW_FLIP_V") != NULL; /* default no-flip (Spout2PW/DX, PipeWire convention) */
 
 	const char *rn = getenv("RPW_EGL_DEVICE");
 	egl_setup_display(c, rn && *rn ? rn : "/dev/dri/renderD128");
@@ -911,7 +954,7 @@ fail:
 	return NULL;
 }
 
-int rpw_wait_frame(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int *h, long timeout_ms) {
+int rpw_wait_frame(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int *h, long long *pts, long timeout_ms) {
 	struct timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	ts.tv_sec += timeout_ms / 1000;
@@ -948,6 +991,8 @@ int rpw_wait_frame(struct rpw_capture *c, unsigned char *dst, int cap, int *w, i
 	int need = c->slot_len > 0 ? c->slot_len : c->width * c->height * 4; /* encoded AU vs RGBA */
 	*w = c->width;
 	*h = c->height;
+	if (pts)
+		*pts = c->slot_pts;
 	if (need > cap) {
 		pthread_mutex_unlock(&c->mu);
 		return -2;
@@ -986,7 +1031,7 @@ int rpw_set_encode(struct rpw_capture *c, int codec, int kbps, int max_h, int fp
 /* rpw_wait_au is rpw_wait_frame for the encode path: it returns one Annex-B AU (H.264/HEVC), sets
  * *keyframe, and reports the CODED dims in *w/*h (<= source; VPP downscaled). Same return contract:
  * >0 bytes, 0 timeout (incl. mid-reconnect), -1 fatal, -2 cap too small (dims set, AU kept). */
-int rpw_wait_au(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int *h, int *keyframe, long timeout_ms) {
+int rpw_wait_au(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int *h, int *keyframe, long long *pts, long timeout_ms) {
 	struct timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	ts.tv_sec += timeout_ms / 1000;
@@ -1024,6 +1069,8 @@ int rpw_wait_au(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int 
 	*w = c->coded_w > 0 ? c->coded_w : c->width;
 	*h = c->coded_h > 0 ? c->coded_h : c->height;
 	*keyframe = c->slot_keyframe;
+	if (pts)
+		*pts = c->slot_pts;
 	if (need > cap) {
 		pthread_mutex_unlock(&c->mu);
 		return -2;

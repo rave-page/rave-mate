@@ -33,11 +33,12 @@ typedef struct rva_enc rva_enc;
 rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps, int bitrate_kbps);
 
 /* rva_enc_frame encodes one dmabuf frame. On success sets *au (session-owned, valid until the next
- * call/free) + *au_len (Annex-B, AUD + [SPS/PPS on IDR] + slice) + *keyframe. force_idr=1 forces an
+ * call/free) + *au_len (Annex-B, AUD + [SPS/PPS on IDR] + slice) + *keyframe. flip=1 mirrors
+ * vertically (bottom-up GL producer); 0 keeps orientation (top-down DX/Spout). force_idr=1 forces an
  * IDR (PLI/reconnect). Returns 0 ok, <0 on error. */
 int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int h, int n_planes,
                   const int *fds, const unsigned *offsets, const unsigned *strides,
-                  int force_idr, unsigned char **au, int *au_len, int *keyframe);
+                  int flip, int force_idr, unsigned char **au, int *au_len, int *keyframe);
 
 /* rva_enc_set_bitrate updates the live target bitrate (kbps); applied on the next encoded frame via
  * a re-sent VBR rate-control misc param (no reopen). */

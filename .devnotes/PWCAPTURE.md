@@ -269,9 +269,40 @@ against the real VRChat node so deferred): drop `PW_KEY_MEDIA_ROLE="Camera"` for
 Stream/Output/Video target, so wireplumber's camera-default-device policy can't hijack the link when
 the name doesn't match.
 
-### Still unverified
-- The **real VRChat/Spout2PW node** (VRChat was not running): all above is vs the libfunnel synthetic
-  producer. Real-node unknowns: its exact node.name, whether it needs `AMD_DEBUG=nodcc` to avoid the
-  3-plane DCC_RETILE layout at 4K, and its sync mode.
-- Production engine wiring ("vaapi-native" in medialink/mediapipe/featurehost) and HEVC remain
-  follow-ups.
+### REAL VRChat node inspected, 1080p AND 4K (2026-11-12)
+
+Node `spout2pw.VRChat.VRCSender1` (Stream/Output/Video), VRChat running under Proton + Spout2PW, read
+-only second consumer by exact node.name (service route untouched). Findings:
+
+- **4K import works as-is, single-plane.** At 3840x2160 the node negotiates BGRA and the fixated
+  modifier is `0x200000028a01f04` (**planes=1**, NOT the 3-plane DCC_RETILE my GL libfunnel producer
+  emitted without nodcc). VA DRM_PRIME_2 import `rc=0`, zero-copy, real picture. **True even with the
+  DCC filter DISABLED** (RPW_ALLOW_DCC=1) - Spout2PW re-exports a DX11/Spout texture, which GBM
+  allocates single-plane; it is not DCC-compressed like a GL render target. **DCC VERDICT: real 4K needs
+  NO game launch-option change (no AMD_DEBUG=nodcc); the consumer DCC-modifier filter is harmless
+  insurance for producers that WOULD offer DCC.** The producer still OFFERS the full DCC+non-DCC family
+  in EnumFormat; the filter drops its 14 modifiers to 5 non-DCC and fixation lands on a01f04 either way.
+- **30 fps was OUR cap, not the game.** VRChat ran at 120 fps but the route carried 30. The node's
+  negotiated Format framerate was exactly `30/1`, which = our consumer's OWN offered default framerate
+  (build_dmabuf_format). libfunnel/Spout2PW paces to the negotiated framerate. **Changing the offered
+  default to 60/1 -> the real 4K node immediately delivered ~59 fps** (verified). Fix committed. Target
+  behaviour (<=60 from a 120 source, evenly paced by the producer, no back-pressure) achieved via the
+  negotiated rate.
+- **Vertical flip.** Spout2PW publishes the Spout (DX11, top-left origin) texture as-is; libfunnel does
+  NOT touch orientation (its only "flip" is the acquire/release SYNC timeline, funnel.c:271). So the
+  real buffer is top-down and our unconditional GL-style vertical flip inverted it (sky at bottom). The
+  node carries no SPA_META_VideoTransform and no orientation prop. Fix: default NO flip (top-down, the
+  Spout2PW/DX + PipeWire convention); honour SPA_META_VideoTransform when a producer sets it
+  (Flipped180 = vertical mirror); `RPW_FLIP_V=1` per-source override for a bottom-up GL producer (our
+  libfunnel test). Applied identically to the readback path (shim want_flip) and the VA path (VPP
+  mirror_state), so both agree. PTS now taken from SPA_META_Header when present (correct inter-frame
+  timing for a variable-rate source), else wall clock.
+- Sync mode: the real node negotiates with our implicit-sync consumer fine (no change needed).
+
+### Still unverified / follow-ups
+- Native **HEVC** encoder (the first live route used hevc_vaapi; H.264 native is done, HEVC rejected ->
+  falls back to ffmpeg hevc_vaapi readback until implemented).
+- **Dedicated encode thread** (robust >=59.5 under contention) - struct scaffolding in place, wiring in
+  progress.
+- Full two-PC route through the real media child with the native engine end-to-end (the lead runs the
+  real rig; H.264-native + fps + flip fixes land on redeploy).

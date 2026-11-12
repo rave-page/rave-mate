@@ -595,11 +595,13 @@ static VASurfaceID import_cached(struct rva_enc *e, uint32_t drm_fourcc, uint64_
 	return s;
 }
 
-/* vpp_to_nv12: import (cached) the dmabuf, VPP (convert + vertical mirror + scale) into e->nv12.
+/* vpp_to_nv12: import (cached) the dmabuf, VPP (convert + optional vertical mirror + scale) into
+ * e->nv12. flip=1 mirrors vertically (a bottom-up GL producer); flip=0 keeps orientation (a top-down
+ * DX/Spout producer). Same decision as the readback path (shim want_flip), so both agree.
  * No explicit VPP sync: the encode's BeginPicture(nv12) + SyncSurface order the dependency on the
  * shared nv12 surface, which lets VPP and encode pipeline. 0=ok. */
 static int vpp_to_nv12(struct rva_enc *e, VASurfaceID target, uint32_t drm_fourcc, uint64_t modifier, int w, int h,
-                       int n_planes, const int *fds, const unsigned *offsets, const unsigned *strides) {
+                       int n_planes, const int *fds, const unsigned *offsets, const unsigned *strides, int flip) {
 	VASurfaceID rgb = import_cached(e, drm_fourcc, modifier, w, h, n_planes, fds, offsets, strides);
 	if (rgb == VA_INVALID_ID)
 		return -1;
@@ -607,7 +609,7 @@ static int vpp_to_nv12(struct rva_enc *e, VASurfaceID target, uint32_t drm_fourc
 	memset(&pp, 0, sizeof(pp));
 	pp.surface = rgb;
 	pp.filter_flags = VA_FILTER_SCALING_HQ;
-	pp.mirror_state = VA_MIRROR_VERTICAL;
+	pp.mirror_state = flip ? VA_MIRROR_VERTICAL : VA_MIRROR_NONE;
 	VABufferID pbuf = VA_INVALID_ID;
 	int rc = -2;
 	VAStatus st = VA.CreateBuffer(e->dpy, e->vpp_ctx, VAProcPipelineParameterBufferType, sizeof(pp), 1, &pp, &pbuf);
@@ -708,12 +710,12 @@ fail:
 
 int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int h, int n_planes,
                   const int *fds, const unsigned *offsets, const unsigned *strides,
-                  int force_idr, unsigned char **au, int *au_len, int *keyframe) {
+                  int flip, int force_idr, unsigned char **au, int *au_len, int *keyframe) {
 	if (!e || !au || !au_len || !keyframe)
 		return -1;
 	*au_len = 0;
 	int idx = e->pp;
-	if (vpp_to_nv12(e, e->nv12[idx], drm_fourcc, modifier, w, h, n_planes, fds, offsets, strides) != 0)
+	if (vpp_to_nv12(e, e->nv12[idx], drm_fourcc, modifier, w, h, n_planes, fds, offsets, strides, flip) != 0)
 		return -2;
 	int idr = (e->since_idr == 0) || force_idr;
 	if (idr) {

@@ -68,7 +68,7 @@ func TestDMABufEncodeAPI(t *testing.T) {
 	var sawFirstKey bool
 	var start time.Time
 	warm := 30
-	pliAt := warm + 120
+	pliAt := warm + n/2 // request a keyframe mid-run (scales with frame count)
 	var pliKeyframeAfter bool
 	for i := 0; i < warm+n; i++ {
 		fr, err := esrc.Next(ctx)
