@@ -385,7 +385,8 @@ func (s *pwSource) AttachNativeTX(p medialink.NativeTXParams) (medialink.NativeT
 	rateBps := C.double(float64(p.BitrateKbps) * 1000 / 8) // kbps -> bytes/sec (0 = unpaced)
 	if C.rpw_attach_native_tx(s.h, C.int(transport), C.int(p.Codec), C.int(p.Stream), C.int(p.BodyMax),
 		chost, cport, C.int(enc), sk, C.uint(p.SendPrefix), rk, C.uint(p.RecvPrefix),
-		C.uint(p.Token), rateBps, C.ulonglong(p.InitialSeq), C.int(p.FPS), C.longlong(int64(p.StartupGrace))) == 0 {
+		C.uint(p.Token), rateBps, C.ulonglong(p.InitialSeq), C.int(p.FPS), C.longlong(int64(p.StartupGrace)),
+		C.longlong(p.MediaClockNs)) == 0 {
 		return nil, errors.New("pwcapture: rpw_attach_native_tx failed")
 	}
 	s.natAUs, s.natBytes, s.natCapTick = int64(C.rpw_enc_aus(s.h)), int64(C.rpw_enc_bytes(s.h)), int64(C.rpw_cap_frames(s.h))
@@ -426,6 +427,7 @@ func (t *pwNativeTX) Stats() medialink.NativeTXStats {
 		AUsDropped: uint64(st.aus_dropped), DatagramsSent: uint64(st.datagrams_sent),
 		BytesSent: uint64(st.bytes_sent), Retransmits: uint64(st.retransmits),
 		Seq: uint64(st.seq), QueueDepth: int(st.queue_depth), Dead: st.dead != 0,
+		NacksRecv: uint64(st.nacks_recv),
 		Keyframes: uint64(C.rpw_enc_keyframes(t.s.h)),
 		Enc:       stageSnap(&enc), Tx: stageSnap(&tx),
 	}

@@ -519,8 +519,8 @@ func formatRoutes(stats []medialink.RouteStat) string {
 		if jb := s.JB; jb != nil {
 			fmt.Fprintf(&b, "    jitterbuf depth=%d buffered=%d lateRate=%.2f policyDrops=%d\n",
 				jb.Depth, jb.Buffered, jb.LateRate, jb.PolicyDrops)
-			fmt.Fprintf(&b, "    playout preset=%s delay=%.1fms target=%.1fms max=%.0fms misses10m=%d repeated10m=%d grows=%d decays=%d\n",
-				jb.Preset, jb.PlayoutMs, jb.TargetMs, jb.MaxMs, jb.Misses10m, jb.Repeats10m, jb.Grows, jb.Decays)
+			fmt.Fprintf(&b, "    playout preset=%s delay=%.1fms target=%.1fms max=%.0fms misses10m=%d repeated10m=%d grows=%d decays=%d rebases=%d\n",
+				jb.Preset, jb.PlayoutMs, jb.TargetMs, jb.MaxMs, jb.Misses10m, jb.Repeats10m, jb.Grows, jb.Decays, jb.Rebases)
 		}
 		// STEP-0 per-stage inter-frame interval histograms (hang localization).
 		if st := s.Stages; st != nil {

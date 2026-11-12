@@ -1822,7 +1822,8 @@ int rpw_attach_native_tx(struct rpw_capture *c, int transport, int codec, int st
                          const unsigned char *send_key, unsigned send_prefix,
                          const unsigned char *recv_key, unsigned recv_prefix,
                          unsigned token, double initial_rate_bps,
-                         unsigned long long initial_seq, int fps, long long startup_grace_ns) {
+                         unsigned long long initial_seq, int fps, long long startup_grace_ns,
+                         long long media_clock_ns) {
 	if (!c || c->native_tx || !send_key || !recv_key)
 		return 0;
 	struct addrinfo hints, *res = NULL;
@@ -1853,6 +1854,7 @@ int rpw_attach_native_tx(struct rpw_capture *c, int transport, int codec, int st
 	p.initial_seq = (uint64_t)initial_seq; /* continue the Go handshake conn's seq space -> receiver rebinds */
 	p.fps = (int32_t)fps;
 	p.startup_grace_ns = (int64_t)startup_grace_ns; /* 0 -> native default */
+	p.media_clock_ns = (int64_t)media_clock_ns; /* ABI v3: PTS into the Go media-clock domain (0 = local mono) */
 	rm_sender *s = NULL;
 	rm_status st = rm_tx_open(&p, native_idr_cb, c, &s);
 	freeaddrinfo(res);

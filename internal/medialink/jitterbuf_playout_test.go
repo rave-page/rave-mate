@@ -242,3 +242,52 @@ func TestParsePlayoutPreset(t *testing.T) {
 		}
 	}
 }
+
+// stepTrace applies a persistent transit step of stepNs from atNs on (clock / PTS-domain step).
+func stepTrace(arr []simArrival, atNs, stepNs int64) {
+	for i := range arr {
+		if arr[i].at >= atNs {
+			arr[i].at += stepNs
+		}
+	}
+	sort.SliceStable(arr, func(i, j int) bool { return arr[i].at < arr[j].at })
+}
+
+// TestPlayoutClockStepRebases: a persistent +300 ms transit step (receiver clock / sender PTS-domain
+// step, live symptom: 355 misses in the first seconds at max margin) is re-anchored within ~1 s; the
+// run's misses are un-counted and the margin returns to its pre-step value. A step under the margin
+// re-anchors too (no silent margin consumption).
+func TestPlayoutClockStepRebases(t *testing.T) {
+	for _, step := range []int64{300e6, 80e6} {
+		rng := rand.New(rand.NewSource(9))
+		p := simProfile{fps: 60, durNs: 30e9, transitNs: 3e6, jitterNs: 1e6, keyEvery: 120}
+		arr := buildTrace(p, rng)
+		stepTrace(arr, 10e9, step)
+		b := newJitterBuffer(60, false)
+		r := runSim(b, arr, p.transitNs, 0)
+		s := b.statsAt(30e9)
+		t.Logf("step %d ms: rebases=%d misses10m=%d late=%d playout=%.1f target=%.1f repeats=%d", step/1e6, s.Rebases, s.Misses10m, s.Late, s.PlayoutMs, s.TargetMs, s.Repeats)
+		if s.Rebases != 1 || s.Misses10m != 0 || s.Late != 0 {
+			t.Fatalf("step %d: %+v", step, s)
+		}
+		if s.PlayoutMs != 150 || len(r.rel) != len(arr) || s.PolicyDrops != 0 {
+			t.Fatalf("step %d: margin/delivery after rebase: %+v released=%d/%d", step, s, len(r.rel), len(arr))
+		}
+	}
+}
+
+// TestPlayoutStartupSettlingNotCounted: the first second arrives with a much lower transit than the
+// steady state (encoder fill / first IDR / base settling); none of it may count as misses or repeats
+// and the margin must not be driven by it.
+func TestPlayoutStartupSettlingNotCounted(t *testing.T) {
+	rng := rand.New(rand.NewSource(11))
+	p := simProfile{fps: 60, durNs: 20e9, transitNs: 3e6, jitterNs: 1e6, keyEvery: 120}
+	arr := buildTrace(p, rng)
+	stepTrace(arr, 1e9, 200e6) // steady state 200 ms above the first second's transit
+	b := newJitterBuffer(60, false)
+	runSim(b, arr, p.transitNs, 0)
+	s := b.statsAt(20e9)
+	if s.Misses10m != 0 || s.PlayoutMs != 150 || s.Rebases != 1 {
+		t.Fatalf("startup settling counted: %+v", s)
+	}
+}
