@@ -443,8 +443,12 @@ func formatRoutes(stats []medialink.RouteStat) string {
 		if s.Encrypted {
 			enc = "encrypted"
 		}
-		line1 := fmt.Sprintf("%s  peer=%s  stream=%d  %s/%s",
-			s.Direction, peerShort(s.Peer), s.Stream, transport, enc)
+		impl := s.TransportImpl
+		if impl == "" {
+			impl = "go"
+		}
+		line1 := fmt.Sprintf("%s  peer=%s  stream=%d  %s/%s  impl=%s",
+			s.Direction, peerShort(s.Peer), s.Stream, transport, enc, impl)
 		if transport == medialink.TransportTCP && s.TCPReason != "" { // why not UDP (brief item 2)
 			line1 += "  (" + s.TCPReason + ")"
 		}

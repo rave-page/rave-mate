@@ -1120,6 +1120,24 @@ func (rm *RouteManager) pumpSource(ctx context.Context, session string, pa *pend
 	}
 	rm.trackRoute(session, ar)
 	rm.dropDuplicateSend(pa.peer, pa.offer.SourceID, session) // one send route per (peer, source): newest wins, bye the old
+	// Native send path (owner directive 2026-11-12): a source that can push its encoded AUs straight to
+	// the native sender takes over the per-frame path; the Go media pump + Go control/report loops do
+	// NOT run - the native sender owns its own socket, NACK, keepalive and liveness. The receiver rebinds
+	// its remote to the native socket on the native sender's first (strictly-newest) datagram. Anything
+	// unsupported (TCP, legacy peer, attach error) falls through to the Go pump unchanged.
+	if tx, ok := rm.tryAttachNativeTX(pa, udp, src); ok {
+		st.setTransportImpl("native")
+		rm.infof("route up (send) [native tx]", map[string]any{"session": session, "peer": pa.peer,
+			"source": pa.offer.SourceID, "stream": pa.stream, "transport": transportName(udp)})
+		if udp != nil {
+			udp.Close() // stop the Go answerer conn's media role; the native sender is the sole sender
+		}
+		rm.superviseNativeTX(rctx, cancel, tx, rio)
+		_ = src.Close()
+		rm.endRoute(session, conn, tx.Err(), "send")
+		return
+	}
+	st.setTransportImpl("go")
 	rm.infof("route up (send)", map[string]any{"session": session, "peer": pa.peer, "source": pa.offer.SourceID,
 		"stream": pa.stream, "transport": transportName(udp)})
 	go rm.guard("sendControl", func() { rm.sendControl(cancel, rio, src) })
@@ -1132,6 +1150,67 @@ func (rm *RouteManager) pumpSource(ctx context.Context, session string, pa *pend
 		udp.sendBye() // §2.5: notify the receiver of a clean end so it ends now, not via a liveness blackout
 	}
 	rm.endRoute(session, conn, err, "send")
+}
+
+// tryAttachNativeTX hands a native-capable source's encoded AU stream to the native sender when the
+// route is natively supported (UDP + per-route keys + the receiver's remote known). Returns (tx,true)
+// on success; (nil,false) → the caller runs the Go pump unchanged.
+func (rm *RouteManager) tryAttachNativeTX(pa *pendingAnswer, udp *udpConn, src Source) (NativeTX, bool) {
+	nts, ok := src.(NativeTXSource)
+	if !ok {
+		return nil, false
+	}
+	if udp == nil || pa.salt == nil { // TCP not native yet; legacy peer has no per-route nonce
+		return nil, false
+	}
+	raddr := udp.remoteAddr()
+	if raddr == nil {
+		return nil, false // receiver not bound yet
+	}
+	sec, ok := rm.secrets.MediaSecret(pa.peer)
+	if !ok {
+		return nil, false
+	}
+	sk, skp, rk, rkp, err := deriveRouteKeysRaw(sec, pa.salt, false) // answerer = responder
+	if err != nil {
+		return nil, false
+	}
+	codec := CodecH264
+	if pa.choice != nil {
+		codec = pa.choice.Codec
+	}
+	params := NativeTXParams{
+		Transport: TransportUDP, Codec: codec, Stream: pa.stream, BodyMax: dgDefaultPayload,
+		PeerAddr: raddr.String(), SocketFD: -1, Encrypt: pa.encrypt,
+		SendKey: sk, SendPrefix: skp, RecvKey: rk, RecvPrefix: rkp, Token: pa.token,
+		InitialSeq: udp.sendSeq(), BitrateKbps: pa.offer.Bitrate, FPS: int(pa.srcDesc.FPS),
+		StartupGrace: udpDefStartupGrace,
+	}
+	tx, err := nts.AttachNativeTX(params)
+	if err != nil {
+		rm.warnf("native tx attach failed - Go pump fallback", map[string]any{"session": pa.offer.Session, "error": err.Error()})
+		return nil, false
+	}
+	return tx, true
+}
+
+// superviseNativeTX supervises a native sender: 1 Hz stats into RouteStat, Done()/ctx → route end.
+func (rm *RouteManager) superviseNativeTX(ctx context.Context, cancel context.CancelFunc, tx NativeTX, rio *routeIO) {
+	defer cancel()
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			_ = tx.Close()
+			return
+		case <-tx.Done():
+			_ = tx.Close() // native ended on its own (blackout/fatal/bye) - free it
+			return
+		case <-t.C:
+			rio.st.setNativeStats(tx.Stats())
+		}
+	}
 }
 
 // sendControl is the send side's read loop: the peer's receiver reports, clock-sync pings, and
