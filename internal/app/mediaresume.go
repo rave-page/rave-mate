@@ -38,6 +38,7 @@ const (
 	reoffBase        = 1 * time.Second
 	reoffCap         = 30 * time.Second
 	reoffResetStable = 5 * time.Second
+	reoffHeldRecheck = 2 * time.Second // VRAM-held source: local admission re-check cadence (no offer sent)
 )
 
 type reoffBackoff struct {
@@ -142,6 +143,13 @@ func (r *rememberingReceives) reconcile() {
 			continue // backing off from a recent attempt
 		}
 		if _, err := r.ReceiveControl.StartReceive(w.Peer, w.SourceID); err != nil {
+			if mediaroute.IsHeld(err) {
+				// Pre-offer VRAM hold: nothing was sent to the source PC; re-check admission locally on a
+				// short fixed cadence (cheap) so the route comes up promptly once VRAM is freed. The hold
+				// is logged by mediaroute on entry/exit, not per tick.
+				b.next = now.Add(reoffHeldRecheck)
+				continue
+			}
 			r.armBackoff(b, now)
 			r.log.Debug("mediaroute", "auto-reactivate deferred", map[string]any{
 				"peer": w.Peer, "source": w.SourceID, "err": err.Error()})

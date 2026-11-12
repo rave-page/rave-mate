@@ -168,7 +168,8 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 			}
 			return gpumem.ReadHeadroom(gpuSampler)
 		},
-		AdmitSender: f.vram.AdmitSender, // unified budget gate (static-floor fallback stays via Headroom)
+		AdmitSender:  f.vram.AdmitSender, // unified budget gate (static-floor fallback stays via Headroom)
+		AdmitReceive: f.vram.AdmitReceive,
 	})
 
 	// Throughput micro-benchmark: lazy + idle-gated, skips while any route is live. Feeds the

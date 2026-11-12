@@ -856,7 +856,8 @@ func run(parent context.Context, serviceMode bool) error {
 			}
 			return gpumem.ReadHeadroom(gpuGovSampler)
 		},
-		AdmitSender: vramBudget.AdmitSender,
+		AdmitSender:  vramBudget.AdmitSender,
+		AdmitReceive: vramBudget.AdmitReceive,
 	})
 
 	// medialink P3: timecode plane. Elects one TC master across paired instances (media.tc

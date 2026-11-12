@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ type fakeRecv struct {
 	avail  []mediaroute.RemoteSource
 	recvs  []mediaroute.Receive
 	starts int
+	held   bool // StartReceive answers a pre-offer VRAM hold
 }
 
 func (f *fakeRecv) Start(context.Context)                         {}
@@ -31,6 +33,9 @@ func (f *fakeRecv) Testcard(string, int, int, int) (testcard.Report, error) {
 }
 func (f *fakeRecv) StartReceive(peer, src string) (string, error) {
 	f.starts++
+	if f.held {
+		return "", errors.New("mediaroute: held: \"VRC\": VRAM budget refuses a new Spout sender - no offer sent")
+	}
 	// Models an in-flight offer: a receive entry exists immediately (Since now), not yet live/up.
 	f.recvs = append(f.recvs, mediaroute.Receive{Session: "sess", Peer: peer, SourceID: src, Since: time.Now()})
 	return "sess", nil
@@ -141,5 +146,27 @@ func TestReoffBackoffBoundedAndResets(t *testing.T) {
 	rr.noteLive(b2, now.Add(reoffResetStable+1)) // stable → reset
 	if b2.interval != reoffBase || !b2.next.IsZero() {
 		t.Fatalf("stable live route did not reset backoff: interval=%v next=%v", b2.interval, b2.next)
+	}
+}
+
+// A VRAM-held source (pre-offer refusal) is re-checked on the short fixed cadence, never pushed into
+// the exponential backoff (it sent nothing to the source PC), and offers as soon as it is admitted.
+func TestReconcileHeldRechecksWithoutBackoff(t *testing.T) {
+	f := &fakeRecv{avail: []mediaroute.RemoteSource{srcAvail("p1", "vrc")}, held: true}
+	rr := newRR(f, config.RememberedReceive{Peer: "p1", SourceID: "vrc"})
+	rr.reconcile()
+	b := rr.backoff["p1\x00vrc"]
+	if f.starts != 1 || b.interval != reoffBase || time.Until(b.next) > reoffHeldRecheck {
+		t.Fatalf("held: starts=%d interval=%v next in %v", f.starts, b.interval, time.Until(b.next))
+	}
+	rr.reconcile() // inside the recheck window: no call at all
+	if f.starts != 1 {
+		t.Fatalf("held recheck hammered: starts=%d", f.starts)
+	}
+	b.next = time.Time{}
+	f.held = false
+	rr.reconcile()
+	if f.starts != 2 || len(f.recvs) != 1 {
+		t.Fatalf("admitted source not offered: starts=%d recvs=%d", f.starts, len(f.recvs))
 	}
 }
