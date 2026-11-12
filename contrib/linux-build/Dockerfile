@@ -11,7 +11,7 @@ RUN set -eux; \
     printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/%s trixie-security main\n' "$APT_SNAPSHOT" >> /etc/apt/sources.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        ca-certificates curl git pkg-config build-essential \
+        ca-certificates curl git pkg-config build-essential xz-utils \
         libgl1-mesa-dev xorg-dev libasound2-dev libwayland-dev \
         libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libegl1-mesa-dev \
         libx11-xcb-dev libxcursor-dev libxfixes-dev \
@@ -26,6 +26,17 @@ RUN set -eux; cd /tmp; \
     echo "${GO_SHA256}  go${GO_VERSION}.linux-amd64.tar.gz" | sha256sum -c -; \
     tar -C /usr/local -xzf "go${GO_VERSION}.linux-amd64.tar.gz"; \
     rm -f "go${GO_VERSION}.linux-amd64.tar.gz"
+# Zig toolchain: builds native/zigmedia (realtime TX C ABI, libravemedia.a). Tarball SHA-256-pinned.
+ARG ZIG_VERSION=0.16.0
+ARG ZIG_SHA256=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
+RUN set -eux; cd /tmp; \
+    curl -fsSLO "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"; \
+    echo "${ZIG_SHA256}  zig-x86_64-linux-${ZIG_VERSION}.tar.xz" | sha256sum -c -; \
+    tar -C /usr/local -xJf "zig-x86_64-linux-${ZIG_VERSION}.tar.xz"; \
+    ln -s "/usr/local/zig-x86_64-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig; \
+    rm -f "zig-x86_64-linux-${ZIG_VERSION}.tar.xz"; \
+    zig version
+
 ENV PATH=/usr/local/go/bin:/root/go/bin:$PATH \
     GOTOOLCHAIN=local \
     GOFLAGS=-mod=readonly \

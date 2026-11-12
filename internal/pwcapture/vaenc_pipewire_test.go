@@ -220,6 +220,86 @@ func max1(n int) int {
 	return n
 }
 
+// TestNativeTXSend drives the native realtime send path end-to-end on the SENDER side: capture -> VA
+// encode -> AttachNativeTX -> rm_tx_submit_au (no Go pump). It verifies the C+Go wiring + the native
+// sender attach/submit/stats on real hardware. Datagrams go to a dummy peer (no receiver => no decode
+// check; end-to-end decode needs a paired UDP receiver, which the owner's TCP route doesn't provide).
+// Set RPW_TEST_NODE + RPW_NATIVE_TX; RPW_NATIVE_PEER (default 127.0.0.1:48999), RPW_ENC_CODEC/KBPS.
+func TestNativeTXSend(t *testing.T) {
+	node := os.Getenv("RPW_TEST_NODE")
+	if node == "" || os.Getenv("RPW_NATIVE_TX") == "" {
+		t.Skip("set RPW_TEST_NODE + RPW_NATIVE_TX")
+	}
+	if !captureAvailable() || !VAEncodeAvailable() {
+		t.Skip("pwcapture/VA not available")
+	}
+	secs := 6
+	if v, err := strconv.Atoi(os.Getenv("RPW_NATIVE_TX_SECS")); err == nil && v > 0 {
+		secs = v
+	}
+	peer := os.Getenv("RPW_NATIVE_PEER")
+	if peer == "" {
+		peer = "127.0.0.1:48999"
+	}
+	node4 := os.Getenv("RPW_EGL_DEVICE")
+	if node4 == "" {
+		node4 = "/dev/dri/renderD128"
+	}
+	kbps, _ := strconv.Atoi(os.Getenv("RPW_ENC_KBPS"))
+	if kbps == 0 {
+		kbps = 8000
+	}
+	encoder, codec := medialink.EncoderVAAPINativeH264, medialink.CodecH264
+	if os.Getenv("RPW_ENC_CODEC") == "hevc" {
+		encoder, codec = medialink.EncoderVAAPINativeHEVC, medialink.CodecHEVC
+	}
+	src, err := openCapture(context.Background(), nil, node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = src.Close() }()
+	de := src.(medialink.DMABufEncodeSource)
+	spec := medialink.EncodeSpec{Encoder: encoder, Codec: codec, FPS: 60,
+		BitrateKbps: kbps, QualityTarget: medialink.QualityDefault, VAAPIRenderNode: node4}
+	esrc, started, err := de.StartDMABufEncode(spec)
+	if err != nil || !started {
+		t.Fatalf("StartDMABufEncode started=%v err=%v", started, err)
+	}
+	ntxs, ok := esrc.(medialink.NativeTXSource)
+	if !ok {
+		t.Fatal("source is not a NativeTXSource")
+	}
+	var sk, rk [32]byte // plaintext test (Encrypt=false): AEAD keys unused
+	p := medialink.NativeTXParams{
+		Transport: medialink.TransportUDP, Codec: codec, Stream: 1, BodyMax: 0,
+		PeerAddr: peer, SocketFD: -1, Encrypt: false,
+		SendKey: sk, SendPrefix: 1, RecvKey: rk, RecvPrefix: 2, Token: 0x1234,
+		BitrateKbps: kbps, FPS: 60,
+	}
+	tx, err := ntxs.AttachNativeTX(p)
+	if err != nil {
+		t.Fatalf("AttachNativeTX: %v", err)
+	}
+	defer func() { _ = tx.Close() }()
+	var st medialink.NativeTXStats
+	for i := 0; i < secs; i++ {
+		select {
+		case <-tx.Done():
+			t.Fatalf("native sender ended early (%ds): %v", i, tx.Err())
+		case <-time.After(time.Second):
+		}
+		st = tx.Stats()
+		t.Logf("NATIVE-TX t=%ds submitted=%d sent=%d dropped=%d datagrams=%d bytes=%d qdepth=%d dead=%v",
+			i+1, st.AUsSubmitted, st.AUsSent, st.AUsDropped, st.DatagramsSent, st.BytesSent, st.QueueDepth, st.Dead)
+	}
+	if st.AUsSubmitted < uint64(secs*40) {
+		t.Errorf("too few AUs submitted (%d) in %ds - native submit path not flowing", st.AUsSubmitted, secs)
+	}
+	if st.Dead {
+		t.Error("native sender dead")
+	}
+}
+
 // TestDMABufEncodeHistogram measures the per-frame DELIVERY cadence of the capture+encode engine as a
 // read-only second consumer: inter-AU interval p50/p99/max + counts over 25/50 ms, newest-wins drops,
 // capture/encode fps. This is the stutter oracle - an even source should yield a tight histogram; a

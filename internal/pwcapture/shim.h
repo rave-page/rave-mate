@@ -6,6 +6,8 @@
 #ifndef RAVE_PWCAPTURE_SHIM_H
 #define RAVE_PWCAPTURE_SHIM_H
 
+#include <ravemedia.h> /* native TX stats type (rm_tx_stats); -I set in capture_pipewire.go cgo CFLAGS */
+
 struct rpw_capture; /* opaque; defined in shim.c */
 
 /* rpw_available dlopens libpipewire-0.3 and resolves the symbols we need. 1 = usable. */
@@ -76,6 +78,18 @@ int rpw_ring_hiwater(struct rpw_capture *c);
 long rpw_ring_overflow(struct rpw_capture *c);
 long rpw_cap_drops(struct rpw_capture *c);
 long rpw_grid_drops(struct rpw_capture *c);
+
+/* ---- native realtime TX (unit 3) ---- */
+/* rpw_attach_native_tx opens a native sender + routes the encode thread to it. 1 = native engaged,
+ * 0 = failure (keep the Go-ring fallback). transport 0=UDP/1=TCP; codec 4=H264/5=HEVC/6=AV1. */
+int rpw_attach_native_tx(struct rpw_capture *c, int transport, int codec, int stream, int body_max,
+                         const char *peer_host, const char *peer_port, int encrypt,
+                         const unsigned char *send_key, unsigned send_prefix,
+                         const unsigned char *recv_key, unsigned recv_prefix,
+                         unsigned token, double initial_rate_bps);
+void rpw_native_tx_set_rate(struct rpw_capture *c, double bytes_per_sec);
+void rpw_native_tx_stats(struct rpw_capture *c, rm_tx_stats *out);
+void rpw_native_tx_close(struct rpw_capture *c);
 
 /* rpw_stop disconnects + frees the capture. */
 void rpw_stop(struct rpw_capture *c);

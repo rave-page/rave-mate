@@ -25,6 +25,7 @@
 #include <gbm.h>
 
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -96,13 +97,45 @@ static int read_full(int fd, unsigned char *buf, size_t n) {
 // published top-down like Spout2PW) into every published dmabuf buffer; frame-doubling re-publishes
 // the SAME texture so the 60 Hz cadence is exercised with real 4K content from a 30 fps source.
 static GLuint g_srctex, g_readfb;
-static unsigned char *g_srcbuf;
 static int g_flipy = 1;
+// Read-ahead: a reader thread fills a 3-slot mailbox from stdin, so the present loop never blocks on
+// the (bursty) ffmpeg pipe -> the producer's own cadence stays even (a valid reference for the owner's
+// recorded-set test). The present loop paces at the target fps and holds the last frame between source
+// frames (so a 30 fps file shown at 60 repeats each frame ~2x, evenly). Triple-buffer: reader owns
+// one slot, main owns one, the third holds the latest; swaps keep the three distinct, the lock guards
+// only the index swap (never the frame copy).
+static unsigned char *g_buf[3];
+static int g_bw, g_bh;
+static size_t g_fsz;
+static int g_reader_i = 0, g_ready_i = 1, g_main_i = 2, g_dirty, g_eof, g_have_frame;
+static pthread_mutex_t g_bmu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_t g_reader_th;
+
+static void *stdin_reader(void *arg) {
+	(void)arg;
+	while (read_full(0, g_buf[g_reader_i], g_fsz)) {
+		pthread_mutex_lock(&g_bmu);
+		int t = g_ready_i;
+		g_ready_i = g_reader_i;
+		g_reader_i = t;
+		g_dirty = 1;
+		pthread_mutex_unlock(&g_bmu);
+	}
+	pthread_mutex_lock(&g_bmu);
+	g_eof = 1;
+	pthread_mutex_unlock(&g_bmu);
+	return NULL;
+}
 
 static void stdin_setup(int w, int h) {
-	g_srcbuf = malloc((size_t)w * h * 4);
-	if (!g_srcbuf)
-		die("malloc srcbuf");
+	g_bw = w;
+	g_bh = h;
+	g_fsz = (size_t)w * h * 4;
+	for (int i = 0; i < 3; i++) {
+		g_buf[i] = malloc(g_fsz);
+		if (!g_buf[i])
+			die("malloc srcbuf");
+	}
 	glGenTextures(1, &g_srctex);
 	glBindTexture(GL_TEXTURE_2D, g_srctex);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -114,15 +147,29 @@ static void stdin_setup(int w, int h) {
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 	if (getenv("RPW_PROD_NOFLIPY"))
 		g_flipy = 0;
+	pthread_create(&g_reader_th, NULL, stdin_reader, NULL);
 }
 
-// stdin_read_frame: pull one BGRA frame from stdin into the texture. Returns 0 on EOF.
-static int stdin_read_frame(int w, int h) {
-	if (!read_full(0, g_srcbuf, (size_t)w * h * 4))
-		return 0;
-	glBindTexture(GL_TEXTURE_2D, g_srctex);
-	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_BGRA, GL_UNSIGNED_BYTE, g_srcbuf);
-	return 1;
+// stdin_grab: non-blocking - if the reader has a newer frame, swap it in + upload it; else hold the
+// current texture (frame-hold). Returns 1 once any frame has arrived, plus whether the reader is done.
+static int stdin_grab(int *eof_out) {
+	int got = 0;
+	pthread_mutex_lock(&g_bmu);
+	if (g_dirty) {
+		int t = g_main_i;
+		g_main_i = g_ready_i;
+		g_ready_i = t;
+		g_dirty = 0;
+		got = 1;
+	}
+	*eof_out = g_eof && !g_dirty;
+	pthread_mutex_unlock(&g_bmu);
+	if (got) {
+		glBindTexture(GL_TEXTURE_2D, g_srctex);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, g_bw, g_bh, GL_BGRA, GL_UNSIGNED_BYTE, g_buf[g_main_i]);
+		g_have_frame = 1;
+	}
+	return g_have_frame;
 }
 
 // blit_src: copy the current src texture into the bound DRAW fbo (the dmabuf), optional Y-flip.
@@ -335,11 +382,25 @@ int main(int argc, char **argv) {
 			fps_t0 = tn;
 			fps_f0 = frame;
 		}
-		// stdin mode: pull a NEW source frame every `dbl` published frames (frame-doubling).
-		if (mode == M_STDIN && (frame % (unsigned)dbl) == 0) {
-			if (!stdin_read_frame(w, h)) {
-				eof = 1;
-				break;
+		// stdin mode: grab the latest decoded frame (non-blocking; the reader thread fills the mailbox).
+		// The present cadence stays even regardless of ffmpeg's bursts - frame-hold between source frames.
+		if (mode == M_STDIN) {
+			int done = 0;
+			int ready = stdin_grab(&done);
+			if (!ready) {
+				if (done) {
+					eof = 1;
+					break;
+				}
+				next += period; /* no frame yet: pace + retry, never publish an empty texture */
+				double dt = next - now_s();
+				if (dt > 0) {
+					struct timespec ts = {(time_t)dt, (long)((dt - (time_t)dt) * 1e9)};
+					nanosleep(&ts, NULL);
+				} else {
+					next = now_s();
+				}
+				continue;
 			}
 		}
 		struct funnel_buffer *buf = NULL;

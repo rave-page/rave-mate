@@ -26,6 +26,16 @@ echo "== go env =="
 go version
 echo "GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=$(go env CGO_ENABLED) tags='${RM_TAGS}'"
 
+# A -tags pipewire build links libravemedia.a (native realtime TX). Build it with the pinned Zig into a
+# writable prefix (the source mount is read-only) and point cgo's linker at it via CGO_LDFLAGS.
+if printf '%s' " ${RM_TAGS} " | grep -q ' pipewire '; then
+    echo "== build libravemedia (native/zigmedia) =="
+    mkdir -p /tmp/zm /tmp/zc
+    ( cd /src/native/zigmedia && zig build -Dtarget=x86_64-linux-gnu --prefix /tmp/zm --cache-dir /tmp/zc )
+    export CGO_LDFLAGS="-L/tmp/zm/lib ${CGO_LDFLAGS:-}"
+    ls -l /tmp/zm/lib/
+fi
+
 echo "== build =="
 if [ -n "${RM_TAGS}" ]; then
     go build -tags "${RM_TAGS}" -ldflags "${LDFLAGS}" -o /out/rave-mate "${RM_PKG}"
