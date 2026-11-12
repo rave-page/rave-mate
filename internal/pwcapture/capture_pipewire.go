@@ -321,9 +321,11 @@ func (s *pwSource) PipeStats() medialink.PipelineStats {
 	if !s.encMode {
 		return medialink.PipelineStats{}
 	}
-	drops := uint64(C.rpw_enc_drops(s.h)) + uint64(C.rpw_ring_skips(s.h)) // encode errors + downstream-stall skips
-	qdepth := int(C.rpw_ring_depth(s.h))                                  // AUs buffered in the lock-free hand-off ring
-	if s.nativeOn.Load() {                                                // native route: the sender's queue + its drops
+	// real loss: encode errors + downstream-stall skips + capture hand-off drops (encoder behind under GPU
+	// contention: graceful newest-wins, never blocks the PipeWire callback - but visible, not silent)
+	drops := uint64(C.rpw_enc_drops(s.h)) + uint64(C.rpw_ring_skips(s.h)) + uint64(C.rpw_cap_drops(s.h))
+	qdepth := int(C.rpw_ring_depth(s.h)) // AUs buffered in the lock-free hand-off ring
+	if s.nativeOn.Load() {               // native route: the sender's queue + its drops
 		var ns C.rm_tx_stats
 		C.rpw_native_tx_stats(s.h, &ns)
 		qdepth = int(ns.queue_depth)

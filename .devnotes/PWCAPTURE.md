@@ -387,6 +387,96 @@ set a real ceiling.)
   so an actively-captured node shows 60; @0 only appears when idle (variable advert, nothing to measure).
 
 ### Still unverified / follow-ups
-- **Dedicated encode thread** (robust >=59.5 under heavy contention) - the current fused path already
+- ~~Dedicated encode thread~~ DONE (B.2) + cadence/ride-through (shim2 pass below). The fused path already
   measured ~59-60 fps at 4K on the real node; the thread is insurance.
 - Full two-PC route through the real media child end-to-end (the lead runs the real rig).
+
+## Linux shim2 pass (feat/linux-shim2, 2026-11-12) - bar-route bug, ride-through, native telemetry, quality
+
+### Bar route ~1 fps after daemon restart - ROOT CAUSE (cc0e9442)
+Not the PTS grid. `egl_load`/`va_load` were unguarded one-time loaders that published 0 BEFORE loading.
+A daemon restart starts every remembered route at once; the losing capture read "no EGL", built a
+**SHM-only EnumFormat**, and the dmabuf-only libfunnel producer failed every link (`pw.link ...
+negotiating -> error no more input formats`, journal flood) -> reconnect churn ~40/s (108k on the
+live bar route), 0 frames, forever; the receiver saw only ~1 Hz idle traffic (`fps wire=1 out=0`,
+~83 B "frames"). Fix: mutex-serialized loaders, EGL setup retried on reconnect when the offer is
+SHM-only, reconnect backoff 50 ms -> 2 s while no frame arrives (reset on any frame). Telemetry log
+now carries `node` + `dmabufOffer`. Tests: `TestConcurrentStartDMABufOffer` (8 concurrent starts:
+old code FAILED 3/3), `TestReconnectBackoff` (10 reconnects / 8 s vs ~300).
+
+### Ride-through (4e3f74dd) - numbers before -> after (4K60 bar / DJ-set source, sus)
+| case | before (175b42ec) | after |
+|---|---|---|
+| 10 fps source, route 60 | 10 AU/s, every interval 100 ms | 60.0 AU/s, max 19.6 ms (repeats) |
+| producer hitch 150 ms x5 | max 164 ms, 5 gaps > 50 ms | max 27 ms, 0 > 50 ms (41 repeats) |
+| producer restart (1080p) | output FROZE/looped: 39 unique of last 200 decoded frames | 200/200 unique, IDR on resume |
+| downstream jitter 0-150 ms (overload) | 112 keyframes/10 s, 246 drops | 3 keyframes, 0 forced IDR |
+| downstream stall 150-300 ms @1/min, 10 min (1080p) | - | 59.94 fps, 0 forced IDR, keyframes = GOP only (300), 38 pre-encode skips, max 32 ms |
+| route start, consumer 600 ms late | live: ringOverflow 38/route (IDR storm) | first AU IDR, 0 drops, 0 burst, holds 34 |
+| two concurrent 4K encodes + VRChat | - | both 60.00 fps, max 17.6 ms |
+- Cadence: encode thread flushes the pipelined frame when the next is late (1.5p) and re-encodes the
+  last VPP output (P-skip) on an even grid while STREAMING (`rva_enc_flush`/`rva_enc_repeat`). AU PTS
+  = its own frame (was the next frame's); arrival-stamped monotonic when no header PTS (libfunnel has
+  none; was 0 on native TX).
+- Import cache keyed by fd + dmabuf inode (fd numbers are reused by the restarted producer's pool).
+- AU ring 3 -> 12 (200 ms), room checked PRE-encode (skip = no ref break, no IDR); start-up hold
+  until the first AU (IDR) is read. `RPW_ENC_SYNC=1` = no 1-frame pipeline (A/B knob).
+- GPU contention: callback only hands off (never blocks); capture hand-off drops now count in
+  `PipeStats.Dropped` (visible degradation). 4 concurrent 4K encodes on the live VRChat node: 38-60 fps
+  per consumer, the owner's route held out=58.
+
+### Native-path telemetry (aa8a0005)
+Lock-free per-AU interval histograms in the shim (enc = encoder out, tx = queued to the native
+sender; StageHist buckets), percentiles computed natively at Go's 1 Hz sample; out/cap fps, queue,
+drops, keyframes fed from C counters. medialink: `NativeTXStats.Keyframes/Enc/Tx`, `setNativeStats`
+folds them. Rig: outFps 59.9, enc n=357 p50 17 p99 17 max 19.1 ms (were 0/empty).
+
+### Constant-quality validation (891ce1d9) - DJ-set recording, 300-frame cells
+Controller fix first: the 1-s peak broke ceiling x1.1 (1080p H.264 @10M q70: 13.8 Mbps = 1.38x).
+Now proportional raise (`ceil(6*log2(rate/0.95c))`, <= +8/window), IDR bits amortized over the GOP,
+release half the headroom after ~1 s. After (avg / max1s Mbps, avgQP, RL%):
+| | 10 Mbps | 25 Mbps | 50 Mbps |
+|---|---|---|---|
+| 1080p H.264 q50/70/85 | 6.4/7.9 QP30.5 90% ; 7.2/8.5 QP32 100% ; 7.9/9.9 QP26 80% | 8.8/11.8 ; 10.8/14.8 ; 14.3/16.5 (no RL) | 7.6/10.6 ; 10.0/14.1 ; 12.8/16.5 |
+| 1080p HEVC q50/70/85 | 5.3/8.3 ; 7.2/9.6 QP29 100% ; 6.9/9.3 QP25 60% | 4.7/7.0 ; 6.4/9.0 ; 9.2/10.7 | 3.9/5.3 ; 6.0/9.1 ; 8.2/10.4 |
+| 4K H.264 q50/70/85 | 6.5/10.1 QP43 ; 7.3/10.8 QP45 ; 8.1/9.7 QP37 (all RL) | 17.3/22.6 ; 16.2/20.3 ; 17.4/19.7 (RL) | 21.0/29.6 ; 27.0/38.5 ; 31.9/37.6 |
+| 4K HEVC q50/70/85 | 6.5/7.9 ; 7.1/8.5 ; 6.3/9.5 (RL) | 11.2/18.4 ; 11.2/12.7 ; 18.6/21.8 | 11.7/13.8 ; 12.1/23.6 ; 17.2/20.4 |
+All max1s <= 1.08x ceiling. fps 60 except some 4K HEVC cells at 51-54 (DJ producer's 4K stdin upload
+under VRChat load; not reproduced on the bar source). Cells run sequentially on advancing content.
+
+PSNR/SSIM vs an HEVC-CQP10 reference recorded from the SAME buffers (`TestQualityPair`, frames paired
+by capture PTS), same content segment per q, ceiling 50 Mbps:
+| | q50 | q70 | q85 |
+|---|---|---|---|
+| 1080p H.264 | 42.4 dB / 0.967 @11.5 | 45.1 / 0.981 @15.3 | 46.7 / 0.986 @20.6 |
+| 1080p HEVC | 42.3 / 0.967 @4.6 | 44.5 / 0.978 @8.3 | 46.2 / 0.984 @13.0 |
+| 4K H.264 | 44.0 / 0.978 @31.3 | 44.5 / 0.980 @33.1 (RL) | 44.8 / 0.981 @40.8 (RL) |
+| 4K HEVC | 44.0 / 0.977 @18.1 | 45.6 / 0.982 @27.5 | 45.7 / 0.982 @31.5 (RL) |
+| 4K HEVC, live VRChat node | 41.7 / 0.971 @9.9 | 44.2 / 0.981 @21.5 | 45.9 / 0.985 @31.1 |
+**Default 70 stays (deliberate):** q50->q70 buys +1.5..2.5 dB for ~1.6-1.8x bits; q70->q85 buys
++0.1..1.7 dB for +25-60% bits and at 4K binds a 50 Mbps ceiling (RL) for ~0.1 dB. q70 sits at the
+knee (~44.5-45.6 dB, SSIM ~0.98). The QP map spans only 7 QP over q50..85 (0.2 QP/step) - fine for
+a default, too flat for a user-facing slider (follow-up if exposed).
+
+### PTS-grid on a jittery ~60 fps source + reference producers (unit 5)
+- The B.3 PTS grid gated EVERY source; libfunnel carries no header PTS, so the arrival clock jitter
+  made the grid drop every other frame of a 4K60 `-stdin` producer (capFps 30, gridDrops 331/11 s;
+  the cadence fill masked it as out 60). Now the grid decimates only when the measured source interval
+  (EMA) is < 0.75 period (a real 120->60 source); a ~rate source passes every frame (capFps 60.0,
+  gridDrops 0). The live VRChat node negotiates 60 itself (gridDrops 0 either way).
+- `funnel-producer -stdin`: the 33 MB/frame 4K texture upload moved after the present (into the
+  sleep slack): present max 23 ms -> 17-18 ms. `/tmp/pw4ktest/funnel-producer` on sus = this build
+  (sha256 bfc19c2d...; libfunnel*.so unchanged). The DJ file must be fed with `ffmpeg -re` (without
+  it ffmpeg decodes at ~5x and the read-ahead mailbox plays the set fast-forward).
+- Start (as root on sus; stop = `pkill -f "[f]unnel-producer 3840 2160 60 <name>"`, ffmpeg exits on
+  EPIPE):
+  - DJ set 4K60: `runuser -u dymattic -- env XDG_RUNTIME_DIR=/run/user/1000 LD_LIBRARY_PATH=/tmp/pw4ktest
+    setsid sh -c 'cd /tmp/pw4ktest && ffmpeg -nostdin -v error -re -hwaccel vaapi -hwaccel_output_format
+    vaapi -i "/mnt/lilbiatch/E/media/recordings/2026-11-10 22-00-27.mp4" -vf hwdownload,format=bgra -an
+    -f rawvideo -pix_fmt bgra - 2>ff_djset.log | ./funnel-producer 3840 2160 60 djset -stdin -either
+    >prod_djset.log 2>&1' </dev/null >/dev/null 2>&1 &`
+  - bar 4K60: `runuser -u dymattic -- env XDG_RUNTIME_DIR=/run/user/1000 LD_LIBRARY_PATH=/tmp/pw4ktest
+    setsid sh -c 'cd /tmp/pw4ktest && ./funnel-producer 3840 2160 60 bar4k -bar -either >prod_bar4k.log
+    2>&1' </dev/null >/dev/null 2>&1 &`
+  Verified with the same pipelines as children (w/ a histogram consumer, 10 s): DJ present max
+  17.0-18.2 ms, consumer 60.01 fps max 18.8 ms; bar present max 16.7-17.8 ms, consumer 60.00 fps.

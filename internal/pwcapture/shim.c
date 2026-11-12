@@ -427,6 +427,7 @@ struct rpw_capture {
 	 * source time (not bunched by the callback's own timing). grid_drops = sub-grid frames paced out
 	 * (deliberate rate-cap, PRE-encode -> no reference break, no IDR; surfaced as RateCapped). */
 	long long enc_grid_next; /* next grid PTS (ns); 0 = uninitialised */
+	long long grid_last_pts, grid_src_iv; /* loop thread: last frame PTS + source interval EMA (ns) */
 	long grid_drops;
 	int enc_src_w, enc_src_h; /* source dims the encoder was built for (recreate on change) */
 	/* robustness (encode thread writes, getters read): */
@@ -1011,6 +1012,8 @@ static void on_param_changed(void *data, uint32_t id, const struct spa_pod *para
 	c->force_idr = 1; /* (re)negotiated = new producer/pool: resume on an IDR */
 	pthread_mutex_unlock(&c->mu);
 	c->enc_grid_next = 0; /* loop-thread-owned: re-prime the PTS grid (new producer = new PTS origin) */
+	c->grid_last_pts = 0;
+	c->grid_src_iv = 0;
 	DBG("format: %dx%d fmt=%d dmabuf=%d mod=0x%llx\n", c->width, c->height, c->fmt, c->is_dmabuf, (unsigned long long)c->modifier);
 	request_buffers(c, c->is_dmabuf);
 }
@@ -1362,7 +1365,20 @@ static void on_process(void *data) {
 					if (c->enc_fps > 0) {
 						long long period = 1000000000LL / c->enc_fps;
 						long long tol = period / 4;
-						if (c->enc_grid_next == 0 || gpts + 4 * period < c->enc_grid_next) {
+						/* source interval EMA (clamped to 2p): decimate ONLY a source that really runs
+						 * faster than the rate (VRChat 120 -> 60). A ~rate source with arrival jitter (no
+						 * header PTS: the arrival clock) must pass every frame - gating it on the grid
+						 * dropped every other frame of a 4K60 libfunnel source (capFps 30). */
+						if (c->grid_last_pts > 0 && gpts > c->grid_last_pts) {
+							long long d = gpts - c->grid_last_pts;
+							if (d > 2 * period)
+								d = 2 * period;
+							c->grid_src_iv = c->grid_src_iv ? (c->grid_src_iv * 7 + d) / 8 : d;
+						}
+						c->grid_last_pts = gpts;
+						if (c->grid_src_iv == 0 || c->grid_src_iv > period * 3 / 4) {
+							c->enc_grid_next = gpts + period; /* pass-through; keep the grid primed */
+						} else if (c->enc_grid_next == 0 || gpts + 4 * period < c->enc_grid_next) {
 							/* prime on the first frame; re-prime when PTS jumped BACK (new producer /
 							 * clock origin) instead of pacing everything out until it catches up */
 							c->enc_grid_next = gpts + period;
