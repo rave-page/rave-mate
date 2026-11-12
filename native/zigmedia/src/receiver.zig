@@ -192,7 +192,7 @@ pub const Receiver = struct {
                 @memcpy(r.slot_buf[si][0..f.payload.len], f.payload);
                 r.slot_len[si] = f.payload.len;
                 r.slot_free[si] = false;
-                if (!r.playout.push(f.seq, f.pts, si, now)) {
+                if (!r.playout.push(f.seq, f.pts, (f.flags & 0x01) != 0, si, now)) {
                     r.slot_free[si] = true; // dropped by playout (dup/too-old)
                 }
             },

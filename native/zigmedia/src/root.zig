@@ -221,6 +221,7 @@ test {
     _ = @import("auqueue.zig");
     _ = @import("retxring.zig");
     _ = @import("playout.zig");
+    _ = @import("chaos_test.zig");
     _ = @import("hrtimer.zig");
     _ = @import("reassembler.zig");
     _ = @import("histogram.zig");

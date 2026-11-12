@@ -47,8 +47,11 @@ pub const Stats = struct {
     nacks_recv: u64 = 0,
 };
 
-const au_slots = 6;
-const au_slot_cap = 4 << 20; // 4 MiB per AU (4K keyframe headroom)
+// TX queue: absorbs >= 150 ms of TX stall (4K60 ~60 Mbps: 150 ms ~ 1.2 MB) with wide margin;
+// bounded in frames AND bytes (auqueue.zig: drop-oldest + IDR request beyond it).
+const tx_queue_frames = 64;
+const tx_queue_bytes = 16 << 20;
+const au_slot_cap = 4 << 20; // max single AU (4K keyframe headroom); larger = dropped + IDR
 const retx_slots = 2048;
 const retx_dg_cap = 1500;
 const keepalive_ns: i64 = 100 * std.time.ns_per_ms;
@@ -145,7 +148,7 @@ pub const Sender = struct {
             .cfg = cfg,
             .fd = fd,
             .own_fd = own_fd,
-            .queue = try auqueue.AuQueue.init(alloc, au_slots, au_slot_cap),
+            .queue = try auqueue.AuQueue.init(alloc, tx_queue_frames, tx_queue_bytes),
             .ring = try retxring.RetxRing.init(alloc, retx_slots, retx_dg_cap),
             .pacer = Pacer.init(pacedRate(cfg.rate_bps), nowNs()),
             .frame_buf = try alloc.alloc(u8, au_slot_cap + wire.frame_header_len),
@@ -174,7 +177,7 @@ pub const Sender = struct {
 
     pub fn submit(s: *Sender, au: []const u8, pts: i64, flags: u32) void {
         _ = s.s_submitted.fetchAdd(1, .monotonic);
-        const dropped = s.queue.submit(au, pts, flags);
+        const dropped = au.len > au_slot_cap or s.queue.submit(au, pts, flags);
         if (dropped) {
             _ = s.s_dropped.fetchAdd(1, .monotonic);
             if (s.on_idr) |cb| cb(s.idr_user);
@@ -196,6 +199,7 @@ pub const Sender = struct {
             .retransmits = s.s_retx.load(.monotonic),
             .seq = s.s_seq.load(.monotonic),
             .dead = s.s_dead.load(.monotonic),
+            .queue_depth = @intCast(s.queue.depth()),
             .nacks_recv = s.s_nacks.load(.monotonic),
         };
     }
