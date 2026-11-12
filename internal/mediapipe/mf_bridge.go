@@ -716,5 +716,8 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		AdapterLUID:     st.AdapterLUID,
 		DevPolicy:       st.DevPolicy,
 		Poisoned:        st.Poisoned,
-		LedgerFails:     st.LedgerFails}
+		LedgerFails:     st.LedgerFails,
+		// Adaptive budget (explainability). Feedback (QP/rate-limited) stays Present=false until the
+		// MF/Zig child reports a quality signal - a documented follow-up.
+		QualityTarget: b.spec.QualityTarget, BudgetKbps: b.spec.BitrateKbps}
 }
