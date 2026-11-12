@@ -54,6 +54,14 @@ type Control interface {
 	GioSnapshot(windowID string) string                    // Gio surfaces: labeled-control tree of one window; "" lists open windows
 	GioTap(windowID, controlID string) string              // Gio surfaces: queue a control activation; status line
 	ListPeers() string                                     // connected paired peers (nodeID/nick/status), one per line
+	Peers() string                                         // discovered + remembered + connected peers (nodeID/name/addr/state[/SAS/initiator])
+	Pair(target string) string                             // initiate pairing with a discovered nodeID|name or a direct host:port; prints the SAS (bounded wait)
+	PairConfirm(nodeID string, accept bool) string         // local human's SAS verdict (same path as the UI confirm); never auto-accepts
+	Unpair(nodeID string) string                           // forget a remembered peer + close any live link
+	MediaSources() string                                  // local advertised sources + remote source adverts per peer
+	Routes() string                                        // active routes both directions: transport/codec/geometry/fps/bitrate + UDP stats
+	RouteStart(peer, source string) string                 // receiving side: request peer's source (same path as the UI)
+	RouteStop(peer, source string) string                  // receiving side: stop a route by source name, or "all"
 	RemoteScreenshot(nodeID, path string, vr bool) string  // screenshot a paired peer's app window (vr=VR-View) to a local PNG; status line
 	VRInputDiag() string                                   // this instance's SteamVR Input action/binding diagnostic
 	RemoteVRInputDiag(nodeID string) string                // a paired peer's VR input/binding diagnostic (nodeID "" = first connected)
@@ -184,6 +192,28 @@ func parseActPayload(rest string) (act, val string) {
 		act, val = rest[:sp], strings.TrimSpace(rest[sp:])
 	}
 	return act, val
+}
+
+// parseYesNo maps a confirm token to a bool. Only explicit yes/no (no default): a mistyped verdict
+// must never silently accept or reject a pairing.
+func parseYesNo(s string) (accept, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "yes", "y", "true", "1", "ok":
+		return true, true
+	case "no", "n", "false", "0":
+		return false, true
+	}
+	return false, false
+}
+
+// cutFirstField splits off the first whitespace-delimited token (the peer) from the rest (a source
+// name, which may contain spaces - PipeWire/Spout names do). Both trimmed.
+func cutFirstField(s string) (first, rest string) {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexAny(s, " \t"); i >= 0 {
+		return s[:i], strings.TrimSpace(s[i+1:])
+	}
+	return s, ""
 }
 
 func handleConn(conn net.Conn, ctrl Control) {
@@ -396,6 +426,43 @@ func handleConn(conn net.Conn, ctrl Control) {
 		fmt.Fprintln(conn, ctrl.GPUSelfTest())
 	case cmd == "LIST-PEERS":
 		fmt.Fprintln(conn, ctrl.ListPeers())
+	case cmd == "PEERS":
+		fmt.Fprint(conn, ctrl.Peers()) // multi-line; read to EOF
+	case strings.HasPrefix(cmd, "PAIR-CONFIRM "):
+		// PAIR-CONFIRM <nodeID> <yes|no> - the local human's SAS verdict (both ends must confirm).
+		f := strings.Fields(cmd[len("PAIR-CONFIRM "):])
+		if len(f) < 2 {
+			fmt.Fprintln(conn, "usage: PAIR-CONFIRM <nodeID> <yes|no>")
+			return
+		}
+		accept, ok := parseYesNo(f[1])
+		if !ok {
+			fmt.Fprintln(conn, "usage: PAIR-CONFIRM <nodeID> <yes|no>")
+			return
+		}
+		fmt.Fprintln(conn, ctrl.PairConfirm(f[0], accept))
+	case strings.HasPrefix(cmd, "PAIR "):
+		fmt.Fprint(conn, ctrl.Pair(strings.TrimSpace(cmd[len("PAIR "):]))) // multi-line; read to EOF
+	case strings.HasPrefix(cmd, "UNPAIR "):
+		fmt.Fprintln(conn, ctrl.Unpair(strings.TrimSpace(cmd[len("UNPAIR "):])))
+	case cmd == "MEDIA-SOURCES":
+		fmt.Fprint(conn, ctrl.MediaSources()) // multi-line; read to EOF
+	case cmd == "ROUTES":
+		fmt.Fprint(conn, ctrl.Routes()) // multi-line; read to EOF
+	case strings.HasPrefix(cmd, "ROUTE-START "):
+		peer, source := cutFirstField(strings.TrimSpace(cmd[len("ROUTE-START "):]))
+		if peer == "" || source == "" {
+			fmt.Fprintln(conn, "usage: ROUTE-START <peer> <source name>")
+			return
+		}
+		fmt.Fprintln(conn, ctrl.RouteStart(peer, source))
+	case strings.HasPrefix(cmd, "ROUTE-STOP "):
+		peer, source := cutFirstField(strings.TrimSpace(cmd[len("ROUTE-STOP "):]))
+		if peer == "" || source == "" {
+			fmt.Fprintln(conn, "usage: ROUTE-STOP <peer> <source name|all>")
+			return
+		}
+		fmt.Fprintln(conn, ctrl.RouteStop(peer, source))
 	case strings.HasPrefix(cmd, "REMOTE-SHOT-VR "):
 		nodeID, path := parseRemoteShot(cmd[len("REMOTE-SHOT-VR "):])
 		fmt.Fprintln(conn, ctrl.RemoteScreenshot(nodeID, path, true))

@@ -306,14 +306,15 @@ func (f *mediaFeature) emitTelemetry() {
 		}
 	}
 	f.rt.Emit(evMediaTelemetry, mediaTelemetry{
-		Routes:     f.router.Stats(),
-		Sync:       f.router.SyncStats(),
-		Clock:      f.router.ClockQuality(),
-		Encoders:   f.router.Encoders(),
-		Remote:     f.routes.RemoteVideoSources(),
-		Receives:   f.routes.Receives(),
-		Cams:       cams,
-		CamRunning: camRunning,
+		Routes:       f.router.Stats(),
+		Sync:         f.router.SyncStats(),
+		Clock:        f.router.ClockQuality(),
+		Encoders:     f.router.Encoders(),
+		LocalSources: f.router.LocalSources(),
+		Remote:       f.routes.RemoteVideoSources(),
+		Receives:     f.routes.Receives(),
+		Cams:         cams,
+		CamRunning:   camRunning,
 	})
 }
 

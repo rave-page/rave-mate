@@ -28,13 +28,14 @@ import (
 // demonstrably running, so anything frozen downstream is the UI's doing.
 type tickMedia struct{ n atomic.Uint64 }
 
-func (m *tickMedia) Start(context.Context) error     { return nil }
-func (m *tickMedia) Stop()                           {}
-func (m *tickMedia) Advertise()                      {}
-func (m *tickMedia) SetCodecCaps(_, _ []string)      {}
-func (m *tickMedia) SetSyncPeer(string)              {}
-func (m *tickMedia) Encoders() []string              { return nil }
-func (m *tickMedia) SyncStats() []medialink.SyncStat { return nil }
+func (m *tickMedia) Start(context.Context) error          { return nil }
+func (m *tickMedia) Stop()                                {}
+func (m *tickMedia) Advertise()                           {}
+func (m *tickMedia) SetCodecCaps(_, _ []string)           {}
+func (m *tickMedia) SetSyncPeer(string)                   {}
+func (m *tickMedia) Encoders() []string                   { return nil }
+func (m *tickMedia) LocalSources() []medialink.SourceDesc { return nil }
+func (m *tickMedia) SyncStats() []medialink.SyncStat      { return nil }
 func (m *tickMedia) ClockQuality() medialink.ClockQuality {
 	return medialink.ClockQuality{Tier: medialink.TierMonotonic, Locked: true}
 }

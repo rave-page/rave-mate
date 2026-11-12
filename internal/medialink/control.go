@@ -17,6 +17,7 @@ type MediaControl interface {
 	Stats() []RouteStat
 	SyncStats() []SyncStat
 	ClockQuality() ClockQuality
+	LocalSources() []SourceDesc // this node's advertised media sources (ctl media-sources; read-only)
 }
 
 var _ MediaControl = (*RouteManager)(nil)

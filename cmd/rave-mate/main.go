@@ -525,6 +525,8 @@ func runCtl(args []string) int {
 			"                       sync-playlists|playlist-sync-status|cleanup-missing [dry]|\n"+
 			"                       dmx-status|stream-status|mocap-status|crew-status|perf|pprof-cpu [SECONDS]|pprof-heap|goroutines|\n"+
 			"                       tc-status|tc-start|tc-stop|ablelink-status|ablelink-resync|\n"+
+			"                       pw-nodes|peers|pair <nodeID|name|host:port>|pair-confirm <nodeID> yes|no|unpair <nodeID|name>|\n"+
+			"                       media-sources|routes|route-start <peer> <source>|route-stop <peer> <source|all>|\n"+
 			"                       encoder-scan|remote-encoder-scan [NODEID]|\n"+
 			"                       frame-shot OUT.PNG [GRABS] [X,Y,W,H] SENDER...|remote-frame-shot OUT.PNG [GRABS] [X,Y,W,H] [@NODEID] SENDER...|\n"+
 			"                       testcard [start [WxH@fps]|stop|stats|reset]|remote-testcard [@NODEID] ...|\n"+
@@ -547,6 +549,90 @@ func runCtl(args []string) int {
 			"tc-status":    "TC-STATUS", "tc-start": "TC-START", "tc-stop": "TC-STOP",
 			"ablelink-status": "ABLELINK-STATUS", "ablelink-resync": "ABLELINK-RESYNC",
 		}[args[0]])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
+	case "pw-nodes": // discovered PipeWire video nodes + which are capturable (Linux sender; multi-line)
+		resp, err := app.SendMulti("PW-NODES")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
+	case "peers": // discovered + remembered + connected peers (nodeID/name/addr/state[/SAS/initiator]; multi-line)
+		resp, err := app.SendMulti("PEERS")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
+	case "pair": // initiate pairing with a discovered nodeID|name or a direct host:port; prints the SAS (bounded wait)
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl pair <nodeID|name|host:port>")
+			return 2
+		}
+		// The daemon blocks up to ~8s waiting for the SAS; outlast it.
+		resp, err := app.SendMultiTimeout("PAIR "+strings.Join(args[1:], " "), 15*time.Second)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
+	case "pair-confirm": // the local human's SAS verdict (both ends must confirm; never auto-accepts)
+		if len(args) < 3 {
+			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl pair-confirm <nodeID> <yes|no>")
+			return 2
+		}
+		resp, err := app.Send("PAIR-CONFIRM " + args[1] + " " + args[2])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
+	case "unpair": // forget a remembered peer + close any live link
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl unpair <nodeID|name>")
+			return 2
+		}
+		resp, err := app.Send("UNPAIR " + args[1])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
+	case "media-sources": // local advertised sources + remote source adverts per peer (multi-line)
+		resp, err := app.SendMulti("MEDIA-SOURCES")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
+	case "routes": // active routes both directions: transport/codec/geometry/fps/bitrate + UDP stats (multi-line)
+		resp, err := app.SendMulti("ROUTES")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
+	case "route-start": // receiving side: request a peer's source (<peer> <source name>)
+		if len(args) < 3 {
+			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl route-start <peer> <source name>")
+			return 2
+		}
+		resp, err := app.Send("ROUTE-START " + args[1] + " " + strings.Join(args[2:], " "))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
+	case "route-stop": // receiving side: stop a route by source name, or "all" (<peer> <source name|all>)
+		if len(args) < 3 {
+			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl route-stop <peer> <source name|all>")
+			return 2
+		}
+		resp, err := app.Send("ROUTE-STOP " + args[1] + " " + strings.Join(args[2:], " "))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ctl:", err)
 			return 1
