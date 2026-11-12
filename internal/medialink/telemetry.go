@@ -126,13 +126,14 @@ type routeStat struct {
 	// marked lock-free on the realtime goroutines, snapshotted off-thread. Never nil after construction.
 	stages *FrameStages
 
-	mu        sync.Mutex
-	encoder   string // §3.2 negotiated encoder ("" = raw/echo route)
-	tier      int
-	software  bool
-	transport string // negotiated media transport ("tcp"/"udp")
-	encrypted bool   // AEAD media plane (default); false = both peers opted out (plaintext)
-	keyframes uint64 // video keyframes seen (sent or received)
+	mu            sync.Mutex
+	encoder       string // §3.2 negotiated encoder ("" = raw/echo route)
+	tier          int
+	software      bool
+	transport     string // negotiated media transport ("tcp"/"udp")
+	transportImpl string // "native" (zigmedia) | "go"; "" = go
+	encrypted     bool   // AEAD media plane (default); false = both peers opted out (plaintext)
+	keyframes     uint64 // video keyframes seen (sent or received)
 	// Adaptive budget, recv-governor view (item 5): stored LOCK-FREE (atomic pointer, NOT st.mu) so
 	// the ~1 Hz governor never shares a lock with the per-frame count() path (realtime-path rule).
 	budget atomic.Pointer[budgetView]
@@ -221,6 +222,25 @@ func (st *routeStat) setEncrypted(on bool) {
 func (st *routeStat) setTransport(t string) {
 	st.mu.Lock()
 	st.transport = t
+	st.mu.Unlock()
+}
+
+func (st *routeStat) setTransportImpl(impl string) {
+	st.mu.Lock()
+	st.transportImpl = impl
+	st.mu.Unlock()
+}
+
+// setNativeStats folds a native sender's 1 Hz counters into the route's telemetry (the Go pump is not
+// running for a native route, so these are the send-side numbers RouteStat reports).
+func (st *routeStat) setNativeStats(s NativeTXStats) {
+	st.mu.Lock()
+	st.frames = s.AUsSent
+	st.bytes = s.BytesSent
+	st.retransmits = s.Retransmits
+	st.sentHighest = uint32(s.Seq)
+	st.sentAny = true
+	st.lastCount = st.now()
 	st.mu.Unlock()
 }
 
@@ -386,7 +406,7 @@ func (st *routeStat) snapshot() RouteStat {
 		Session: st.session, Peer: st.peer, Stream: st.stream, Direction: st.direction,
 		Frames: st.frames, Bytes: st.bytes,
 		Encoder: st.encoder, Tier: st.tier, Software: st.software, Encrypted: st.encrypted,
-		Transport: st.transport, Keyframes: st.keyframes,
+		Transport: st.transport, TransportImpl: st.transportImpl, Keyframes: st.keyframes,
 		SeqGaps: st.seqGaps, LostEst: st.lostEst, Recovered: st.recovered,
 		NACKsSent: st.nacksSent, Retransmits: st.retransmits, PLIRequests: st.pliReqs,
 		ReportsSent: st.reportsSent, ReportsRecv: st.reportsRecv,
@@ -434,9 +454,10 @@ type RouteStat struct {
 	Tier     int
 	Software bool // tier-4 software encode - surface the CPU warning
 
-	Transport string // negotiated media transport ("tcp"/"udp"; "" = legacy/tcp)
-	TCPReason string // why a TCP route is not UDP (reachability failed / peer lacks udp / udp off / legacy); "" on UDP routes
-	Encrypted bool   // media plane AEAD-sealed (default); false = both peers opted out (plaintext)
+	Transport     string // negotiated media transport ("tcp"/"udp"; "" = legacy/tcp)
+	TCPReason     string // why a TCP route is not UDP (reachability failed / peer lacks udp / udp off / legacy); "" on UDP routes
+	TransportImpl string // send-path implementation: "native" (zigmedia) or "go" (the Go pump); "" = go
+	Encrypted     bool   // media plane AEAD-sealed (default); false = both peers opted out (plaintext)
 
 	Keyframes uint64  // video keyframes (send: emitted; recv: seen)
 	RateBps   float64 // rolling media bitrate, bits/s (0 = no frame within rateStale)

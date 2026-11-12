@@ -10,6 +10,24 @@
  * Wire format is byte-exact with internal/medialink (udpframe.go / frame.go / transport.go); see
  * .devnotes/ZIGMEDIA_TRANSPORT.md. Supports BOTH transports: UDP datagram profile (explicit-nonce
  * AES-256-GCM, user-space fragmentation, NACK) and TCP (length-prefixed, implicit-counter GCM).
+ *
+ * ABI contract (confirmed 2026-11-12):
+ *  - DUAL PATH: a source either hands its AU stream to the native sender here (rm_tx_submit_au), OR,
+ *    when no native sender is attached, pushes into its own AU ring that the Go pump reads. The Go
+ *    hook (internal/medialink NativeTXSource.AttachNativeTX) decides per route and falls back to the
+ *    Go pump for anything unsupported (TCP until it lands, legacy peer, attach error).
+ *  - CONCURRENCY: rm_tx_set_rate and rm_tx_stats_get are safe to call concurrently with
+ *    rm_tx_submit_au (the stats block is lock-free; the rate is a benign racy write applied on the
+ *    next pacer reserve).
+ *  - AU FORMAT: submit AUs exactly as medialink.Frame.Payload carries them today - Annex-B with the
+ *    in-band parameter sets, the caller sets RM_FLAG_KEYFRAME on IDRs, NO separate CONFIG AU is
+ *    required (SPS/PPS ride the keyframe AU).
+ *  - LIFECYCLE: the IDR callback NEVER fires after rm_tx_close returns.
+ *  - SOCKET (UDP answerer): the native sender opens its OWN socket toward the receiver's address
+ *    (rm_open_params.peer_addr, socket_fd < 0) and starts at InitialSeq (continuing the Go handshake
+ *    conn's seq space), so its first datagram is strictly-newest at the receiver, which rebinds its
+ *    remote to the native socket (existing replay/rebind rule) - receiver->sender control (NACK/ping/
+ *    bye) then reaches the native socket. Alternatively Go hands a dup'd connected fd (socket_fd >= 0).
  */
 #ifndef RAVEMEDIA_H
 #define RAVEMEDIA_H

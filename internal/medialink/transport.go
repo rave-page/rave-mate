@@ -31,7 +31,12 @@ type Conn struct {
 	rmu   sync.Mutex
 	rbuf  []byte // reused ciphertext buffer
 	ptbuf []byte // reused plaintext buffer
+
+	onFirstByte func() // STEP-0: called when a frame's length prefix is read (first bytes off the socket)
 }
+
+// SetFirstByteHook sets a per-frame first-byte-arrival callback (STEP-0 arrival-jitter localization).
+func (c *Conn) SetFirstByteHook(fn func()) { c.onFirstByte = fn }
 
 // maxCipher bounds an inbound sealed frame so a corrupt length can't force a huge read/alloc.
 const maxCipher = headerLen + maxPayload + 64
@@ -83,6 +88,9 @@ func (c *Conn) ReadFrame() (*Frame, error) {
 	var lp [4]byte
 	if _, err := io.ReadFull(c.br, lp[:]); err != nil {
 		return nil, err
+	}
+	if c.onFirstByte != nil {
+		c.onFirstByte() // first bytes of this frame are off the socket (before the body read)
 	}
 	n := binary.BigEndian.Uint32(lp[:])
 	lo, hi := uint32(16), uint32(maxCipher) // sealed: min GCM tag, max cipher (frame + tag)
