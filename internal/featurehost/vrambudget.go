@@ -20,6 +20,9 @@ import (
 type VramBudget struct {
 	Budget      *gpubudget.Budget
 	AdmitSender func(w, h int) (allow bool, reason string, freeMB, reserveMB uint64)
+	// AdmitReceive is the pre-offer receive gate: a new sender AND its decoder must both fit, else the
+	// receive is held without offering (no capture/encode on the source PC).
+	AdmitReceive func(w, h, fps int) (allow bool, reason string, freeMB, reserveMB uint64)
 }
 
 // WireVramBudget builds the shared VRAM budget for whichever process opens GPU sessions (the media
@@ -76,6 +79,16 @@ func WireVramBudget(liveCfg func() config.MediaLinkFeature, sampler gpumem.Sampl
 		AdmitSender: func(w, h int) (bool, string, uint64, uint64) {
 			d := b.AdmitSender(w, h)
 			return d.Admit, d.Reason, d.FreeMB, d.ReserveMB
+		},
+		AdmitReceive: func(w, h, fps int) (bool, string, uint64, uint64) {
+			if d := b.AdmitSender(w, h); !d.Admit {
+				return false, "sender: " + d.Reason, d.FreeMB, d.ReserveMB
+			}
+			d := b.AdmitDecode(w, h, fps, "hevc") // codec unknown pre-offer; HEVC/H.264 decode cost is comparable
+			if !d.Admit {
+				return false, "decode: " + d.Reason, d.FreeMB, d.ReserveMB
+			}
+			return true, "", d.FreeMB, d.ReserveMB
 		},
 	}
 }

@@ -69,6 +69,8 @@ type Options struct {
 	// reserve + self-cap). nil => the static-floor senderCreateGate below. allow=false => the sender
 	// is not created (the source waits for VRAM), so one policy governs decode, sender and encode.
 	AdmitSender func(w, h int) (allow bool, reason string, freeMB, reserveMB uint64)
+	// AdmitReceive is the pre-offer gate (new sender + decoder). nil => AdmitSender / static floor.
+	AdmitReceive func(w, h, fps int) (allow bool, reason string, freeMB, reserveMB uint64)
 
 	// Test seams (default: videoshare Spout backend).
 	ListSenders func() []string
@@ -122,6 +124,8 @@ type Manager struct {
 	sameHost  func(string) bool
 	headroom  func() gpumem.Headroom
 	admitSndr func(w, h int) (allow bool, reason string, freeMB, reserveMB uint64)
+	held      map[string]time.Time // sender name -> last hold log (mu); pre-offer VRAM holds
+	admitRecv func(w, h, fps int) (allow bool, reason string, freeMB, reserveMB uint64)
 
 	listSenders  func() []string
 	senderSize   func(string) (int, int, bool)
@@ -153,7 +157,7 @@ type Manager struct {
 // New builds the manager (inert until Start).
 func New(o Options) *Manager {
 	m := &Manager{
-		log: o.Log, router: o.Router, cfg: o.Cfg, sameHost: o.SameHost, headroom: o.Headroom, admitSndr: o.AdmitSender,
+		log: o.Log, router: o.Router, cfg: o.Cfg, sameHost: o.SameHost, headroom: o.Headroom, admitSndr: o.AdmitSender, admitRecv: o.AdmitReceive,
 		listSenders: o.ListSenders, senderSize: o.SenderSize, senderShare: o.SenderShare,
 		grabFrame: o.GrabFrame, newFrameSnd: o.NewFrameSender,
 		newSharedSnd: o.NewSharedSender, openSource: o.OpenSource, openSink: o.OpenSink,
@@ -420,6 +424,20 @@ func (m *Manager) StartReceive(peer, sourceID string) (string, error) {
 	sinkID := "net:" + randID()
 	sender := linkPrefix + desc.Name
 	w, h := desc.Width, desc.Height
+	// VRAM hold: admit BEFORE offering. Refusing only at sink open (after the answer) made the sender
+	// open capture + encoder every re-offer cycle for nothing (live: `vaapi-native encode engaged` then
+	// `broken pipe` every ~9 s per source on the gaming PC). A parked sender is reused, never gated.
+	m.mu.Lock()
+	_, parked := m.parked[sender]
+	m.mu.Unlock()
+	if !parked {
+		if reason, freeMB, reserveMB, blocked := m.receiveGate(w, h, int(desc.FPS)); blocked {
+			m.noteHeld(sender, reason, freeMB, reserveMB)
+			return "", fmt.Errorf("%s %q: VRAM budget refuses a new Spout sender (%s, free %d MB, reserve %d MB) - no offer sent",
+				heldPrefix, desc.Name, reason, freeMB, reserveMB)
+		}
+		m.clearHeld(sender)
+	}
 	m.router.RegisterSink(medialink.SinkDesc{ID: sinkID, Name: sender, Kind: medialink.KindVideo},
 		func(context.Context, medialink.Answer) (medialink.Sink, error) {
 			return m.openReceiveSink(sender, w, h)
@@ -448,6 +466,43 @@ func (m *Manager) StartReceive(peer, sourceID string) (string, error) {
 	m.log.Info(source, "receive offered", map[string]any{"peer": peer, "source": desc.Name,
 		"session": session, "sender": sender})
 	return session, nil
+}
+
+// heldPrefix marks a receive refused BEFORE the offer (VRAM admission); survives the media-child RPC
+// (string errors), so callers test it with IsHeld.
+const heldPrefix = "mediaroute: held:"
+
+// IsHeld reports whether a StartReceive error is a pre-offer VRAM hold (retry cheaply, no backoff).
+func IsHeld(err error) bool { return err != nil && strings.Contains(err.Error(), heldPrefix) }
+
+// noteHeld logs a VRAM hold on entry and at most once a minute while it lasts.
+func (m *Manager) noteHeld(sender, reason string, freeMB, reserveMB uint64) {
+	now := time.Now()
+	m.mu.Lock()
+	if m.held == nil {
+		m.held = map[string]time.Time{}
+	}
+	last, was := m.held[sender]
+	logIt := !was || now.Sub(last) >= time.Minute
+	if logIt {
+		m.held[sender] = now
+	}
+	m.mu.Unlock()
+	if logIt {
+		m.log.Warn(source, "receive HELD - VRAM budget refuses a new Spout sender; no offer sent (the sender does not start capture/encode). Resumes automatically when the budget admits it.",
+			map[string]any{"sender": sender, "freeMB": freeMB, "reserveMB": reserveMB, "reason": reason})
+	}
+}
+
+// clearHeld logs the end of a VRAM hold.
+func (m *Manager) clearHeld(sender string) {
+	m.mu.Lock()
+	_, was := m.held[sender]
+	delete(m.held, sender)
+	m.mu.Unlock()
+	if was {
+		m.log.Info(source, "receive hold released - VRAM budget admits the sender; offering", map[string]any{"sender": sender})
+	}
 }
 
 // StopReceive tears one receive route down and unregisters its sink. Unlike a route restart, an
@@ -621,6 +676,16 @@ func (m *Manager) openReceiveSink(name string, w, h int) (medialink.Sink, error)
 		return nil, err
 	}
 	return &keptSink{m: m, inner: inner, name: name, w: w, h: h}, nil
+}
+
+// receiveGate is the pre-offer admission: the unified receive gate (sender + decoder) when wired,
+// else the sender gate. Same fail-open rules as senderCreateGate.
+func (m *Manager) receiveGate(w, h, fps int) (reason string, freeMB, reserveMB uint64, blocked bool) {
+	if m.admitRecv == nil || m.cfg == nil || !m.cfg().VramGovernorEnabled() {
+		return m.senderCreateGate(w, h)
+	}
+	allow, reason, free, reserve := m.admitRecv(w, h, fps)
+	return reason, free, reserve, !allow
 }
 
 // senderCreateFloorMB is the free-VRAM floor below which a NEW sender (a fresh interop registration)

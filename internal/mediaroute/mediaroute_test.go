@@ -647,3 +647,39 @@ func TestCleanupUnregistersDeadReceives(t *testing.T) {
 		t.Fatalf("active receive must keep its sink: %+v", fr.sinks)
 	}
 }
+
+// TestStartReceiveHeldForVRAM: when the receive admission (new sender + decoder) refuses, StartReceive
+// returns a held error WITHOUT registering a sink or sending an offer (the source PC must not open
+// capture + encoder for a route that cannot come up); once admitted it offers normally.
+func TestStartReceiveHeldForVRAM(t *testing.T) {
+	fr := newFakeRouter()
+	desc := medialink.SourceDesc{ID: "spout:VRC", Name: "VRC", Kind: medialink.KindVideo, Width: 3840, Height: 2160, FPS: 60}
+	fr.adverts["peerB"] = advertWith(desc, "hevc_vaapi")
+	allow := false
+	m := New(Options{Log: logbus.New(16), Router: fr,
+		Cfg: func() config.MediaLinkFeature { return config.MediaLinkFeature{} }, // governor default ON
+		AdmitReceive: func(w, h, fps int) (bool, string, uint64, uint64) {
+			return allow, "sender: free 430 MB < reserve 1152 MB", 430, 1152
+		}})
+	for i := 0; i < 3; i++ {
+		if _, err := m.StartReceive("peerB", "spout:VRC"); !IsHeld(err) {
+			t.Fatalf("want held error, got %v", err)
+		}
+	}
+	fr.mu.Lock()
+	n, s := len(fr.offers), len(fr.sinks)
+	fr.mu.Unlock()
+	if n != 0 || s != 0 || len(m.Receives()) != 0 {
+		t.Fatalf("held receive offered/registered: offers=%d sinks=%d", n, s)
+	}
+	allow = true
+	if _, err := m.StartReceive("peerB", "spout:VRC"); err != nil {
+		t.Fatal(err)
+	}
+	fr.mu.Lock()
+	n = len(fr.offers)
+	fr.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("admitted receive must offer once: %d", n)
+	}
+}
