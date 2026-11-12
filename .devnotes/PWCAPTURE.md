@@ -299,10 +299,46 @@ Node `spout2pw.VRChat.VRCSender1` (Stream/Output/Video), VRChat running under Pr
   timing for a variable-rate source), else wall clock.
 - Sync mode: the real node negotiates with our implicit-sync consumer fine (no change needed).
 
+### Native HEVC encoder - WORKING, pixel-correct (2026-11-12)
+
+`vaenc.c` now encodes HEVC (Main profile, 4:2:0 8-bit) natively alongside H.264, selected by
+`rva_enc_new(codec=1)`. radeonsi requires app-written packed headers, so the shim hand-writes VPS
+(nal 32) / SPS (33) / PPS (34) / slice (19 IDR, 1 TRAIL) with `write_*_hevc`; single slice, one
+short-term ref (delta_poc=-1, the previous frame), no B, no SAO, no scaling lists, 8-bit POC lsb.
+VA config = VAProfileHEVCMain + VAEntrypointEncSlice + VBR + packed headers; the VPP/surfaces/pipeline
+and the constrained-VBR rate control are shared with H.264 (`append_rc_misc`). `build_hevc_bufs` fills
+the HEVC seq/pic/slice param buffers.
+
+Verified on sus (RX 7900 XTX), decode + corner check (ffmpeg):
+- **1080p60: ~60.3 fps**, decoded `codec=hevc 1920x1080`, corners pixel-correct, ~1.3 KB/frame on the
+  synthetic corner pattern (much tighter than H.264's ~9 KB - HEVC + VBR).
+- **4K60: ~60.3 fps**, decoded `codec=hevc 3840x2160`, corners pixel-correct.
+- **REAL VRChat 4K node: ~60.3 fps**, single-plane import (planes=1, mod 0x...a01f04), decoded OK on
+  real content. HEVC + the 60fps offer + the DCC filter all work together on the live node, zero-copy.
+
+Advertised as `hevc_vaapi_native` (feat_media.go) when VA + PipeWire capture are available;
+`h264_vaapi_native` too. Negotiation (codec.go) preempts to the native engine for a decodable codec,
+HEVC-native BEFORE H.264-native, both BEFORE the ffmpeg *_vaapi tiers - so a dmabuf 4K route picks the
+zero-copy native path, never the stalling ffmpeg readback. Fallback: a non-dmabuf / non-importable
+source still falls back to ffmpeg *_vaapi (readback), same wire codec.
+
+RATE-CONTROL note: on the flat lavfi source the ffmpeg VBR change (args.go `-rc_mode VBR`, verified)
+emits ~40 kbps vs a 20 Mbps budget (no CBR padding). The native VBR undershoots flat content too, but
+on REAL 4K VRChat content it ran ~51 Mbps against a 25 Mbps budget (peak = 1.5x = 37.5): radeonsi VBR
+with min_qp=10 does not hard-cap the peak on complex content. Tuning follow-up (lower peak ratio or a
+QP ceiling, or rely on the receiver bitrate governor); not a correctness issue, and a LAN absorbs it.
+
+### Codec/engine ranking for a dmabuf source + interim guidance
+
+The Negotiate preemption (native VAAPI > ffmpeg tiers) only fires when `preferCodec` is unset; a sender
+`mediaLink.preferCodec = "hevc"` would make the Prefer block pick ffmpeg `hevc_vaapi` (readback, stalls
+at 4K). Now that `hevc_vaapi_native` is advertised + listed FIRST in the HEVC tier, the Prefer block
+picks the native engine for a hevc preference too. INTERIM (before this is deployed): keep sus
+`mediaLink.preferCodec` empty or `h264` so the preemption selects `h264_vaapi_native` for 4K.
+
 ### Still unverified / follow-ups
-- Native **HEVC** encoder (the first live route used hevc_vaapi; H.264 native is done, HEVC rejected ->
-  falls back to ffmpeg hevc_vaapi readback until implemented).
-- **Dedicated encode thread** (robust >=59.5 under contention) - struct scaffolding in place, wiring in
-  progress.
-- Full two-PC route through the real media child with the native engine end-to-end (the lead runs the
-  real rig; H.264-native + fps + flip fixes land on redeploy).
+- **Dedicated encode thread** (robust >=59.5 under heavy contention) - the current fused path already
+  measured ~59-60 fps at 4K on the real node; the thread is insurance.
+- Native-VBR peak cap on complex content (see RATE-CONTROL note).
+- Full two-PC route through the real media child end-to-end (the lead runs the real rig; H.264/HEVC
+  native + fps + flip + DCC fixes land on redeploy).

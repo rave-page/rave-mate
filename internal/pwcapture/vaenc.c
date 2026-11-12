@@ -16,6 +16,7 @@
 #include <va/va_drm.h>
 #include <va/va_drmcommon.h>
 #include <va/va_vpp.h>
+#include <va/va_enc_hevc.h>
 #include <libdrm/drm_fourcc.h>
 #include <fcntl.h>
 
@@ -573,6 +574,170 @@ static void write_slice_hdr(struct bs *b, struct rva_enc *e, int idr) {
 	/* deblocking_filter_control_present==0 -> no deblocking syntax. Driver appends slice data. */
 }
 
+/* ---- HEVC (H.265) Main-profile bitstream writers ------------------------------------------------
+ * Main profile, 4:2:0 8-bit, no scaling lists, no PCM, no SAO, one short-term ref (previous frame),
+ * no B-frames. radeonsi requires app-written VPS/SPS/PPS/slice packed headers, same as H.264. */
+
+/* hevc_nal: 2-byte NAL header (forbidden_zero=0, nal_unit_type u6, nuh_layer_id u6=0, tid_plus1 u3=1). */
+static void hevc_nal(struct bs *b, int type) {
+	bs_startcode(b);
+	bs_bits(b, 0, 1);              /* forbidden_zero_bit */
+	bs_bits(b, (uint32_t)type, 6); /* nal_unit_type */
+	bs_bits(b, 0, 6);              /* nuh_layer_id */
+	bs_bits(b, 1, 3);              /* nuh_temporal_id_plus1 */
+}
+
+/* write_ptl: profile_tier_level for max_sub_layers_minus1 == 0 (no sub-layers). Main profile. */
+static void write_ptl(struct bs *b, int level_x30) {
+	bs_bits(b, 0, 2);  /* general_profile_space */
+	bs_bits(b, 0, 1);  /* general_tier_flag (main tier) */
+	bs_bits(b, 1, 5);  /* general_profile_idc = 1 (Main) */
+	for (int i = 0; i < 32; i++) /* general_profile_compatibility_flag[i]: only Main (i==1) */
+		bs_bits(b, i == 1 ? 1 : 0, 1);
+	bs_bits(b, 1, 1);  /* general_progressive_source_flag */
+	bs_bits(b, 0, 1);  /* general_interlaced_source_flag */
+	bs_bits(b, 0, 1);  /* general_non_packed_constraint_flag */
+	bs_bits(b, 1, 1);  /* general_frame_only_constraint_flag */
+	bs_bits(b, 0, 32); /* general_reserved_zero_43bits [43] + general_reserved_zero_bit [1] = 44 */
+	bs_bits(b, 0, 12);
+	bs_bits(b, (uint32_t)level_x30, 8); /* general_level_idc (30 x level number) */
+}
+
+/* hevc_level_x30: general_level_idc = 30 x level. 1080p60 -> 4.1 (123); 4K60 -> 5.1 (153). */
+static int hevc_level_x30(int w, int h, int fps) {
+	long lumaRate = (long)w * h * (fps > 0 ? fps : 60);
+	if (lumaRate <= 1920L * 1088 * 60)
+		return 123; /* 4.1 */
+	if (lumaRate <= 3840L * 2160 * 60)
+		return 153; /* 5.1 */
+	return 156;     /* 5.2 */
+}
+
+static void write_vps_hevc(struct bs *b, struct rva_enc *e) {
+	hevc_nal(b, 32); /* VPS */
+	bs_bits(b, 0, 4);     /* vps_video_parameter_set_id */
+	bs_bits(b, 3, 2);     /* vps_base_layer_internal_flag=1, vps_base_layer_available_flag=1 */
+	bs_bits(b, 0, 6);     /* vps_max_layers_minus1 */
+	bs_bits(b, 0, 3);     /* vps_max_sub_layers_minus1 */
+	bs_bits(b, 1, 1);     /* vps_temporal_id_nesting_flag */
+	bs_bits(b, 0xffff, 16); /* vps_reserved_0xffff_16bits */
+	write_ptl(b, hevc_level_x30(e->out_w, e->out_h, e->fps));
+	bs_bits(b, 1, 1);     /* vps_sub_layer_ordering_info_present_flag */
+	bs_ue(b, 1);          /* vps_max_dec_pic_buffering_minus1[0] (>= num refs+1) */
+	bs_ue(b, 0);          /* vps_max_num_reorder_pics[0] (no reorder) */
+	bs_ue(b, 0);          /* vps_max_latency_increase_plus1[0] */
+	bs_bits(b, 0, 6);     /* vps_max_layer_id */
+	bs_ue(b, 0);          /* vps_num_layer_sets_minus1 */
+	bs_bits(b, 0, 1);     /* vps_timing_info_present_flag */
+	bs_bits(b, 0, 1);     /* vps_extension_flag */
+	bs_trailing(b);
+}
+
+static void write_sps_hevc(struct bs *b, struct rva_enc *e) {
+	hevc_nal(b, 33); /* SPS */
+	bs_bits(b, 0, 4);     /* sps_video_parameter_set_id */
+	bs_bits(b, 0, 3);     /* sps_max_sub_layers_minus1 */
+	bs_bits(b, 1, 1);     /* sps_temporal_id_nesting_flag */
+	write_ptl(b, hevc_level_x30(e->out_w, e->out_h, e->fps));
+	bs_ue(b, 0);          /* sps_seq_parameter_set_id */
+	bs_ue(b, 1);          /* chroma_format_idc = 1 (4:2:0) */
+	bs_ue(b, (uint32_t)e->out_w); /* pic_width_in_luma_samples */
+	bs_ue(b, (uint32_t)e->out_h); /* pic_height_in_luma_samples */
+	bs_bits(b, 0, 1);     /* conformance_window_flag (dims are multiples of 8 at our sizes) */
+	bs_ue(b, 0);          /* bit_depth_luma_minus8 */
+	bs_ue(b, 0);          /* bit_depth_chroma_minus8 */
+	bs_ue(b, 4);          /* log2_max_pic_order_cnt_lsb_minus4 => 8-bit POC lsb */
+	bs_bits(b, 1, 1);     /* sps_sub_layer_ordering_info_present_flag */
+	bs_ue(b, 1);          /* sps_max_dec_pic_buffering_minus1[0] */
+	bs_ue(b, 0);          /* sps_max_num_reorder_pics[0] */
+	bs_ue(b, 0);          /* sps_max_latency_increase_plus1[0] */
+	bs_ue(b, 0);          /* log2_min_luma_coding_block_size_minus3 (min CU 8) */
+	bs_ue(b, 3);          /* log2_diff_max_min_luma_coding_block_size (max CTB 64) */
+	bs_ue(b, 0);          /* log2_min_luma_transform_block_size_minus2 (min TU 4) */
+	bs_ue(b, 3);          /* log2_diff_max_min_luma_transform_block_size (max TU 32) */
+	bs_ue(b, 2);          /* max_transform_hierarchy_depth_inter */
+	bs_ue(b, 2);          /* max_transform_hierarchy_depth_intra */
+	bs_bits(b, 0, 1);     /* scaling_list_enabled_flag */
+	bs_bits(b, 0, 1);     /* amp_enabled_flag */
+	bs_bits(b, 0, 1);     /* sample_adaptive_offset_enabled_flag */
+	bs_bits(b, 0, 1);     /* pcm_enabled_flag */
+	bs_ue(b, 1);          /* num_short_term_ref_pic_sets = 1 */
+	/* st_ref_pic_set(0): 1 negative pic, delta_poc = -1, used by curr */
+	bs_ue(b, 1);          /* num_negative_pics */
+	bs_ue(b, 0);          /* num_positive_pics */
+	bs_ue(b, 0);          /* delta_poc_s0_minus1[0] => -1 */
+	bs_bits(b, 1, 1);     /* used_by_curr_pic_s0_flag[0] */
+	bs_bits(b, 0, 1);     /* long_term_ref_pics_present_flag */
+	bs_bits(b, 0, 1);     /* sps_temporal_mvp_enabled_flag */
+	bs_bits(b, 0, 1);     /* strong_intra_smoothing_enabled_flag */
+	bs_bits(b, 0, 1);     /* vui_parameters_present_flag */
+	bs_bits(b, 0, 1);     /* sps_extension_present_flag */
+	bs_trailing(b);
+}
+
+static void write_pps_hevc(struct bs *b, struct rva_enc *e) {
+	(void)e;
+	hevc_nal(b, 34); /* PPS */
+	bs_ue(b, 0);          /* pps_pic_parameter_set_id */
+	bs_ue(b, 0);          /* pps_seq_parameter_set_id */
+	bs_bits(b, 0, 1);     /* dependent_slice_segments_enabled_flag */
+	bs_bits(b, 0, 1);     /* output_flag_present_flag */
+	bs_bits(b, 0, 3);     /* num_extra_slice_header_bits */
+	bs_bits(b, 0, 1);     /* sign_data_hiding_enabled_flag */
+	bs_bits(b, 0, 1);     /* cabac_init_present_flag */
+	bs_ue(b, 0);          /* num_ref_idx_l0_default_active_minus1 */
+	bs_ue(b, 0);          /* num_ref_idx_l1_default_active_minus1 */
+	bs_se(b, 0);          /* init_qp_minus26 */
+	bs_bits(b, 0, 1);     /* constrained_intra_pred_flag */
+	bs_bits(b, 0, 1);     /* transform_skip_enabled_flag */
+	bs_bits(b, 0, 1);     /* cu_qp_delta_enabled_flag */
+	bs_se(b, 0);          /* pps_cb_qp_offset */
+	bs_se(b, 0);          /* pps_cr_qp_offset */
+	bs_bits(b, 0, 1);     /* pps_slice_chroma_qp_offsets_present_flag */
+	bs_bits(b, 0, 1);     /* weighted_pred_flag */
+	bs_bits(b, 0, 1);     /* weighted_bipred_flag */
+	bs_bits(b, 0, 1);     /* transquant_bypass_enabled_flag */
+	bs_bits(b, 0, 1);     /* tiles_enabled_flag */
+	bs_bits(b, 0, 1);     /* entropy_coding_sync_enabled_flag */
+	bs_bits(b, 0, 1);     /* pps_loop_filter_across_slices_enabled_flag=0 (single slice => no slice-level flag) */
+	bs_bits(b, 0, 1);     /* deblocking_filter_control_present_flag */
+	bs_bits(b, 0, 1);     /* pps_scaling_list_data_present_flag */
+	bs_bits(b, 0, 1);     /* lists_modification_present_flag */
+	bs_ue(b, 0);          /* log2_parallel_merge_level_minus2 */
+	bs_bits(b, 0, 1);     /* slice_segment_header_extension_present_flag */
+	bs_bits(b, 0, 1);     /* pps_extension_present_flag */
+	bs_trailing(b);
+}
+
+/* write_slice_hdr_hevc: slice_segment_header. idr => IDR_W_RADL (19), else TRAIL_R (1). poc = frames
+ * since the IDR (no B => encode order == display order). */
+static void write_slice_hdr_hevc(struct bs *b, struct rva_enc *e, int idr) {
+	int nal = idr ? 19 : 1; /* IDR_W_RADL : TRAIL_R */
+	hevc_nal(b, nal);
+	bs_bits(b, 1, 1);     /* first_slice_segment_in_pic_flag */
+	/* IDR uses nal_unit_type in [16..23] => no_output_of_prior_pics_flag */
+	if (idr)
+		bs_bits(b, 0, 1); /* no_output_of_prior_pics_flag */
+	bs_ue(b, 0);          /* slice_pic_parameter_set_id */
+	/* dependent_slice_segments disabled + first slice => no slice_segment_address */
+	bs_ue(b, idr ? 2 : 1); /* slice_type: 2=I, 1=P */
+	if (!idr) {
+		bs_bits(b, (uint32_t)(e->since_idr & 0xff), 8); /* slice_pic_order_cnt_lsb (log2=8) */
+		bs_bits(b, 1, 1); /* short_term_ref_pic_set_sps_flag (use SPS set 0; num==1 => no idx) */
+		/* sps_temporal_mvp_enabled_flag==0 => no slice_temporal_mvp_enabled_flag */
+		bs_bits(b, 0, 1); /* num_ref_idx_active_override_flag (use PPS defaults: 1 ref) */
+		/* lists_modification_present_flag==0 => no ref_pic_list_modification */
+		/* no mvd_l1 (P slice), cabac_init_present==0 => none */
+		bs_ue(b, 0);      /* five_minus_max_num_merge_cand => max_num_merge_cand = 5 */
+	}
+	bs_se(b, 0);          /* slice_qp_delta */
+	/* pps_loop_filter_across_slices_enabled_flag==0 => no slice_loop_filter_across_slices flag.
+	 * deblocking control absent => none. byte_alignment: */
+	bs_bits(b, 1, 1);     /* alignment_bit_equal_to_one */
+	while (b->nbits != 0)
+		bs_bits(b, 0, 1); /* alignment_bit_equal_to_zero */
+}
+
 /* import_cached returns a VASurface for the dmabuf, reusing one created earlier for the same
  * plane-0 fd (the pool cycles a fixed fd set). Cache full / miss on a fresh fd => import + store. */
 static VASurfaceID import_cached(struct rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int h,
@@ -631,7 +796,7 @@ static int vpp_to_nv12(struct rva_enc *e, VASurfaceID target, uint32_t drm_fourc
 rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps, int bitrate_kbps) {
 	if (!va_load() || out_w < 16 || out_h < 16 || out_w > 8192 || out_h > 8192)
 		return NULL;
-	if (codec != 0) /* H.264 only in this engine; HEVC lands in a follow-up (caller falls back) */
+	if (codec != 0 && codec != 1) /* 0 = H.264, 1 = HEVC */
 		return NULL;
 	struct rva_enc *e = calloc(1, sizeof(*e));
 	if (!e)
@@ -683,7 +848,8 @@ rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps,
 	ea[1].value = VA_RC_VBR; /* constrained VBR: average=target, burst to peak, NO CBR filler on static content */
 	ea[2].type = VAConfigAttribEncPackedHeaders;
 	ea[2].value = VA_ENC_PACKED_HEADER_SEQUENCE | VA_ENC_PACKED_HEADER_PICTURE | VA_ENC_PACKED_HEADER_SLICE;
-	if (VA.CreateConfig(e->dpy, VAProfileH264ConstrainedBaseline, VAEntrypointEncSlice, ea, 3, &e->enc_cfg) != VA_STATUS_SUCCESS) {
+	VAProfile encProfile = (codec == 1) ? VAProfileHEVCMain : VAProfileH264ConstrainedBaseline;
+	if (VA.CreateConfig(e->dpy, encProfile, VAEntrypointEncSlice, ea, 3, &e->enc_cfg) != VA_STATUS_SUCCESS) {
 		VDBG("enc: create enc config failed\n");
 		goto fail;
 	}
@@ -708,6 +874,168 @@ fail:
 	return NULL;
 }
 
+/* append_rc_misc adds the constrained-VBR rate-control + framerate misc param buffers (codec-agnostic:
+ * same VAEncMiscParameter* for H.264 and HEVC). Peak = 1.5x target, no CBR filler on static content. */
+static void append_rc_misc(struct rva_enc *e, VABufferID *bufs, int *pnb) {
+	VAEncMiscParameterBuffer *mb;
+	VABufferID rcb;
+	if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncMiscParameterBufferType,
+		sizeof(VAEncMiscParameterBuffer) + sizeof(VAEncMiscParameterRateControl), 1, NULL, &rcb) == VA_STATUS_SUCCESS &&
+		VA.MapBuffer(e->dpy, rcb, (void **)&mb) == VA_STATUS_SUCCESS) {
+		mb->type = VAEncMiscParameterTypeRateControl;
+		VAEncMiscParameterRateControl *rc = (VAEncMiscParameterRateControl *)mb->data;
+		memset(rc, 0, sizeof(*rc));
+		unsigned target = (unsigned)e->kbps * 1000;
+		rc->bits_per_second = target + target / 2;
+		rc->target_percentage = 67;
+		rc->window_size = 1000;
+		rc->initial_qp = 26;
+		rc->min_qp = 10;
+		VA.UnmapBuffer(e->dpy, rcb);
+		bufs[(*pnb)++] = rcb;
+	}
+	VABufferID frb;
+	if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncMiscParameterBufferType,
+		sizeof(VAEncMiscParameterBuffer) + sizeof(VAEncMiscParameterFrameRate), 1, NULL, &frb) == VA_STATUS_SUCCESS &&
+		VA.MapBuffer(e->dpy, frb, (void **)&mb) == VA_STATUS_SUCCESS) {
+		mb->type = VAEncMiscParameterTypeFrameRate;
+		VAEncMiscParameterFrameRate *fr = (VAEncMiscParameterFrameRate *)mb->data;
+		memset(fr, 0, sizeof(*fr));
+		fr->framerate = (unsigned)e->fps;
+		VA.UnmapBuffer(e->dpy, frb);
+		bufs[(*pnb)++] = frb;
+	}
+}
+
+/* build_hevc_bufs appends the HEVC seq (IDR) + picture + packed VPS/SPS/PPS (IDR) + packed slice
+ * header + slice param buffers. Single slice, single short-term ref (previous frame), no B. */
+static int build_hevc_bufs(struct rva_enc *e, int idx, int idr, VABufferID *bufs, int *pnb) {
+	int cur = idx;
+	int poc = e->since_idr; /* 0 at IDR, increments (no B => encode == display order) */
+	VAStatus st;
+	if (idr) {
+		VAEncSequenceParameterBufferHEVC sp;
+		memset(&sp, 0, sizeof(sp));
+		sp.general_profile_idc = 1; /* Main */
+		sp.general_level_idc = (uint8_t)hevc_level_x30(e->out_w, e->out_h, e->fps);
+		sp.general_tier_flag = 0;
+		sp.intra_period = (unsigned)e->gop;
+		sp.intra_idr_period = (unsigned)e->gop;
+		sp.ip_period = 1;
+		sp.bits_per_second = (unsigned)e->kbps * 1000 + (unsigned)e->kbps * 1000 / 2;
+		sp.pic_width_in_luma_samples = (uint16_t)e->out_w;
+		sp.pic_height_in_luma_samples = (uint16_t)e->out_h;
+		sp.seq_fields.bits.chroma_format_idc = 1;
+		sp.log2_min_luma_coding_block_size_minus3 = 0;    /* min CU 8 */
+		sp.log2_diff_max_min_luma_coding_block_size = 3;  /* max CTB 64 */
+		sp.log2_min_transform_block_size_minus2 = 0;      /* min TU 4 */
+		sp.log2_diff_max_min_transform_block_size = 3;    /* max TU 32 */
+		sp.max_transform_hierarchy_depth_inter = 2;
+		sp.max_transform_hierarchy_depth_intra = 2;
+		VABufferID sb;
+		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncSequenceParameterBufferType, sizeof(sp), 1, &sp, &sb) != VA_STATUS_SUCCESS)
+			return -3;
+		bufs[(*pnb)++] = sb;
+	}
+	VAEncPictureParameterBufferHEVC pp;
+	memset(&pp, 0, sizeof(pp));
+	pp.decoded_curr_pic.picture_id = e->recon[cur];
+	pp.decoded_curr_pic.pic_order_cnt = poc;
+	for (int i = 0; i < 15; i++) {
+		pp.reference_frames[i].picture_id = VA_INVALID_SURFACE;
+		pp.reference_frames[i].flags = VA_PICTURE_HEVC_INVALID;
+	}
+	if (!idr && e->have_ref) {
+		pp.reference_frames[0].picture_id = e->recon[cur ^ 1];
+		pp.reference_frames[0].pic_order_cnt = poc - 1;
+		pp.reference_frames[0].flags = VA_PICTURE_HEVC_RPS_ST_CURR_BEFORE;
+	}
+	pp.coded_buf = e->coded[idx];
+	pp.collocated_ref_pic_index = 0xff; /* temporal MVP off => no collocated */
+	pp.last_picture = 0;
+	pp.pic_init_qp = 26;
+	pp.nal_unit_type = (uint8_t)(idr ? 19 : 1); /* IDR_W_RADL : TRAIL_R */
+	pp.pic_fields.bits.idr_pic_flag = idr ? 1 : 0;
+	pp.pic_fields.bits.coding_type = idr ? 1 : 2; /* 1=I, 2=P */
+	pp.pic_fields.bits.reference_pic_flag = 1;
+	VABufferID pb;
+	if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPictureParameterBufferType, sizeof(pp), 1, &pp, &pb) != VA_STATUS_SUCCESS)
+		return -4;
+	bufs[(*pnb)++] = pb;
+	unsigned char hdr[512];
+	if (idr) {
+		struct bs b;
+		bs_init(&b, hdr, sizeof(hdr));
+		write_vps_hevc(&b, e);
+		write_sps_hevc(&b, e);
+		int seq_len = b.len; /* VPS+SPS as the Sequence packed header */
+		write_pps_hevc(&b, e);
+		VAEncPackedHeaderParameterBuffer ph;
+		memset(&ph, 0, sizeof(ph));
+		ph.type = VAEncPackedHeaderSequence;
+		ph.bit_length = (unsigned)seq_len * 8;
+		ph.has_emulation_bytes = 1;
+		VABufferID phb, pdb;
+		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderParameterBufferType, sizeof(ph), 1, &ph, &phb) == VA_STATUS_SUCCESS)
+			bufs[(*pnb)++] = phb;
+		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderDataBufferType, (unsigned)seq_len, 1, hdr, &pdb) == VA_STATUS_SUCCESS)
+			bufs[(*pnb)++] = pdb;
+		VAEncPackedHeaderParameterBuffer ph2;
+		memset(&ph2, 0, sizeof(ph2));
+		ph2.type = VAEncPackedHeaderPicture;
+		ph2.bit_length = (unsigned)(b.len - seq_len) * 8;
+		ph2.has_emulation_bytes = 1;
+		VABufferID phb2, pdb2;
+		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderParameterBufferType, sizeof(ph2), 1, &ph2, &phb2) == VA_STATUS_SUCCESS)
+			bufs[(*pnb)++] = phb2;
+		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderDataBufferType, (unsigned)(b.len - seq_len), 1, hdr + seq_len, &pdb2) == VA_STATUS_SUCCESS)
+			bufs[(*pnb)++] = pdb2;
+	}
+	unsigned char sh[64];
+	struct bs sb2;
+	bs_init(&sb2, sh, sizeof(sh));
+	write_slice_hdr_hevc(&sb2, e, idr); /* already byte-aligned (byte_alignment() in the writer) */
+	VAEncPackedHeaderParameterBuffer sph;
+	memset(&sph, 0, sizeof(sph));
+	sph.type = VAEncPackedHeaderSlice;
+	sph.bit_length = (unsigned)sb2.len * 8;
+	sph.has_emulation_bytes = 1;
+	VABufferID shpb, shdb;
+	if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderParameterBufferType, sizeof(sph), 1, &sph, &shpb) == VA_STATUS_SUCCESS)
+		bufs[(*pnb)++] = shpb;
+	if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderDataBufferType, (unsigned)sb2.len, 1, sh, &shdb) == VA_STATUS_SUCCESS)
+		bufs[(*pnb)++] = shdb;
+	VAEncSliceParameterBufferHEVC sl;
+	memset(&sl, 0, sizeof(sl));
+	int ctbw = (e->out_w + 63) / 64, ctbh = (e->out_h + 63) / 64;
+	sl.slice_segment_address = 0;
+	sl.num_ctu_in_slice = (unsigned)(ctbw * ctbh);
+	sl.slice_type = (uint8_t)(idr ? 2 : 1); /* 2=I, 1=P */
+	sl.slice_pic_parameter_set_id = 0;
+	sl.num_ref_idx_l0_active_minus1 = 0;
+	sl.num_ref_idx_l1_active_minus1 = 0;
+	for (int i = 0; i < 15; i++) {
+		sl.ref_pic_list0[i].picture_id = VA_INVALID_SURFACE;
+		sl.ref_pic_list0[i].flags = VA_PICTURE_HEVC_INVALID;
+		sl.ref_pic_list1[i].picture_id = VA_INVALID_SURFACE;
+		sl.ref_pic_list1[i].flags = VA_PICTURE_HEVC_INVALID;
+	}
+	if (!idr && e->have_ref) {
+		sl.ref_pic_list0[0].picture_id = e->recon[cur ^ 1];
+		sl.ref_pic_list0[0].pic_order_cnt = poc - 1;
+		sl.ref_pic_list0[0].flags = VA_PICTURE_HEVC_RPS_ST_CURR_BEFORE;
+	}
+	sl.max_num_merge_cand = 5;
+	sl.slice_qp_delta = 0;
+	sl.slice_fields.bits.last_slice_of_pic_flag = 1;
+	VABufferID slb;
+	st = VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncSliceParameterBufferType, sizeof(sl), 1, &sl, &slb);
+	if (st != VA_STATUS_SUCCESS)
+		return -5;
+	bufs[(*pnb)++] = slb;
+	return 0;
+}
+
 int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int h, int n_planes,
                   const int *fds, const unsigned *offsets, const unsigned *strides,
                   int flip, int force_idr, unsigned char **au, int *au_len, int *keyframe) {
@@ -724,9 +1052,23 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 		e->idr_id = (e->idr_id + 1) & 0xffff;
 		e->have_ref = 0;
 	}
-	VABufferID bufs[12];
+	VABufferID bufs[24];
 	int nb = 0;
 	VAStatus st;
+
+	if (e->codec == 1) { /* HEVC: build all codec-specific buffers, then the shared submit */
+		if (idr || e->rc_dirty) {
+			e->rc_dirty = 0;
+			append_rc_misc(e, bufs, &nb);
+		}
+		int r = build_hevc_bufs(e, idx, idr, bufs, &nb);
+		if (r != 0) {
+			for (int i = 0; i < nb; i++)
+				VA.DestroyBuffer(e->dpy, bufs[i]);
+			return r;
+		}
+		goto do_submit;
+	}
 
 	if (idr) {
 		VAEncSequenceParameterBufferH264 sp;
@@ -761,34 +1103,7 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 	 * of the budget (the ffmpeg-path "50 Mbps of flat colour" shape). */
 	if (idr || e->rc_dirty) {
 		e->rc_dirty = 0;
-		VAEncMiscParameterBuffer *mb;
-		VABufferID rcb;
-		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncMiscParameterBufferType,
-			sizeof(VAEncMiscParameterBuffer) + sizeof(VAEncMiscParameterRateControl), 1, NULL, &rcb) == VA_STATUS_SUCCESS &&
-			VA.MapBuffer(e->dpy, rcb, (void **)&mb) == VA_STATUS_SUCCESS) {
-			mb->type = VAEncMiscParameterTypeRateControl;
-			VAEncMiscParameterRateControl *rc = (VAEncMiscParameterRateControl *)mb->data;
-			memset(rc, 0, sizeof(*rc));
-			unsigned target = (unsigned)e->kbps * 1000;
-			rc->bits_per_second = target + target / 2; /* peak = 1.5x target (constrained VBR cap) */
-			rc->target_percentage = 67;                /* average ~= target; static content falls below */
-			rc->window_size = 1000;
-			rc->initial_qp = 26;
-			rc->min_qp = 10;
-			VA.UnmapBuffer(e->dpy, rcb);
-			bufs[nb++] = rcb;
-		}
-		VABufferID frb;
-		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncMiscParameterBufferType,
-			sizeof(VAEncMiscParameterBuffer) + sizeof(VAEncMiscParameterFrameRate), 1, NULL, &frb) == VA_STATUS_SUCCESS &&
-			VA.MapBuffer(e->dpy, frb, (void **)&mb) == VA_STATUS_SUCCESS) {
-			mb->type = VAEncMiscParameterTypeFrameRate;
-			VAEncMiscParameterFrameRate *fr = (VAEncMiscParameterFrameRate *)mb->data;
-			memset(fr, 0, sizeof(*fr));
-			fr->framerate = (unsigned)e->fps;
-			VA.UnmapBuffer(e->dpy, frb);
-			bufs[nb++] = frb;
-		}
+		append_rc_misc(e, bufs, &nb);
 	}
 
 	VAEncPictureParameterBufferH264 pp;
@@ -891,6 +1206,7 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 		return -5;
 	bufs[nb++] = slb;
 
+do_submit:
 	st = VA.BeginPicture(e->dpy, e->enc_ctx, e->nv12[idx]);
 	if (st == VA_STATUS_SUCCESS)
 		st = VA.RenderPicture(e->dpy, e->enc_ctx, bufs, nb);

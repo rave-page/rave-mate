@@ -60,20 +60,29 @@ type mediaFeature struct {
 	seqByOrigin map[string]uint64 // synthetic per-origin seq for down-injected events (dedup-safe)
 }
 
-// withVAAPINativeEncoders appends the Linux zero-copy VA engine's encoder name to the advertised set
-// when this box can run it (libva + PipeWire capture). The name is honoured natively only for a
-// dmabuf source; any other source (webcam) falls back to the ffmpeg *_vaapi readback, same wire codec.
-// HEVC-native is not advertised yet (the native engine is H.264-only; HEVC routes use ffmpeg hevc_vaapi).
+// withVAAPINativeEncoders appends the Linux zero-copy VA engine's encoder names (H.264 + HEVC) to the
+// advertised set when this box can run it (libva + PipeWire capture). The names are honoured natively
+// only for a dmabuf source; any other source (webcam) falls back to the ffmpeg *_vaapi readback, same
+// wire codec. Advertising both lets negotiation prefer the native zero-copy path for a dmabuf 4K route
+// over the ffmpeg *_vaapi readback (which stalls at 4K), for whichever codec the peer decodes.
 func withVAAPINativeEncoders(encoders []string) []string {
 	if !pwcapture.VAEncodeAvailable() {
 		return encoders
 	}
-	for _, e := range encoders {
-		if e == medialink.EncoderVAAPINativeH264 {
-			return encoders
+	out := append([]string(nil), encoders...)
+	for _, want := range []string{medialink.EncoderVAAPINativeHEVC, medialink.EncoderVAAPINativeH264} {
+		has := false
+		for _, e := range out {
+			if e == want {
+				has = true
+				break
+			}
+		}
+		if !has {
+			out = append(out, want)
 		}
 	}
-	return append(append([]string(nil), encoders...), medialink.EncoderVAAPINativeH264)
+	return out
 }
 
 func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {

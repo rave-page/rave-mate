@@ -49,7 +49,11 @@ func TestDMABufEncodeAPI(t *testing.T) {
 	h, _ := strconv.Atoi(os.Getenv("RPW_ENC_H"))
 	kbps, _ := strconv.Atoi(os.Getenv("RPW_ENC_KBPS"))
 	maxh, _ := strconv.Atoi(os.Getenv("RPW_ENC_MAXH"))
-	spec := medialink.EncodeSpec{Encoder: medialink.EncoderVAAPINativeH264, Codec: medialink.CodecH264,
+	encoder, codec := medialink.EncoderVAAPINativeH264, medialink.CodecH264
+	if os.Getenv("RPW_ENC_CODEC") == "hevc" {
+		encoder, codec = medialink.EncoderVAAPINativeHEVC, medialink.CodecHEVC
+	}
+	spec := medialink.EncodeSpec{Encoder: encoder, Codec: codec,
 		Width: w, Height: h, FPS: 60, BitrateKbps: kbps, MaxHeight: maxh, VAAPIRenderNode: node4}
 	esrc, started, err := de.StartDMABufEncode(spec)
 	if err != nil || !started {
