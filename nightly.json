@@ -1,13 +1,13 @@
 {
-  "version": "nightly-14145e3",
-  "build": 440,
-  "commit": "14145e3",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-440-20261112-14145e3.exe",
-  "sha256": "8b2951dd4df87d2de14085524f75f831d4bfb532081b3bf152247b3b56970b61",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-440-20261112-14145e3.exe",
-  "installer_sha256": "18158684dd3daa6c4b27dcafa976eaad642b84ad2915881a74dff692c2fb536b",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-440-20261112-14145e3",
-  "linux_sha256": "9f868eb10e8992657aafa33378e20172591165619b7c88097be6a5b2434281f6",
+  "version": "nightly-252b7dd",
+  "build": 441,
+  "commit": "252b7dd",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-441-20261112-252b7dd.exe",
+  "sha256": "a87baab504f7dce23ca33c329575469263f5b0948018e8c9d874f730fa65a98c",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-441-20261112-252b7dd.exe",
+  "installer_sha256": "54ba8c314b929bfdc0299e0c6e4f022b4ef42be496ffa8a085b5d896a8a30d9b",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-441-20261112-252b7dd",
+  "linux_sha256": "1a29de8bf95ad2b138ff63b758c1224088f92e9383d75b20e86faa09ca180a12",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-11-12T22:40:13Z",
-  "notes": "Merge feat/zigmedia-resilience: lateness-sized playout margin with presets on the legacy receiver"
+  "released": "2026-11-12T23:11:15Z",
+  "notes": "Merge feat/linux-shim2: loader race + reconnect backoff, full-cadence repeat frames, clean start, native telemetry, quality controller, producer fixes"
 }
