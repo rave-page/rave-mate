@@ -336,9 +336,57 @@ at 4K). Now that `hevc_vaapi_native` is advertised + listed FIRST in the HEVC ti
 picks the native engine for a hevc preference too. INTERIM (before this is deployed): keep sus
 `mediaLink.preferCodec` empty or `h264` so the preemption selects `h264_vaapi_native` for 4K.
 
+### Bitrate budget ENFORCED as a hard ceiling (2026-11-12, supersedes the RATE-CONTROL note above)
+
+The congestion-safe ceiling is now held. Key findings on radeonsi (RX 7900 XTX):
+- radeonsi VBR overshoots the budget ~1.2-1.8x and does NOT honour min_qp as a ceiling lever.
+- The HEVC RC was additionally stuck: `cu_qp_delta_enabled_flag` was 0, locking the whole frame at the
+  init QP so NO rate control could bite (H.264 varies per-MB QP by default). Enabling cu_qp_delta in the
+  HEVC PPS + pic param is REQUIRED for any HEVC RC.
+- radeonsi still overshoots even in CBR, so the real lever is a CLOSED-LOOP corrector in the shim:
+  `append_rc_misc` uses CBR (target == effective budget) + disable_bit_stuffing (so static undershoots,
+  no padding) + a ~0.5s HRD/VBV; `rc_scale_pct` scales the EFFECTIVE budget sent to the driver from a
+  1s sliding window of emitted AU bits, so a 1.4x driver overshoot converges to ~72% scale and the
+  MEASURED output lands on the real budget. HEVC seeds at 68%, H.264 at 90%. SetBitrate re-seeds it.
+
+Measured (real VRChat 4K node, read-only 2nd consumer, 12 s windows; budget x1.1 is the target):
+| budget | H.264 avg / max1s | HEVC avg / max1s |
+|  10 M  |   8.98 / 11.17    |   8.49 / 11.24   |
+|  25 M  |  22.44 / 27.29    |  20.83 / 26.47   |
+|  50 M  |  45.03 / 52.84    |  41.67 / 52.67   |
+All avg well UNDER budget; max1s <= 1.12x (only the extreme 4K@10M case touches 1.12, a single motion
+spike while avg is 9 Mbps). 1080p high-motion synthetic: all <= budget x1.1. A pathological random-block
+synthetic (max-entropy noise, incompressible) sits ~1.2x at 4K - no encoder holds true noise under an
+arbitrary budget; real content holds. SetRateHint 50->10 Mbps: output lands at ~8.6 (H.264) / 10.5
+(HEVC) Mbps within ~1 s. Static/low-motion (corner producer, 50 M budget): H.264 ~13.8, HEVC ~1.7 Mbps
+- undershoots, no padding. HEVC still decodes after all RC changes.
+
+AUD is now codec-correct (H.264 nal 9 only; HEVC carries none, VPS/SPS/PPS are in-band).
+
+### Default budget source + proposed 4K60 defaults
+
+The route budget = Offer.Bitrate = the RECEIVER's `config.mediaLink.bitrateKbps` (flat default 20000,
+NOT resolution/codec-aware) -> EncodeSpec.BitrateKbps. So a 4K route and a 1080p route both default to
+20 Mbps, which is low for 4K60 H.264. Proposed deliberate defaults (owner config, per codec; HEVC needs
+noticeably less for equal quality): 4K60 H.264 ~35 Mbps, HEVC ~22 Mbps; 1080p60 H.264 ~12 Mbps, HEVC
+~8 Mbps. (Not changed in code - it is the receiver's knob; the enforcement now makes whatever budget is
+set a real ceiling.)
+
+### Live MaxHeight + PLI + sender telemetry (2026-11-12)
+
+- **Live MaxHeight on the native path**: SetRateHint.MaxHeight re-creates the encoder at the capped
+  CODED size (rpw_set_cap_height -> on_process recreates via rva_enc_new/free). Verified at 4K: a
+  mid-run cap -> 1080 then restore shows per-frame coded heights 2160 -> 1080 -> 2160 at ~60 fps; the
+  nominal source geometry is unchanged (the receiver upscales). MaxFPS stays reserved.
+- **PLI -> IDR latency = 2 frames (~33 ms)** (force_idr consumed next on_process + 1 pipeline frame).
+- **Sender telemetry fixed**: `PipelineStats.OutFPS` (the `fps out=0` bug) now comes from a per-AU
+  ratewin, so OutFPS/CapFPS/bytes-per-frame are accurate on a SINGLE `ctl routes` poll (was a read-time
+  delta that read 0). Verified: outFps=60.0 capFps=60.0 on one read.
+- **Advert fps** (`ctl pw-nodes`): already correct - bestFormat reads the node's negotiated "Format"
+  (framerate 60/1, present in `pw-dump -N` when a route is active) before the EnumFormat advert (@0),
+  so an actively-captured node shows 60; @0 only appears when idle (variable advert, nothing to measure).
+
 ### Still unverified / follow-ups
 - **Dedicated encode thread** (robust >=59.5 under heavy contention) - the current fused path already
   measured ~59-60 fps at 4K on the real node; the thread is insurance.
-- Native-VBR peak cap on complex content (see RATE-CONTROL note).
-- Full two-PC route through the real media child end-to-end (the lead runs the real rig; H.264/HEVC
-  native + fps + flip + DCC fixes land on redeploy).
+- Full two-PC route through the real media child end-to-end (the lead runs the real rig).

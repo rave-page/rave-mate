@@ -78,13 +78,46 @@ static double now_s(void) {
 	return ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
+// noise_enabled: RPW_PROD_NOISE => high-motion, high-entropy frames (a grid of per-cell random
+// colours that change every frame) to stress the encoder's bitrate ceiling. Still paints the 4 corners
+// so orientation stays checkable.
+static int noise_enabled(void) {
+	static int v = -1;
+	if (v < 0)
+		v = getenv("RPW_PROD_NOISE") != NULL;
+	return v;
+}
+
 static void draw_pattern(int w, int h, unsigned frame) {
 	glViewport(0, 0, w, h);
 	glDisable(GL_SCISSOR_TEST);
+	if (noise_enabled()) {
+		// coarse random-colour grid, reseeded per frame: defeats intra+inter compression => near-max
+		// bitrate, the high-motion case for ceiling testing.
+		glEnable(GL_SCISSOR_TEST);
+		int cs = 64; /* cell size */
+		unsigned seed = frame * 2654435761u + 12345u;
+		for (int y = 0; y < h; y += cs) {
+			for (int x = 0; x < w; x += cs) {
+				seed = seed * 1103515245u + 12345u;
+				float r = ((seed >> 16) & 0xff) / 255.0f;
+				float g = ((seed >> 8) & 0xff) / 255.0f;
+				float b = (seed & 0xff) / 255.0f;
+				int ch = (y + cs <= h) ? cs : (h - y);
+				int cw = (x + cs <= w) ? cs : (w - x);
+				glScissor(x, y, cw, ch);
+				glClearColor(r, g, b, 1.0f);
+				glClear(GL_COLOR_BUFFER_BIT);
+			}
+		}
+		glDisable(GL_SCISSOR_TEST);
+		goto corners;
+	}
 	// background encodes the frame counter in the red channel (low byte) so the consumer can
 	// confirm frames advance; green/blue fixed so channel order is checkable.
 	glClearColor((frame & 0xff) / 255.0f, 0.20f, 0.60f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
+corners:
 	glEnable(GL_SCISSOR_TEST);
 	int s = w < h ? w / 8 : h / 8;
 	if (s < 8)

@@ -74,6 +74,19 @@ func TestDMABufEncodeAPI(t *testing.T) {
 	warm := 30
 	pliAt := warm + n/2 // request a keyframe mid-run (scales with frame count)
 	var pliKeyframeAfter bool
+	pliLatencyFrames := -1
+	// 1s-window bitrate tracking (max window = the congestion-relevant peak).
+	var winBytes int
+	var winStart time.Time
+	var maxWinKbps, lastWinKbps float64
+	// Optional mid-run SetRateHint (RPW_RATEHINT_KBPS): drop the budget at the midpoint; lastWinKbps
+	// then reflects the post-hint window to prove it took effect within ~1s.
+	hintKbps, _ := strconv.Atoi(os.Getenv("RPW_RATEHINT_KBPS"))
+	hintAt := warm + n/2
+	// Optional live MaxHeight (RPW_MAXH): apply at warm+n/3, restore (0) at warm+2n/3, to prove the
+	// coded size changes and restores on the native path (nominal geometry unchanged).
+	maxh2, _ := strconv.Atoi(os.Getenv("RPW_MAXH2"))
+	capAt, restoreAt := warm+n/3, warm+2*n/3
 	for i := 0; i < warm+n; i++ {
 		fr, err := esrc.Next(ctx)
 		if err != nil {
@@ -84,6 +97,33 @@ func TestDMABufEncodeAPI(t *testing.T) {
 		}
 		if i == warm {
 			start = time.Now()
+			winStart = start
+		}
+		if hintKbps > 0 && i == hintAt {
+			if rc, ok := esrc.(medialink.RateControlSource); ok {
+				rc.SetRateHint(medialink.RateHint{MaxBitrateKbps: hintKbps})
+			}
+		}
+		if maxh2 > 0 {
+			if rc, ok := esrc.(medialink.RateControlSource); ok {
+				if i == capAt {
+					rc.SetRateHint(medialink.RateHint{MaxHeight: maxh2})
+				} else if i == restoreAt {
+					rc.SetRateHint(medialink.RateHint{MaxHeight: 0})
+				}
+			}
+		}
+		if i >= warm {
+			winBytes += len(fr.Payload)
+			if el := time.Since(winStart).Seconds(); el >= 1.0 {
+				k := float64(winBytes) * 8 / 1000 / el
+				if k > maxWinKbps {
+					maxWinKbps = k
+				}
+				lastWinKbps = k
+				winBytes = 0
+				winStart = time.Now()
+			}
 		}
 		if i == pliAt {
 			if ks, ok := esrc.(medialink.KeyframeSource); ok {
@@ -91,6 +131,9 @@ func TestDMABufEncodeAPI(t *testing.T) {
 			}
 		}
 		if i > pliAt && i <= pliAt+15 && fr.Keyframe() {
+			if !pliKeyframeAfter {
+				pliLatencyFrames = i - pliAt // PLI request -> first IDR, in frames
+			}
 			pliKeyframeAfter = true
 		}
 		if f != nil {
@@ -110,8 +153,13 @@ func TestDMABufEncodeAPI(t *testing.T) {
 	if pr, ok := esrc.(medialink.PipelineReporter); ok {
 		st = pr.PipeStats()
 	}
+	avgKbps := float64(bytes) * 8 / 1000 / dur.Seconds()
+	budget := kbps
 	t.Logf("DMABUF-ENC %d AUs in %v (~%.1f fps), %d bytes (avg %d), keyframes=%d firstKey=%v pliKey=%v",
 		frames, dur.Round(time.Millisecond), fps, bytes, bytes/max1(frames), keyframes, sawFirstKey, pliKeyframeAfter)
+	t.Logf("BITRATE budget=%d kbps  avg=%.0f kbps  max1s=%.0f kbps  lastWin=%.0f kbps  (ceiling test: max1s <= budget*1.1)",
+		budget, avgKbps, maxWinKbps, lastWinKbps)
+	t.Logf("PLI->IDR latency: %d frames", pliLatencyFrames)
 	t.Logf("PipeStats: engine=%s outFps=%.1f capFps=%.1f dropped=%d zeroCopy=%v bytes/frame=%.0f node=%s",
 		st.Encoder, st.OutFPS, st.CapFPS, st.Dropped, st.ZeroCopy, st.AUBytesPerFrame, st.DevPolicy)
 	if !sawFirstKey {

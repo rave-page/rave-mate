@@ -449,6 +449,13 @@ struct rva_enc {
 	int in_w, in_h, out_w, out_h, fps, kbps;
 	int rc_dirty; /* kbps changed via rva_enc_set_bitrate: re-send the RC misc param next frame */
 	int codec;    /* 0 = H.264, 1 = HEVC */
+	/* closed-loop bitrate corrector: a 1s sliding window over emitted AU bits. radeonsi's RC (esp.
+	 * HEVC) overshoots the requested budget by a content-dependent factor, so the shim scales the
+	 * EFFECTIVE budget it sends the driver (rc_scale_pct) until the measured output lands on the real
+	 * budget - a 1.4x driver overshoot converges to rc_scale ~72%. Driver-agnostic; bounds the rate. */
+	int rc_scale_pct;     /* effective budget = kbps * rc_scale_pct/100 (0 => codec default) */
+	long long win_bits;   /* AU bits accumulated in the current ~1s window */
+	int win_frames;
 	int mbw, mbh;
 	int log2_max_fn;
 	/* VPP (rgb import -> nv12 scale/convert) */
@@ -690,7 +697,9 @@ static void write_pps_hevc(struct bs *b, struct rva_enc *e) {
 	bs_se(b, 0);          /* init_qp_minus26 */
 	bs_bits(b, 0, 1);     /* constrained_intra_pred_flag */
 	bs_bits(b, 0, 1);     /* transform_skip_enabled_flag */
-	bs_bits(b, 0, 1);     /* cu_qp_delta_enabled_flag */
+	bs_bits(b, 1, 1);     /* cu_qp_delta_enabled_flag=1: let the RC vary QP per-CU (bounds the bitrate;
+	                       * without it HEVC is locked at init_qp and NO rate control works) */
+	bs_ue(b, 0);          /* diff_cu_qp_delta_depth = 0 (QP delta at CTB granularity) */
 	bs_se(b, 0);          /* pps_cb_qp_offset */
 	bs_se(b, 0);          /* pps_cr_qp_offset */
 	bs_bits(b, 0, 1);     /* pps_slice_chroma_qp_offsets_present_flag */
@@ -802,6 +811,7 @@ rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps,
 	if (!e)
 		return NULL;
 	e->codec = codec;
+	e->rc_scale_pct = codec == 1 ? 68 : 90; /* HEVC: pre-compensate radeonsi's ~1.4x RC overshoot */
 	e->fd = open(node, O_RDWR | O_CLOEXEC);
 	if (e->fd < 0) {
 		free(e);
@@ -845,7 +855,10 @@ rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps,
 	ea[0].type = VAConfigAttribRTFormat;
 	ea[0].value = VA_RT_FORMAT_YUV420;
 	ea[1].type = VAConfigAttribRateControl;
-	ea[1].value = VA_RC_VBR; /* constrained VBR: average=target, burst to peak, NO CBR filler on static content */
+	/* CBR holds the average at the budget directly (radeonsi VBR, esp. HEVC, overshoots 1.6-1.8x and
+	 * does not honour min_qp as a ceiling lever). disable_bit_stuffing (set in append_rc_misc) keeps
+	 * static content UNDER the budget instead of padding it. */
+	ea[1].value = VA_RC_CBR;
 	ea[2].type = VAConfigAttribEncPackedHeaders;
 	ea[2].value = VA_ENC_PACKED_HEADER_SEQUENCE | VA_ENC_PACKED_HEADER_PICTURE | VA_ENC_PACKED_HEADER_SLICE;
 	VAProfile encProfile = (codec == 1) ? VAProfileHEVCMain : VAProfileH264ConstrainedBaseline;
@@ -874,10 +887,16 @@ fail:
 	return NULL;
 }
 
-/* append_rc_misc adds the constrained-VBR rate-control + framerate misc param buffers (codec-agnostic:
- * same VAEncMiscParameter* for H.264 and HEVC). Peak = 1.5x target, no CBR filler on static content. */
+/* append_rc_misc adds the rate-control + framerate + HRD misc param buffers (codec-agnostic). The
+ * budget is a HARD CEILING for a congestion-safe link: bits_per_second (the VBR MAX) == budget, a ~1s
+ * HRD/VBV so the peak cannot run away, max_qp so the RC can raise QP to hold the ceiling on complex
+ * content, and disable_bit_stuffing so static content still UNDERSHOOTS (no CBR-style filler). If the
+ * driver's VBR still overshoots, rva_enc_frame's closed-loop corrector (qp_ceiling) tightens it. */
 static void append_rc_misc(struct rva_enc *e, VABufferID *bufs, int *pnb) {
 	VAEncMiscParameterBuffer *mb;
+	unsigned eff = (unsigned)e->kbps * 1000;
+	if (e->rc_scale_pct > 0)
+		eff = (unsigned)((long long)e->kbps * 1000 * e->rc_scale_pct / 100);
 	VABufferID rcb;
 	if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncMiscParameterBufferType,
 		sizeof(VAEncMiscParameterBuffer) + sizeof(VAEncMiscParameterRateControl), 1, NULL, &rcb) == VA_STATUS_SUCCESS &&
@@ -885,12 +904,13 @@ static void append_rc_misc(struct rva_enc *e, VABufferID *bufs, int *pnb) {
 		mb->type = VAEncMiscParameterTypeRateControl;
 		VAEncMiscParameterRateControl *rc = (VAEncMiscParameterRateControl *)mb->data;
 		memset(rc, 0, sizeof(*rc));
-		unsigned target = (unsigned)e->kbps * 1000;
-		rc->bits_per_second = target + target / 2;
-		rc->target_percentage = 67;
+		rc->bits_per_second = eff;      /* CBR target == effective budget (corrector-scaled) */
+		rc->target_percentage = 100;
 		rc->window_size = 1000;
 		rc->initial_qp = 26;
 		rc->min_qp = 10;
+		rc->max_qp = 51;
+		rc->rc_flags.bits.disable_bit_stuffing = 1;     /* no padding: static content undershoots */
 		VA.UnmapBuffer(e->dpy, rcb);
 		bufs[(*pnb)++] = rcb;
 	}
@@ -904,6 +924,18 @@ static void append_rc_misc(struct rva_enc *e, VABufferID *bufs, int *pnb) {
 		fr->framerate = (unsigned)e->fps;
 		VA.UnmapBuffer(e->dpy, frb);
 		bufs[(*pnb)++] = frb;
+	}
+	VABufferID hrdb;
+	if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncMiscParameterBufferType,
+		sizeof(VAEncMiscParameterBuffer) + sizeof(VAEncMiscParameterHRD), 1, NULL, &hrdb) == VA_STATUS_SUCCESS &&
+		VA.MapBuffer(e->dpy, hrdb, (void **)&mb) == VA_STATUS_SUCCESS) {
+		mb->type = VAEncMiscParameterTypeHRD;
+		VAEncMiscParameterHRD *hrd = (VAEncMiscParameterHRD *)mb->data;
+		memset(hrd, 0, sizeof(*hrd));
+		hrd->buffer_size = eff / 2;        /* ~0.5s VBV: caps 1s-window bursts tighter */
+		hrd->initial_buffer_fullness = eff / 4;
+		VA.UnmapBuffer(e->dpy, hrdb);
+		bufs[(*pnb)++] = hrdb;
 	}
 }
 
@@ -922,7 +954,7 @@ static int build_hevc_bufs(struct rva_enc *e, int idx, int idr, VABufferID *bufs
 		sp.intra_period = (unsigned)e->gop;
 		sp.intra_idr_period = (unsigned)e->gop;
 		sp.ip_period = 1;
-		sp.bits_per_second = (unsigned)e->kbps * 1000 + (unsigned)e->kbps * 1000 / 2;
+		sp.bits_per_second = (unsigned)e->kbps * 1000; /* ceiling == budget (HRD/VBV holds it) */
 		sp.pic_width_in_luma_samples = (uint16_t)e->out_w;
 		sp.pic_height_in_luma_samples = (uint16_t)e->out_h;
 		sp.seq_fields.bits.chroma_format_idc = 1;
@@ -954,10 +986,12 @@ static int build_hevc_bufs(struct rva_enc *e, int idx, int idr, VABufferID *bufs
 	pp.collocated_ref_pic_index = 0xff; /* temporal MVP off => no collocated */
 	pp.last_picture = 0;
 	pp.pic_init_qp = 26;
+	pp.diff_cu_qp_delta_depth = 0;
 	pp.nal_unit_type = (uint8_t)(idr ? 19 : 1); /* IDR_W_RADL : TRAIL_R */
 	pp.pic_fields.bits.idr_pic_flag = idr ? 1 : 0;
 	pp.pic_fields.bits.coding_type = idr ? 1 : 2; /* 1=I, 2=P */
 	pp.pic_fields.bits.reference_pic_flag = 1;
+	pp.pic_fields.bits.cu_qp_delta_enabled_flag = 1; /* must match the PPS: lets the RC bound the rate */
 	VABufferID pb;
 	if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPictureParameterBufferType, sizeof(pp), 1, &pp, &pb) != VA_STATUS_SUCCESS)
 		return -4;
@@ -1077,7 +1111,7 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 		sp.intra_period = e->gop;
 		sp.intra_idr_period = e->gop;
 		sp.ip_period = 1;
-		sp.bits_per_second = (unsigned)e->kbps * 1000 + (unsigned)e->kbps * 1000 / 2; /* peak (VBR HRD) */
+		sp.bits_per_second = (unsigned)e->kbps * 1000; /* ceiling == budget (HRD/VBV holds it) */
 		sp.max_num_ref_frames = 1;
 		sp.picture_width_in_mbs = e->mbw;
 		sp.picture_height_in_mbs = e->mbh;
@@ -1248,12 +1282,14 @@ do_submit:
 	st = VA.MapBuffer(e->dpy, e->coded[pidx], (void **)&seg);
 	if (st != VA_STATUS_SUCCESS || !seg)
 		return -7;
-	static const unsigned char aud_i[] = {0, 0, 0, 1, 0x09, 0x10};
-	static const unsigned char aud_p[] = {0, 0, 0, 1, 0x09, 0x30};
 	int off = 0;
-	if (off + 6 <= e->au_cap) {
-		memcpy(e->au, pidr ? aud_i : aud_p, 6);
-		off = 6;
+	if (e->codec == 0) { /* H.264 AUD (nal_unit_type 9); HEVC carries no AUD (VPS/SPS/PPS already in-band) */
+		static const unsigned char aud_i[] = {0, 0, 0, 1, 0x09, 0x10};
+		static const unsigned char aud_p[] = {0, 0, 0, 1, 0x09, 0x30};
+		if (off + 6 <= e->au_cap) {
+			memcpy(e->au, pidr ? aud_i : aud_p, 6);
+			off = 6;
+		}
 	}
 	for (VACodedBufferSegment *s = seg; s; s = (VACodedBufferSegment *)s->next) {
 		if (off + (int)s->size > e->au_cap)
@@ -1262,6 +1298,36 @@ do_submit:
 		off += (int)s->size;
 	}
 	VA.UnmapBuffer(e->dpy, e->coded[pidx]);
+
+	/* closed-loop bitrate corrector: a 1s window over emitted AU bits. Scale the EFFECTIVE budget sent
+	 * to the driver so the MEASURED output lands on the real budget - lowers rc_scale when the driver
+	 * overshoots, raises it (toward 100%) when well under (static content undershoots either way). */
+	if (off > 0 && e->fps > 0) {
+		e->win_bits += (long long)off * 8;
+		if (++e->win_frames >= e->fps) {
+			long long budget = (long long)e->kbps * 1000;
+			int cur = e->rc_scale_pct > 0 ? e->rc_scale_pct : 100;
+			int ns = cur;
+			if (budget > 0) {
+				if (e->win_bits > budget * 130 / 100)
+					ns -= 10; /* far over: big step */
+				else if (e->win_bits > budget * 105 / 100)
+					ns -= 4;
+				else if (e->win_bits < budget * 85 / 100)
+					ns += 4; /* under: give quality back toward 100% */
+			}
+			if (ns < 30)
+				ns = 30;
+			if (ns > 100)
+				ns = 100;
+			if (ns != cur) {
+				e->rc_scale_pct = ns;
+				e->rc_dirty = 1;
+			}
+			e->win_bits = 0;
+			e->win_frames = 0;
+		}
+	}
 
 	*au = e->au;
 	*au_len = off;
@@ -1273,6 +1339,9 @@ void rva_enc_set_bitrate(rva_enc *e, int kbps) {
 	if (!e || kbps <= 0)
 		return;
 	e->kbps = kbps;
+	e->rc_scale_pct = e->codec == 1 ? 68 : 90; /* re-seed the corrector for the new budget */
+	e->win_bits = 0;
+	e->win_frames = 0;
 	e->rc_dirty = 1; /* re-send the VBR rate-control misc param on the next frame */
 }
 

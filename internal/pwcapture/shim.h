@@ -47,6 +47,10 @@ void rpw_request_keyframe(struct rpw_capture *c);
 /* rpw_set_bitrate sets the live target bitrate (kbps), applied on the next encoded frame. */
 void rpw_set_bitrate(struct rpw_capture *c, int kbps);
 
+/* rpw_set_cap_height applies a live CODED-height cap (0 = native); the encoder re-creates at the new
+ * coded size on the next frame if changed. Nominal source geometry unchanged (receiver upscales). */
+void rpw_set_cap_height(struct rpw_capture *c, int max_h);
+
 /* encode telemetry getters. */
 long rpw_enc_aus(struct rpw_capture *c);
 long rpw_enc_drops(struct rpw_capture *c);
