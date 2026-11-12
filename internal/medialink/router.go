@@ -315,6 +315,9 @@ type Options struct {
 	BudgetMode         func() string
 	BudgetUserCeilKbps func() int
 	BudgetLinkFracPct  func() int // static link-ceiling fraction (0 => DefaultLinkFracPct); nil => default
+	// PlayoutPreset returns the recv playout preset (config mediaLink.playout:
+	// low-latency|balanced|smooth; ""/nil = balanced). Read at route start.
+	PlayoutPreset func() string
 }
 
 // RouteManager owns the media listener + negotiation. Create with New, attach sources/sinks, then
@@ -356,6 +359,7 @@ type RouteManager struct {
 	budgetMode  func() string                        // adaptive bitrate mode ("auto"/"fixed"; nil=fixed)
 	budgetUserK func() int                           // adaptive user ceiling kbps (0=none)
 	budgetLinkF func() int                           // static link-ceiling fraction pct (0=default)
+	playout     func() string                        // recv playout preset name (nil = balanced)
 
 	sampler procstat.Sampler // daemon RSS sampler for the media memory watchdog
 
@@ -413,6 +417,7 @@ func New(opts Options) *RouteManager {
 		headroom: opts.Headroom, governorOn: opts.GovernorEnabled,
 		govFloorMB: opts.GovernorFloorMB, govBaseKbps: opts.GovernorBaseKbps,
 		budgetMode: opts.BudgetMode, budgetUserK: opts.BudgetUserCeilKbps, budgetLinkF: opts.BudgetLinkFracPct,
+		playout: opts.PlayoutPreset,
 		udp:     opts.UDP,
 		sources: map[string]sourceReg{}, sinks: map[string]sinkReg{},
 		remoteAdvert: map[string]Advert{}, pendingAns: map[string]*pendingAnswer{},
@@ -1445,7 +1450,7 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 	// NACK-unrecoverable loss triggers a PLI over the control plane (§2.5).
 	var jb *jitterBuffer
 	if po.sinkKind == KindVideo || (haveDesc && srcDesc.Kind == KindVideo) {
-		jb = newJitterBuffer(srcDesc.FPS, ans.Codec.IntraOnly())
+		jb = newJitterBufferPreset(srcDesc.FPS, ans.Codec.IntraOnly(), rm.playoutPreset())
 		stream := ans.Stream
 		jb.pli = func() {
 			nk := NACK{Type: MetaNACK, Stream: stream, From: 1, To: 0, FrameLevel: true}
@@ -1535,6 +1540,14 @@ func (rm *RouteManager) remoteSourceDesc(peer, sourceID string) (SourceDesc, boo
 	return SourceDesc{}, false
 }
 
+// playoutPreset resolves the configured recv playout preset.
+func (rm *RouteManager) playoutPreset() PlayoutPreset {
+	if rm.playout == nil {
+		return PlayoutBalanced
+	}
+	return ParsePlayoutPreset(rm.playout())
+}
+
 // jbSink feeds the recv loop into the jitter buffer (arrival = media clock at read).
 type jbSink struct {
 	jb    *jitterBuffer
@@ -1567,8 +1580,14 @@ func (rm *RouteManager) runJitter(ctx context.Context, conn frameConn, jb *jitte
 					if prevWriteNs > hitchNs {
 						cause = "sink write blocked (decode/publish backpressure)"
 					}
+					cur, ev := jb.marginInfo()
+					before, after := cur, cur
+					if ev.At != 0 && rm.clock.Now()-ev.At < int64(2*time.Second) {
+						before, after = ev.FromNs, ev.ToNs // this hitch grew the playout margin
+					}
 					rm.warnf("playout hitch", map[string]any{"session": st.session, "stream": st.stream,
 						"gapMs": gap / 1e6, "prevWriteMs": prevWriteNs / 1e6, "cause": cause,
+						"marginBeforeMs": before / 1e6, "marginAfterMs": after / 1e6,
 						"wall": time.Now().Format("15:04:05.000")})
 				}
 			}
@@ -1806,7 +1825,7 @@ func (rm *RouteManager) Stats() []RouteStat {
 	for _, r := range rm.active {
 		s := r.stat.snapshot()
 		if r.jb != nil {
-			js := r.jb.stats()
+			js := r.jb.statsAt(rm.clock.Now())
 			s.JB = &js
 		}
 		if r.pipe != nil {
