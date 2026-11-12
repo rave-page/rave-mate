@@ -265,12 +265,14 @@ struct rpw_capture {
 	/* ---- vaapi-native encode mode (production: rpw_set_encode; also RPW_VA_ENC env for the harness) */
 	int enc_mode;        /* 0 = readback RGBA; 1 = fused dmabuf->VA encode (AU in slot) */
 	int enc_codec;       /* 0 = H.264, 1 = HEVC */
-	int enc_kbps;        /* target bitrate budget */
+	int enc_kbps;        /* target bitrate budget (CBR target, or the CQP ceiling in quality mode) */
 	int enc_maxh;        /* coded-height cap (0 = native); VPP downscales taller sources */
 	int enc_fps;
+	int enc_quality_qp;  /* 0 = legacy CBR; >0 = constant-quality CQP at this target QP (ceiling=kbps) */
 	char enc_node[96];   /* VA render node */
 	int force_idr;       /* rpw_request_keyframe sets it; on_process consumes + clears (under mu) */
 	int pending_kbps;    /* rpw_set_bitrate sets it; on_process applies live (under mu) */
+	int pending_quality; /* rpw_set_quality sets it (target QP); on_process applies live (under mu) */
 	int pending_maxh;    /* rpw_set_cap_height sets it (-1 = none); on_process re-creates the encoder at
 	                      * the new coded size (nominal source geometry unchanged; receiver upscales) */
 	int slot_keyframe;   /* keyframe flag of the AU in slot */
@@ -279,6 +281,9 @@ struct rpw_capture {
 	long enc_aus;        /* AUs emitted */
 	long enc_drops;      /* frames dropped on the encode path (newest-wins + encode errors) */
 	long cap_frames;     /* dmabuf frames seen in encode mode */
+	int fb_present;      /* adaptive-budget feedback snapshot (written on the loop thread, read by getter) */
+	double fb_avg_qp;    /* mean QP over ~1s (exact in CQP) */
+	int fb_rate_limited; /* 1 when the ceiling forced QP above the quality target */
 	int import_ok;       /* 1 once a dmabuf imported+encoded at least once (va-dmabuf path live) */
 	int flip_default;    /* RPW_FLIP_V: default vertical flip when the buffer carries no transform meta.
 	                      * 0 = top-down (Spout2PW/DX + PipeWire convention); 1 = bottom-up (GL producer) */
@@ -785,7 +790,7 @@ static void on_process(void *data) {
 						oh = c->enc_maxh;
 					}
 					ow &= ~1; oh &= ~1;
-					c->enc = rva_enc_new(en, c->enc_codec, ow, oh, fps, kbps);
+					c->enc = rva_enc_new(en, c->enc_codec, ow, oh, fps, kbps, c->enc_quality_qp);
 					if (!c->enc) {
 						c->enc_fail = 1;
 					} else {
@@ -798,26 +803,41 @@ static void on_process(void *data) {
 					int idr = c->force_idr; c->force_idr = 0;
 					int newkbps = c->pending_kbps; c->pending_kbps = 0;
 					int newmaxh = c->pending_maxh; c->pending_maxh = -1;
+					int newqual = c->pending_quality; c->pending_quality = 0;
 					pthread_mutex_unlock(&c->mu);
 					if (newkbps > 0)
 						rva_enc_set_bitrate(c->enc, newkbps);
-					if (newmaxh >= 0) { /* live coded-size cap: recompute out dims, recreate if changed */
+					/* mode_switch = a legacy(CBR) encoder asked to go constant-quality. The RC mode is
+					 * fixed at config creation, so that needs a recreate; a quality->quality QP change is
+					 * applied live by rva_enc_set_quality (no reopen). */
+					int mode_switch = 0;
+					if (newqual > 0) {
+						if (c->enc_quality_qp > 0)
+							rva_enc_set_quality(c->enc, newqual); /* already CQP: live QP change */
+						else
+							mode_switch = 1;                      /* legacy -> quality: recreate below */
+						c->enc_quality_qp = newqual;
+					}
+					/* recreate on a coded-size change OR a legacy->quality mode switch (both rare). */
+					if (newmaxh >= 0 || mode_switch) {
+						int want_maxh = newmaxh >= 0 ? newmaxh : c->enc_maxh;
 						int ow = c->width, oh = c->height;
-						if (newmaxh > 0 && oh > newmaxh) {
-							ow = ow * newmaxh / oh;
-							oh = newmaxh;
+						if (want_maxh > 0 && oh > want_maxh) {
+							ow = ow * want_maxh / oh;
+							oh = want_maxh;
 						}
 						ow &= ~1; oh &= ~1;
-						if (oh != c->coded_h || ow != c->coded_w) {
+						if (oh != c->coded_h || ow != c->coded_w || mode_switch) {
 							const char *en = c->enc_node[0] ? c->enc_node : "/dev/dri/renderD128";
 							struct rva_enc *ne = rva_enc_new(en, c->enc_codec, ow, oh,
-								c->enc_fps > 0 ? c->enc_fps : 60, c->enc_kbps > 0 ? c->enc_kbps : 20000);
+								c->enc_fps > 0 ? c->enc_fps : 60, c->enc_kbps > 0 ? c->enc_kbps : 20000,
+								c->enc_quality_qp);
 							if (ne) { /* nominal source geometry unchanged; coded size shrinks, receiver upscales */
 								rva_enc_free(c->enc);
 								c->enc = ne;
 								c->coded_w = ow;
 								c->coded_h = oh;
-								c->enc_maxh = newmaxh;
+								c->enc_maxh = want_maxh;
 							}
 						}
 					}
@@ -837,6 +857,9 @@ static void on_process(void *data) {
 					if (rva_enc_frame(c->enc, spa_to_drm_fourcc(c->fmt), c->modifier, c->width, c->height,
 						np, efds, eoff, estr, flip, idr, &au, &aulen, &kf) == 0 && aulen > 0) {
 						c->import_ok = 1;
+						/* snapshot the quality feedback on the loop thread (the getter reads these scalars,
+						 * never c->enc, so a recreate on another path cannot cause a use-after-free). */
+						rva_enc_feedback(c->enc, &c->fb_present, &c->fb_avg_qp, &c->fb_rate_limited);
 						pthread_mutex_lock(&c->mu);
 						if (aulen > c->slot_cap) {
 							unsigned char *n = realloc(c->slot, aulen);
@@ -1034,13 +1057,14 @@ long rpw_dmabuf_skipped(struct rpw_capture *c) { return c ? c->dmabuf_skipped : 
  * Must be called before any AU is consumed; the encoder is created lazily on the first dmabuf frame
  * at the coded size (source height capped by max_h). Returns 1 when VA is usable (caller commits to
  * the AU path), 0 when VA is unavailable (caller falls back to the readback + ffmpeg path). */
-int rpw_set_encode(struct rpw_capture *c, int codec, int kbps, int max_h, int fps, const char *node) {
+int rpw_set_encode(struct rpw_capture *c, int codec, int kbps, int max_h, int fps, const char *node, int quality_qp) {
 	if (!c || !rva_available())
 		return 0;
 	pthread_mutex_lock(&c->mu);
 	c->enc_codec = codec;
 	c->enc_kbps = kbps;
 	c->enc_maxh = max_h;
+	c->enc_quality_qp = quality_qp > 0 ? quality_qp : 0;
 	c->enc_fps = fps > 0 ? fps : 60;
 	if (node && *node) {
 		snprintf(c->enc_node, sizeof(c->enc_node), "%s", node);
@@ -1121,6 +1145,26 @@ void rpw_set_bitrate(struct rpw_capture *c, int kbps) {
 	pthread_mutex_lock(&c->mu);
 	c->pending_kbps = kbps;
 	pthread_mutex_unlock(&c->mu);
+}
+
+/* rpw_set_quality updates the live constant-quality target QP; applied on the next encoded frame. */
+void rpw_set_quality(struct rpw_capture *c, int target_qp) {
+	if (!c || target_qp <= 0)
+		return;
+	pthread_mutex_lock(&c->mu);
+	c->pending_quality = target_qp;
+	pthread_mutex_unlock(&c->mu);
+}
+
+/* rpw_enc_feedback reports the adaptive-budget quality signal (scalar snapshot written on the loop
+ * thread by on_process; no c->enc deref, so it is safe against a concurrent encoder recreate). */
+void rpw_enc_feedback(struct rpw_capture *c, int *present, double *avg_qp, int *rate_limited) {
+	if (present)
+		*present = c ? c->fb_present : 0;
+	if (avg_qp)
+		*avg_qp = c ? c->fb_avg_qp : 0.0;
+	if (rate_limited)
+		*rate_limited = c ? c->fb_rate_limited : 0;
 }
 
 /* rpw_set_cap_height applies a live CODED-height cap (0 = native): the encoder is re-created at the

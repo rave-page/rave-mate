@@ -5,6 +5,7 @@ package pwcapture
 import (
 	"context"
 	"os"
+	"sort"
 	"strconv"
 	"testing"
 	"time"
@@ -53,8 +54,13 @@ func TestDMABufEncodeAPI(t *testing.T) {
 	if os.Getenv("RPW_ENC_CODEC") == "hevc" {
 		encoder, codec = medialink.EncoderVAAPINativeHEVC, medialink.CodecHEVC
 	}
+	// Adaptive budget: RPW_ENC_Q (1..100) engages constant-quality-with-ceiling (BitrateKbps = the
+	// ceiling). 0/unset = legacy rate-controlled. RPW_RATEHINT_Q applies a live quality change mid-run.
+	quality, _ := strconv.Atoi(os.Getenv("RPW_ENC_Q"))
+	hintQ, _ := strconv.Atoi(os.Getenv("RPW_RATEHINT_Q"))
 	spec := medialink.EncodeSpec{Encoder: encoder, Codec: codec,
-		Width: w, Height: h, FPS: 60, BitrateKbps: kbps, MaxHeight: maxh, VAAPIRenderNode: node4}
+		Width: w, Height: h, FPS: 60, BitrateKbps: kbps, MaxHeight: maxh, VAAPIRenderNode: node4,
+		QualityTarget: quality}
 	esrc, started, err := de.StartDMABufEncode(spec)
 	if err != nil || !started {
 		t.Fatalf("StartDMABufEncode started=%v err=%v", started, err)
@@ -79,6 +85,9 @@ func TestDMABufEncodeAPI(t *testing.T) {
 	var winBytes int
 	var winStart time.Time
 	var maxWinKbps, lastWinKbps float64
+	// Quality feedback sampling (adaptive budget): avg QP + the fraction of samples rate-limited.
+	var fbSamples, fbRateLimited int
+	var fbQPSum float64
 	// Optional mid-run SetRateHint (RPW_RATEHINT_KBPS): drop the budget at the midpoint; lastWinKbps
 	// then reflects the post-hint window to prove it took effect within ~1s.
 	hintKbps, _ := strconv.Atoi(os.Getenv("RPW_RATEHINT_KBPS"))
@@ -102,6 +111,23 @@ func TestDMABufEncodeAPI(t *testing.T) {
 		if hintKbps > 0 && i == hintAt {
 			if rc, ok := esrc.(medialink.RateControlSource); ok {
 				rc.SetRateHint(medialink.RateHint{MaxBitrateKbps: hintKbps})
+			}
+		}
+		if hintQ > 0 && i == hintAt { // live quality-level change (no reopen)
+			if rc, ok := esrc.(medialink.RateControlSource); ok {
+				rc.SetRateHint(medialink.RateHint{QualityTarget: hintQ})
+			}
+		}
+		if quality > 0 && i >= warm && (i-warm)%30 == 0 { // ~1s feedback sampling
+			if pr, ok := esrc.(medialink.PipelineReporter); ok {
+				fb := pr.PipeStats().Feedback
+				if fb.Present {
+					fbSamples++
+					fbQPSum += fb.AvgQP
+					if fb.RateLimited {
+						fbRateLimited++
+					}
+				}
 			}
 		}
 		if maxh2 > 0 {
@@ -162,6 +188,19 @@ func TestDMABufEncodeAPI(t *testing.T) {
 	t.Logf("PLI->IDR latency: %d frames", pliLatencyFrames)
 	t.Logf("PipeStats: engine=%s outFps=%.1f capFps=%.1f dropped=%d zeroCopy=%v bytes/frame=%.0f node=%s",
 		st.Encoder, st.OutFPS, st.CapFPS, st.Dropped, st.ZeroCopy, st.AUBytesPerFrame, st.DevPolicy)
+	if quality > 0 {
+		t.Logf("QUALITY q=%d targetQP=%d budget=%d  avgQP=%.1f  rateLimited=%d/%d (%.0f%%)  present=%v finalQP=%.1f finalRL=%v",
+			quality, medialink.QualityToQP(codec, quality), st.BudgetKbps,
+			fbQPSum/float64(max1(fbSamples)), fbRateLimited, fbSamples,
+			100*float64(fbRateLimited)/float64(max1(fbSamples)), st.Feedback.Present,
+			st.Feedback.AvgQP, st.Feedback.RateLimited)
+		if !st.Feedback.Present {
+			t.Error("quality mode but the encoder reported no feedback (Present=false)")
+		}
+		if st.QualityTarget != quality {
+			t.Errorf("PipeStats.QualityTarget = %d, want %d", st.QualityTarget, quality)
+		}
+	}
 	if !sawFirstKey {
 		t.Error("route did not open with a keyframe")
 	}
@@ -178,6 +217,117 @@ func max1(n int) int {
 		return 1
 	}
 	return n
+}
+
+// TestDMABufEncodeHistogram measures the per-frame DELIVERY cadence of the capture+encode engine as a
+// read-only second consumer: inter-AU interval p50/p99/max + counts over 25/50 ms, newest-wins drops,
+// capture/encode fps. This is the stutter oracle - an even source should yield a tight histogram; a
+// pipeline that overruns its PipeWire cycle under load shows interval spikes and climbing drops. Set
+// RPW_TEST_NODE + RPW_HIST; RPW_HIST_SECS (default 15), RPW_ENC_CODEC, RPW_ENC_KBPS, RPW_ENC_Q.
+func TestDMABufEncodeHistogram(t *testing.T) {
+	node := os.Getenv("RPW_TEST_NODE")
+	if node == "" || os.Getenv("RPW_HIST") == "" {
+		t.Skip("set RPW_TEST_NODE + RPW_HIST")
+	}
+	if !captureAvailable() || !VAEncodeAvailable() {
+		t.Skip("pwcapture/VA not available")
+	}
+	secs := 15
+	if v, err := strconv.Atoi(os.Getenv("RPW_HIST_SECS")); err == nil && v > 0 {
+		secs = v
+	}
+	node4 := os.Getenv("RPW_EGL_DEVICE")
+	if node4 == "" {
+		node4 = "/dev/dri/renderD128"
+	}
+	kbps, _ := strconv.Atoi(os.Getenv("RPW_ENC_KBPS"))
+	if kbps == 0 {
+		kbps = 25000
+	}
+	quality, _ := strconv.Atoi(os.Getenv("RPW_ENC_Q"))
+	encoder, codec := medialink.EncoderVAAPINativeH264, medialink.CodecH264
+	if os.Getenv("RPW_ENC_CODEC") == "hevc" {
+		encoder, codec = medialink.EncoderVAAPINativeHEVC, medialink.CodecHEVC
+	}
+	src, err := openCapture(context.Background(), nil, node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = src.Close() }()
+	de := src.(medialink.DMABufEncodeSource)
+	spec := medialink.EncodeSpec{Encoder: encoder, Codec: codec, FPS: 60,
+		BitrateKbps: kbps, QualityTarget: quality, VAAPIRenderNode: node4}
+	esrc, started, err := de.StartDMABufEncode(spec)
+	if err != nil || !started {
+		t.Fatalf("StartDMABufEncode started=%v err=%v", started, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(secs+30)*time.Second)
+	defer cancel()
+	pr, _ := esrc.(medialink.PipelineReporter)
+	warm := 60
+	var intervals []float64 // ms between successive AUs
+	var last, winStart time.Time
+	var dropAtWarm uint64
+	for i := 0; ; i++ {
+		fr, err := esrc.Next(ctx)
+		if err != nil {
+			t.Fatalf("Next after %d: %v", i, err)
+		}
+		_ = fr
+		now := time.Now()
+		if i == warm {
+			winStart = now
+			last = now
+			if pr != nil {
+				dropAtWarm = pr.PipeStats().Dropped
+			}
+			continue
+		}
+		if i > warm {
+			intervals = append(intervals, now.Sub(last).Seconds()*1000)
+			last = now
+			if now.Sub(winStart) >= time.Duration(secs)*time.Second {
+				break
+			}
+		}
+	}
+	sort.Float64s(intervals)
+	pct := func(p float64) float64 {
+		if len(intervals) == 0 {
+			return 0
+		}
+		idx := int(p / 100 * float64(len(intervals)))
+		if idx >= len(intervals) {
+			idx = len(intervals) - 1
+		}
+		return intervals[idx]
+	}
+	var over25, over50 int
+	var sum float64
+	for _, v := range intervals {
+		sum += v
+		if v > 25 {
+			over25++
+		}
+		if v > 50 {
+			over50++
+		}
+	}
+	var st medialink.PipelineStats
+	if pr != nil {
+		st = pr.PipeStats()
+	}
+	fps := float64(len(intervals)) / time.Since(winStart).Seconds()
+	drops := st.Dropped - dropAtWarm
+	t.Logf("HIST node=%s codec=%s q=%d ceil=%d secs=%d frames=%d fps=%.2f",
+		node, os.Getenv("RPW_ENC_CODEC"), quality, kbps, secs, len(intervals), fps)
+	t.Logf("HIST interval ms: mean=%.2f p50=%.2f p90=%.2f p99=%.2f max=%.2f  >25ms=%d >50ms=%d",
+		sum/float64(max1(len(intervals))), pct(50), pct(90), pct(99), pct(100), over25, over50)
+	t.Logf("HIST engine: newest-wins drops(window)=%d capFps=%.2f outFps=%.2f zeroCopy=%v bytes/frame=%.0f",
+		drops, st.CapFPS, st.OutFPS, st.ZeroCopy, st.AUBytesPerFrame)
+	if len(intervals) < secs*20 {
+		t.Errorf("far too few frames (%d) in %ds - capture stalled", len(intervals), secs)
+	}
 }
 
 // TestVAEncodeDump drives the zero-copy VA capture+encode path (set RPW_VA_ENC=1): PipeWire dmabuf

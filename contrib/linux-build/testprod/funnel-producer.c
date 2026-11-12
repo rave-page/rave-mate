@@ -78,6 +78,124 @@ static double now_s(void) {
 	return ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
+// read_full: read exactly n bytes from fd (looping short reads). Returns 1 ok, 0 on EOF/short.
+static int read_full(int fd, unsigned char *buf, size_t n) {
+	size_t got = 0;
+	while (got < n) {
+		ssize_t r = read(fd, buf + got, n - got);
+		if (r <= 0)
+			return 0;
+		got += (size_t)r;
+	}
+	return 1;
+}
+
+// --- src frame (stdin BGRA) -> GL texture -> blit into the libfunnel dmabuf FBO -----------------
+// Mode M_STDIN: raw BGRA frames arrive on stdin (fed by `ffmpeg -hwaccel vaapi -i file -f rawvideo
+// -pix_fmt bgra -`). We upload each to a texture once and blit it (Y-flipped so a top-down source is
+// published top-down like Spout2PW) into every published dmabuf buffer; frame-doubling re-publishes
+// the SAME texture so the 60 Hz cadence is exercised with real 4K content from a 30 fps source.
+static GLuint g_srctex, g_readfb;
+static unsigned char *g_srcbuf;
+static int g_flipy = 1;
+
+static void stdin_setup(int w, int h) {
+	g_srcbuf = malloc((size_t)w * h * 4);
+	if (!g_srcbuf)
+		die("malloc srcbuf");
+	glGenTextures(1, &g_srctex);
+	glBindTexture(GL_TEXTURE_2D, g_srctex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+	glGenFramebuffers(1, &g_readfb);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, g_readfb);
+	glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_srctex, 0);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+	if (getenv("RPW_PROD_NOFLIPY"))
+		g_flipy = 0;
+}
+
+// stdin_read_frame: pull one BGRA frame from stdin into the texture. Returns 0 on EOF.
+static int stdin_read_frame(int w, int h) {
+	if (!read_full(0, g_srcbuf, (size_t)w * h * 4))
+		return 0;
+	glBindTexture(GL_TEXTURE_2D, g_srctex);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_BGRA, GL_UNSIGNED_BYTE, g_srcbuf);
+	return 1;
+}
+
+// blit_src: copy the current src texture into the bound DRAW fbo (the dmabuf), optional Y-flip.
+static void blit_src(int w, int h) {
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, g_readfb);
+	if (g_flipy)
+		glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	else
+		glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+}
+
+// draw_bar: a smooth horizontal sweep (a bright vertical bar moving L->R, wrapping) on a dark field -
+// a synthetic even-motion 4K source where any dropped/duplicated frame is visible to the eye and
+// countable from captures. No stdin, no shaders.
+static void draw_bar(int w, int h, unsigned frame) {
+	glViewport(0, 0, w, h);
+	glDisable(GL_SCISSOR_TEST);
+	glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glEnable(GL_SCISSOR_TEST);
+	int bw = w / 48;
+	if (bw < 4)
+		bw = 4;
+	int speed = w / 90; // ~1.5 s per sweep at 60 fps
+	if (speed < 1)
+		speed = 1;
+	int x = (int)((frame * (unsigned)speed) % (unsigned)w);
+	glScissor(x, 0, bw, h);
+	glClearColor(0.95f, 0.95f, 1.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	if (x + bw > w) { // wrap the leading edge
+		glScissor(0, 0, (x + bw) - w, h);
+		glClear(GL_COLOR_BUFFER_BIT);
+	}
+	glDisable(GL_SCISSOR_TEST);
+}
+
+// interval stats over a 2 s window: confirms the producer's OWN presentation cadence is even (a valid
+// reference) before we blame the consumer.
+struct ival {
+	double win_t0, last;
+	int n;
+	double sum, max;
+	int over25, over50;
+};
+static void ival_tick(struct ival *v, double t) {
+	if (v->last > 0) {
+		double dt = (t - v->last) * 1000.0;
+		v->sum += dt;
+		v->n++;
+		if (dt > v->max)
+			v->max = dt;
+		if (dt > 25)
+			v->over25++;
+		if (dt > 50)
+			v->over50++;
+	}
+	v->last = t;
+	if (v->win_t0 == 0)
+		v->win_t0 = t;
+	if (t - v->win_t0 >= 2.0) {
+		fprintf(stderr, "funnel-producer: present n=%d mean=%.2fms max=%.2fms >25ms=%d >50ms=%d\n",
+			v->n, v->n ? v->sum / v->n : 0, v->max, v->over25, v->over50);
+		v->win_t0 = t;
+		v->n = 0;
+		v->sum = 0;
+		v->max = 0;
+		v->over25 = 0;
+		v->over50 = 0;
+	}
+}
+
 // noise_enabled: RPW_PROD_NOISE => high-motion, high-entropy frames (a grid of per-cell random
 // colours that change every frame) to stress the encoder's bitrate ceiling. Still paints the 4 corners
 // so orientation stays checkable.
@@ -149,6 +267,8 @@ int main(int argc, char **argv) {
 	double fps = atof(argv[3]);
 	const char *name = argv[4];
 	enum funnel_sync fe = FUNNEL_SYNC_BOTH, be = FUNNEL_SYNC_BOTH;
+	enum { M_PATTERN, M_BAR, M_STDIN } mode = M_PATTERN;
+	int dbl = 1; // frame-doubling: publish each SOURCE frame `dbl` times (stdin mode)
 	for (int i = 5; i < argc; i++) {
 		if (!strcmp(argv[i], "-implicit"))
 			fe = be = FUNNEL_SYNC_IMPLICIT;
@@ -158,6 +278,14 @@ int main(int argc, char **argv) {
 			fe = FUNNEL_SYNC_EXPLICIT, be = FUNNEL_SYNC_BOTH;
 		else if (!strcmp(argv[i], "-either"))
 			fe = be = FUNNEL_SYNC_BOTH;
+		else if (!strcmp(argv[i], "-stdin"))
+			mode = M_STDIN;
+		else if (!strcmp(argv[i], "-bar"))
+			mode = M_BAR;
+		else if (!strcmp(argv[i], "-double"))
+			dbl = 2;
+		else if (!strncmp(argv[i], "-double=", 8))
+			dbl = atoi(argv[i] + 8) > 0 ? atoi(argv[i] + 8) : 1;
 	}
 
 	init_egl_surfaceless("/dev/dri/renderD128");
@@ -188,9 +316,14 @@ int main(int argc, char **argv) {
 
 	GLuint fb = 0;
 	glGenFramebuffers(1, &fb);
-	fprintf(stderr, "funnel-producer: streaming '%s' %dx%d @%.0f\n", name, w, h, fps);
+	if (mode == M_STDIN)
+		stdin_setup(w, h);
+	fprintf(stderr, "funnel-producer: streaming '%s' %dx%d @%.0f mode=%s double=%d\n", name, w, h, fps,
+		mode == M_STDIN ? "stdin" : mode == M_BAR ? "bar" : "pattern", dbl);
 
 	unsigned frame = 0;
+	int eof = 0;
+	struct ival iv = {0};
 	double period = 1.0 / fps;
 	double next = now_s();
 	double fps_t0 = now_s();
@@ -201,6 +334,13 @@ int main(int argc, char **argv) {
 			fprintf(stderr, "funnel-producer: render %.1f fps\n", (frame - fps_f0) / (tn - fps_t0));
 			fps_t0 = tn;
 			fps_f0 = frame;
+		}
+		// stdin mode: pull a NEW source frame every `dbl` published frames (frame-doubling).
+		if (mode == M_STDIN && (frame % (unsigned)dbl) == 0) {
+			if (!stdin_read_frame(w, h)) {
+				eof = 1;
+				break;
+			}
 		}
 		struct funnel_buffer *buf = NULL;
 		if (funnel_stream_dequeue(stream, &buf) < 0)
@@ -221,7 +361,12 @@ int main(int argc, char **argv) {
 				glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, image);
 				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb);
 				glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
-				draw_pattern(w, h, frame);
+				if (mode == M_STDIN)
+					blit_src(w, h);
+				else if (mode == M_BAR)
+					draw_bar(w, h, frame);
+				else
+					draw_pattern(w, h, frame);
 				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 				glDeleteTextures(1, &tex);
 				if (funnel_buffer_has_sync(buf)) {
@@ -233,6 +378,7 @@ int main(int argc, char **argv) {
 				}
 			}
 			funnel_stream_enqueue(stream, buf);
+			ival_tick(&iv, now_s());
 			frame++;
 		}
 		next += period;
@@ -244,6 +390,8 @@ int main(int argc, char **argv) {
 			next = now_s();
 		}
 	}
+	if (eof)
+		fprintf(stderr, "funnel-producer: stdin EOF after %u frames\n", frame);
 	funnel_stream_stop(stream);
 	funnel_stream_destroy(stream);
 	funnel_shutdown(ctx);

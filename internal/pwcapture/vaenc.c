@@ -456,6 +456,18 @@ struct rva_enc {
 	int rc_scale_pct;     /* effective budget = kbps * rc_scale_pct/100 (0 => codec default) */
 	long long win_bits;   /* AU bits accumulated in the current ~1s window */
 	int win_frames;
+	/* constant-quality-with-ceiling (adaptive budget). quality_mode => the enc config is VA_RC_CQP and
+	 * the frame QP is cur_qp (not driver rate control): hold cur_qp == target_qp so simple content
+	 * undershoots, and raise cur_qp toward 51 (via the sub-window ceiling controller) only when the 1s
+	 * rate would exceed the kbps ceiling. rate_limited = cur_qp > target_qp. */
+	int quality_mode;     /* 1 = CQP constant-quality; 0 = legacy CBR */
+	int target_qp;        /* quality floor (medialink.QualityToQP); cur_qp never drops below it */
+	int cur_qp;           /* current CQP (>= target_qp); encoded into pic_init_qp + the packed PPS */
+	long long qc_bits;    /* bits emitted in the current sub-window (~250ms) */
+	int qc_frames;        /* frames in the current sub-window */
+	int qc_sub;           /* frames per sub-window (~fps/4): raise the ceiling fast, release slow */
+	int qc_under;         /* consecutive comfortable sub-windows (slow-release hysteresis streak) */
+	int rate_limited;     /* last controller verdict (cur_qp > target_qp): reported in feedback */
 	int mbw, mbh;
 	int log2_max_fn;
 	/* VPP (rgb import -> nv12 scale/convert) */
@@ -486,6 +498,10 @@ struct rva_enc {
 	VASurfaceID cache_surf[16];
 	int cache_n;
 };
+
+/* enc_init_qp is the init QP written into the PPS and the picture param: the live cur_qp in quality
+ * (CQP) mode, the fixed 26 reference in legacy (CBR) mode (the driver deltas from 26 itself). */
+static int enc_init_qp(struct rva_enc *e) { return e->quality_mode ? e->cur_qp : 26; }
 
 static int level_for(int w, int h, int fps) {
 	long mbs = (long)(w / 16) * (h / 16) * fps;
@@ -533,7 +549,6 @@ static void write_sps(struct bs *b, struct rva_enc *e) {
 	bs_trailing(b);
 }
 static void write_pps(struct bs *b, struct rva_enc *e) {
-	(void)e;
 	bs_startcode(b);
 	bs_bits(b, 0, 1);
 	bs_bits(b, 3, 2);
@@ -547,7 +562,7 @@ static void write_pps(struct bs *b, struct rva_enc *e) {
 	bs_ue(b, 0);            /* num_ref_idx_l1_default_active_minus1 */
 	bs_bits(b, 0, 1);       /* weighted_pred_flag */
 	bs_bits(b, 0, 2);       /* weighted_bipred_idc */
-	bs_se(b, 0);            /* pic_init_qp_minus26 */
+	bs_se(b, enc_init_qp(e) - 26); /* pic_init_qp_minus26 (quality mode: the live CQP value; else 26) */
 	bs_se(b, 0);            /* pic_init_qs_minus26 */
 	bs_se(b, 0);            /* chroma_qp_index_offset */
 	bs_bits(b, 0, 1);       /* deblocking_filter_control_present */
@@ -683,7 +698,6 @@ static void write_sps_hevc(struct bs *b, struct rva_enc *e) {
 }
 
 static void write_pps_hevc(struct bs *b, struct rva_enc *e) {
-	(void)e;
 	hevc_nal(b, 34); /* PPS */
 	bs_ue(b, 0);          /* pps_pic_parameter_set_id */
 	bs_ue(b, 0);          /* pps_seq_parameter_set_id */
@@ -694,7 +708,7 @@ static void write_pps_hevc(struct bs *b, struct rva_enc *e) {
 	bs_bits(b, 0, 1);     /* cabac_init_present_flag */
 	bs_ue(b, 0);          /* num_ref_idx_l0_default_active_minus1 */
 	bs_ue(b, 0);          /* num_ref_idx_l1_default_active_minus1 */
-	bs_se(b, 0);          /* init_qp_minus26 */
+	bs_se(b, enc_init_qp(e) - 26); /* init_qp_minus26 (quality mode: the live CQP value; else 26) */
 	bs_bits(b, 0, 1);     /* constrained_intra_pred_flag */
 	bs_bits(b, 0, 1);     /* transform_skip_enabled_flag */
 	bs_bits(b, 1, 1);     /* cu_qp_delta_enabled_flag=1: let the RC vary QP per-CU (bounds the bitrate;
@@ -802,7 +816,7 @@ static int vpp_to_nv12(struct rva_enc *e, VASurfaceID target, uint32_t drm_fourc
 	return rc;
 }
 
-rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps, int bitrate_kbps) {
+rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps, int bitrate_kbps, int quality_qp) {
 	if (!va_load() || out_w < 16 || out_h < 16 || out_w > 8192 || out_h > 8192)
 		return NULL;
 	if (codec != 0 && codec != 1) /* 0 = H.264, 1 = HEVC */
@@ -812,6 +826,14 @@ rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps,
 		return NULL;
 	e->codec = codec;
 	e->rc_scale_pct = codec == 1 ? 68 : 90; /* HEVC: pre-compensate radeonsi's ~1.4x RC overshoot */
+	/* constant-quality-with-ceiling: quality_qp>0 => CQP at that QP (the floor), ceiling = bitrate. */
+	if (quality_qp > 0) {
+		e->quality_mode = 1;
+		if (quality_qp > 51)
+			quality_qp = 51;
+		e->target_qp = quality_qp;
+		e->cur_qp = quality_qp;
+	}
 	e->fd = open(node, O_RDWR | O_CLOEXEC);
 	if (e->fd < 0) {
 		free(e);
@@ -820,6 +842,7 @@ rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps,
 	e->out_w = out_w;
 	e->out_h = out_h;
 	e->fps = fps > 0 ? fps : 60;
+	e->qc_sub = e->fps / 4 > 0 ? e->fps / 4 : 1; /* ~4 ceiling checks/s: fast raise, slow release */
 	e->kbps = bitrate_kbps > 0 ? bitrate_kbps : 20000;
 	e->mbw = (out_w + 15) / 16;
 	e->mbh = (out_h + 15) / 16;
@@ -855,10 +878,12 @@ rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps,
 	ea[0].type = VAConfigAttribRTFormat;
 	ea[0].value = VA_RT_FORMAT_YUV420;
 	ea[1].type = VAConfigAttribRateControl;
-	/* CBR holds the average at the budget directly (radeonsi VBR, esp. HEVC, overshoots 1.6-1.8x and
-	 * does not honour min_qp as a ceiling lever). disable_bit_stuffing (set in append_rc_misc) keeps
-	 * static content UNDER the budget instead of padding it. */
-	ea[1].value = VA_RC_CBR;
+	/* Quality mode: VA_RC_CQP - the one RC mode radeonsi honours exactly (QP comes straight from the
+	 * pic param, no driver rate seeking), so constant-quality + the software ceiling controller are
+	 * reliable. Legacy mode: CBR holds the average at the budget directly (radeonsi VBR, esp. HEVC,
+	 * overshoots 1.6-1.8x and does not honour min_qp as a ceiling lever); disable_bit_stuffing (set in
+	 * append_rc_misc) keeps static content UNDER the budget instead of padding it. */
+	ea[1].value = e->quality_mode ? VA_RC_CQP : VA_RC_CBR;
 	ea[2].type = VAConfigAttribEncPackedHeaders;
 	ea[2].value = VA_ENC_PACKED_HEADER_SEQUENCE | VA_ENC_PACKED_HEADER_PICTURE | VA_ENC_PACKED_HEADER_SLICE;
 	VAProfile encProfile = (codec == 1) ? VAProfileHEVCMain : VAProfileH264ConstrainedBaseline;
@@ -897,8 +922,10 @@ static void append_rc_misc(struct rva_enc *e, VABufferID *bufs, int *pnb) {
 	unsigned eff = (unsigned)e->kbps * 1000;
 	if (e->rc_scale_pct > 0)
 		eff = (unsigned)((long long)e->kbps * 1000 * e->rc_scale_pct / 100);
+	/* Quality (CQP) mode: no bitrate RC / HRD param - the QP comes from the pic param and the ceiling
+	 * is enforced in software (the sub-window controller). Only the frame rate is advertised. */
 	VABufferID rcb;
-	if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncMiscParameterBufferType,
+	if (!e->quality_mode && VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncMiscParameterBufferType,
 		sizeof(VAEncMiscParameterBuffer) + sizeof(VAEncMiscParameterRateControl), 1, NULL, &rcb) == VA_STATUS_SUCCESS &&
 		VA.MapBuffer(e->dpy, rcb, (void **)&mb) == VA_STATUS_SUCCESS) {
 		mb->type = VAEncMiscParameterTypeRateControl;
@@ -926,7 +953,7 @@ static void append_rc_misc(struct rva_enc *e, VABufferID *bufs, int *pnb) {
 		bufs[(*pnb)++] = frb;
 	}
 	VABufferID hrdb;
-	if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncMiscParameterBufferType,
+	if (!e->quality_mode && VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncMiscParameterBufferType,
 		sizeof(VAEncMiscParameterBuffer) + sizeof(VAEncMiscParameterHRD), 1, NULL, &hrdb) == VA_STATUS_SUCCESS &&
 		VA.MapBuffer(e->dpy, hrdb, (void **)&mb) == VA_STATUS_SUCCESS) {
 		mb->type = VAEncMiscParameterTypeHRD;
@@ -985,7 +1012,7 @@ static int build_hevc_bufs(struct rva_enc *e, int idx, int idr, VABufferID *bufs
 	pp.coded_buf = e->coded[idx];
 	pp.collocated_ref_pic_index = 0xff; /* temporal MVP off => no collocated */
 	pp.last_picture = 0;
-	pp.pic_init_qp = 26;
+	pp.pic_init_qp = enc_init_qp(e); /* quality mode: the live CQP value; else the 26 CBR reference */
 	pp.diff_cu_qp_delta_depth = 0;
 	pp.nal_unit_type = (uint8_t)(idr ? 19 : 1); /* IDR_W_RADL : TRAIL_R */
 	pp.pic_fields.bits.idr_pic_flag = idr ? 1 : 0;
@@ -997,32 +1024,37 @@ static int build_hevc_bufs(struct rva_enc *e, int idx, int idr, VABufferID *bufs
 		return -4;
 	bufs[(*pnb)++] = pb;
 	unsigned char hdr[512];
-	if (idr) {
+	if (idr) { /* VPS+SPS = the Sequence packed header (IDR only) */
 		struct bs b;
 		bs_init(&b, hdr, sizeof(hdr));
 		write_vps_hevc(&b, e);
 		write_sps_hevc(&b, e);
-		int seq_len = b.len; /* VPS+SPS as the Sequence packed header */
-		write_pps_hevc(&b, e);
 		VAEncPackedHeaderParameterBuffer ph;
 		memset(&ph, 0, sizeof(ph));
 		ph.type = VAEncPackedHeaderSequence;
-		ph.bit_length = (unsigned)seq_len * 8;
+		ph.bit_length = (unsigned)b.len * 8;
 		ph.has_emulation_bytes = 1;
 		VABufferID phb, pdb;
 		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderParameterBufferType, sizeof(ph), 1, &ph, &phb) == VA_STATUS_SUCCESS)
 			bufs[(*pnb)++] = phb;
-		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderDataBufferType, (unsigned)seq_len, 1, hdr, &pdb) == VA_STATUS_SUCCESS)
+		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderDataBufferType, (unsigned)b.len, 1, hdr, &pdb) == VA_STATUS_SUCCESS)
 			bufs[(*pnb)++] = pdb;
+	}
+	/* PPS = the Picture packed header. In quality mode re-emit it every frame (it carries the live CQP
+	 * init_qp); in legacy mode only at IDR. ~12 bytes, negligible at 60fps. */
+	if (idr || e->quality_mode) {
+		struct bs b;
+		bs_init(&b, hdr, sizeof(hdr));
+		write_pps_hevc(&b, e);
 		VAEncPackedHeaderParameterBuffer ph2;
 		memset(&ph2, 0, sizeof(ph2));
 		ph2.type = VAEncPackedHeaderPicture;
-		ph2.bit_length = (unsigned)(b.len - seq_len) * 8;
+		ph2.bit_length = (unsigned)b.len * 8;
 		ph2.has_emulation_bytes = 1;
 		VABufferID phb2, pdb2;
 		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderParameterBufferType, sizeof(ph2), 1, &ph2, &phb2) == VA_STATUS_SUCCESS)
 			bufs[(*pnb)++] = phb2;
-		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderDataBufferType, (unsigned)(b.len - seq_len), 1, hdr + seq_len, &pdb2) == VA_STATUS_SUCCESS)
+		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderDataBufferType, (unsigned)b.len, 1, hdr, &pdb2) == VA_STATUS_SUCCESS)
 			bufs[(*pnb)++] = pdb2;
 	}
 	unsigned char sh[64];
@@ -1156,7 +1188,7 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 	}
 	pp.coded_buf = e->coded[idx];
 	pp.frame_num = e->frame_num & ((1 << e->log2_max_fn) - 1);
-	pp.pic_init_qp = 26;
+	pp.pic_init_qp = enc_init_qp(e); /* quality mode: the live CQP value; else the 26 CBR reference */
 	pp.pic_fields.bits.idr_pic_flag = idr ? 1 : 0;
 	pp.pic_fields.bits.reference_pic_flag = 1;
 	pp.pic_fields.bits.entropy_coding_mode_flag = 0;
@@ -1168,31 +1200,36 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 	bufs[nb++] = pb;
 
 	unsigned char hdr[512];
-	if (idr) {
+	if (idr) { /* SPS = the Sequence packed header (IDR only; carries no QP) */
 		struct bs b;
 		bs_init(&b, hdr, sizeof(hdr));
 		write_sps(&b, e);
-		int sps_len = b.len;
-		write_pps(&b, e);
 		VAEncPackedHeaderParameterBuffer ph;
 		memset(&ph, 0, sizeof(ph));
 		ph.type = VAEncPackedHeaderSequence;
-		ph.bit_length = (unsigned)sps_len * 8;
+		ph.bit_length = (unsigned)b.len * 8;
 		ph.has_emulation_bytes = 1;
 		VABufferID phb, pdb;
 		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderParameterBufferType, sizeof(ph), 1, &ph, &phb) == VA_STATUS_SUCCESS)
 			bufs[nb++] = phb;
-		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderDataBufferType, (unsigned)sps_len, 1, hdr, &pdb) == VA_STATUS_SUCCESS)
+		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderDataBufferType, (unsigned)b.len, 1, hdr, &pdb) == VA_STATUS_SUCCESS)
 			bufs[nb++] = pdb;
+	}
+	/* PPS = the Picture packed header. In quality mode re-emit it every frame (it carries the live CQP
+	 * init_qp); in legacy mode only at IDR. ~10 bytes, negligible at 60fps. */
+	if (idr || e->quality_mode) {
+		struct bs b;
+		bs_init(&b, hdr, sizeof(hdr));
+		write_pps(&b, e);
 		VAEncPackedHeaderParameterBuffer ph2;
 		memset(&ph2, 0, sizeof(ph2));
 		ph2.type = VAEncPackedHeaderPicture;
-		ph2.bit_length = (unsigned)(b.len - sps_len) * 8;
+		ph2.bit_length = (unsigned)b.len * 8;
 		ph2.has_emulation_bytes = 1;
 		VABufferID phb2, pdb2;
 		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderParameterBufferType, sizeof(ph2), 1, &ph2, &phb2) == VA_STATUS_SUCCESS)
 			bufs[nb++] = phb2;
-		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderDataBufferType, (unsigned)(b.len - sps_len), 1, hdr + sps_len, &pdb2) == VA_STATUS_SUCCESS)
+		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncPackedHeaderDataBufferType, (unsigned)b.len, 1, hdr, &pdb2) == VA_STATUS_SUCCESS)
 			bufs[nb++] = pdb2;
 	}
 
@@ -1299,10 +1336,26 @@ do_submit:
 	}
 	VA.UnmapBuffer(e->dpy, e->coded[pidx]);
 
-	/* closed-loop bitrate corrector: a 1s window over emitted AU bits. Scale the EFFECTIVE budget sent
-	 * to the driver so the MEASURED output lands on the real budget - lowers rc_scale when the driver
-	 * overshoots, raises it (toward 100%) when well under (static content undershoots either way). */
-	if (off > 0 && e->fps > 0) {
+	if (e->quality_mode) {
+		/* constant-quality ceiling controller: hold cur_qp (== target_qp while content is simple, so it
+		 * undershoots), and over a ~250ms sub-window raise cur_qp toward 51 when the rate would exceed the
+		 * ceiling, releasing slowly toward target_qp when comfortably under. The next frame re-emits the
+		 * PPS with the new QP (no reopen). rate_limited = held above the quality target by the ceiling. */
+		if (off > 0 && e->fps > 0) {
+			e->qc_bits += (long long)off * 8;
+			if (++e->qc_frames >= e->qc_sub) {
+				int nq = rva_qp_next(e->cur_qp, e->target_qp, e->qc_bits, e->qc_frames, e->fps,
+					(long long)e->kbps * 1000, &e->qc_under);
+				e->cur_qp = nq;
+				e->rate_limited = e->cur_qp > e->target_qp;
+				e->qc_bits = 0;
+				e->qc_frames = 0;
+			}
+		}
+	} else if (off > 0 && e->fps > 0) {
+		/* closed-loop bitrate corrector (legacy CBR): a 1s window over emitted AU bits. Scale the
+		 * EFFECTIVE budget sent to the driver so the MEASURED output lands on the real budget - lowers
+		 * rc_scale when the driver overshoots, raises it (toward 100%) when well under. */
 		e->win_bits += (long long)off * 8;
 		if (++e->win_frames >= e->fps) {
 			long long budget = (long long)e->kbps * 1000;
@@ -1339,10 +1392,77 @@ void rva_enc_set_bitrate(rva_enc *e, int kbps) {
 	if (!e || kbps <= 0)
 		return;
 	e->kbps = kbps;
+	if (e->quality_mode) {
+		/* CQP: kbps is the ceiling the software controller enforces. Just reset the sub-window so the new
+		 * ceiling takes effect cleanly on the next window (no RC param to resend). */
+		e->qc_bits = 0;
+		e->qc_frames = 0;
+		e->qc_under = 0;
+		return;
+	}
 	e->rc_scale_pct = e->codec == 1 ? 68 : 90; /* re-seed the corrector for the new budget */
 	e->win_bits = 0;
 	e->win_frames = 0;
-	e->rc_dirty = 1; /* re-send the VBR rate-control misc param on the next frame */
+	e->rc_dirty = 1; /* re-send the CBR rate-control misc param on the next frame */
+}
+
+/* rva_enc_set_quality updates the live constant-quality target QP (quality mode only; no reopen). */
+void rva_enc_set_quality(rva_enc *e, int target_qp) {
+	if (!e || !e->quality_mode || target_qp <= 0)
+		return;
+	if (target_qp > 51)
+		target_qp = 51;
+	e->target_qp = target_qp;
+	if (e->cur_qp < target_qp) /* a lower quality raises the floor immediately */
+		e->cur_qp = target_qp;  /* a higher quality lets the controller drift cur_qp back down */
+	e->rate_limited = e->cur_qp > e->target_qp;
+	e->qc_bits = 0;
+	e->qc_frames = 0;
+	e->qc_under = 0;
+}
+
+/* rva_enc_feedback reports the per-second quality signal (see vaenc.h). */
+void rva_enc_feedback(rva_enc *e, int *present, double *avg_qp, int *rate_limited) {
+	if (present)
+		*present = (e && e->quality_mode) ? 1 : 0;
+	if (avg_qp)
+		*avg_qp = e ? (double)e->cur_qp : 0.0;
+	if (rate_limited)
+		*rate_limited = (e && e->rate_limited) ? 1 : 0;
+}
+
+/* rva_qp_next: the pure constant-quality ceiling controller (see vaenc.h). */
+int rva_qp_next(int cur_qp, int target_qp, long long win_bits, int frames, int fps,
+                long long budget_bits, int *under) {
+	int q = cur_qp;
+	if (frames > 0 && fps > 0 && budget_bits > 0) {
+		double secs = (double)frames / (double)fps;
+		double rate = secs > 0 ? (double)win_bits / secs : 0.0; /* bits/sec over the sub-window */
+		if (rate > (double)budget_bits * 1.5) { /* far over: raise two steps, protect the 1s peak */
+			q += 2;
+			if (under)
+				*under = 0;
+		} else if (rate > (double)budget_bits * 1.1) { /* over the ceiling: raise one step */
+			q += 1;
+			if (under)
+				*under = 0;
+		} else if (rate < (double)budget_bits * 85 / 100) { /* comfortably under: slow release */
+			int u = (under ? *under : 0) + 1;
+			if (u >= 8) { /* ~2s at ~4 sub-windows/s before giving one QP of quality back */
+				q -= 1;
+				u = 0;
+			}
+			if (under)
+				*under = u;
+		} else if (under) { /* dead band [0.85, 1.1]x: hold, reset the release streak */
+			*under = 0;
+		}
+	}
+	if (q < target_qp)
+		q = target_qp;
+	if (q > 51)
+		q = 51;
+	return q;
 }
 
 void rva_enc_free(rva_enc *e) {

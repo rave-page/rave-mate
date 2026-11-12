@@ -70,11 +70,13 @@ type pwSource struct {
 	done   chan struct{} // closed on Close; stops the encode telemetry goroutine
 
 	// vaapi-native encode mode (StartDMABufEncode). Once set, Next returns compressed AUs.
-	encMode  bool
-	encCodec medialink.Codec
-	encName  string // negotiated engine name (PipelineStats.Encoder)
-	encNode  string // VA render node
-	lastMaxH int    // last MaxHeight applied via SetRateHint (coded-height cap; 0 = native)
+	encMode    bool
+	encCodec   medialink.Codec
+	encName    string // negotiated engine name (PipelineStats.Encoder)
+	encNode    string // VA render node
+	lastMaxH   int    // last MaxHeight applied via SetRateHint (coded-height cap; 0 = native)
+	encQuality int    // active constant-quality target (1..100; 0 = legacy rate-controlled) - for ctl
+	encKbps    int    // active bitrate budget CEILING (kbps); updated live by SetRateHint - for ctl
 
 	// telemetry: windowed rates ticked per AU, so OutFPS/CapFPS/bytes-per-frame are accurate on ANY
 	// single read (the route's ctl stats poll once) - the MF bridge does the same. Earlier the engine
@@ -176,7 +178,11 @@ func (s *pwSource) StartDMABufEncode(spec medialink.EncodeSpec) (medialink.Sourc
 		cnode = C.CString(node)
 		defer C.free(unsafe.Pointer(cnode))
 	}
-	if C.rpw_set_encode(s.h, C.int(codec), C.int(spec.BitrateKbps), C.int(spec.MaxHeight), C.int(fps), cnode) == 0 {
+	// Adaptive budget: QualityTarget>0 (auto mode, the default) => constant-quality-with-ceiling. Map
+	// the 1..100 target to the VA engine's CQP value here (the medialink reference mapping), and pass
+	// BitrateKbps as the ceiling. 0 => legacy rate-controlled (CBR), unchanged.
+	qp := medialink.QualityToQP(spec.Codec, spec.QualityTarget)
+	if C.rpw_set_encode(s.h, C.int(codec), C.int(spec.BitrateKbps), C.int(spec.MaxHeight), C.int(fps), cnode, C.int(qp)) == 0 {
 		return nil, false, nil // VA unavailable (or HEVC not yet supported by the native engine)
 	}
 	s.mu.Lock()
@@ -185,6 +191,8 @@ func (s *pwSource) StartDMABufEncode(spec medialink.EncodeSpec) (medialink.Sourc
 	s.encName = spec.Encoder
 	s.encNode = node
 	s.lastMaxH = spec.MaxHeight // initial coded cap applied at engage; SetRateHint diffs against it
+	s.encQuality = spec.QualityTarget
+	s.encKbps = spec.BitrateKbps
 	if s.done == nil {
 		s.done = make(chan struct{})
 	}
@@ -194,7 +202,8 @@ func (s *pwSource) StartDMABufEncode(spec medialink.EncodeSpec) (medialink.Sourc
 	if s.log != nil {
 		s.log.Info(source, "vaapi-native encode engaged", map[string]any{
 			"node": s.node, "encoder": spec.Encoder, "in": sizeStr(spec.Width, spec.Height),
-			"maxHeight": spec.MaxHeight, "kbps": spec.BitrateKbps, "renderNode": node})
+			"maxHeight": spec.MaxHeight, "kbps": spec.BitrateKbps, "qualityTarget": spec.QualityTarget,
+			"targetQP": qp, "renderNode": node})
 	}
 	return s, true, nil
 }
@@ -273,6 +282,16 @@ func (s *pwSource) SetRateHint(h medialink.RateHint) {
 	}
 	if h.MaxBitrateKbps > 0 {
 		C.rpw_set_bitrate(s.h, C.int(h.MaxBitrateKbps))
+		s.mu.Lock()
+		s.encKbps = h.MaxBitrateKbps // the new CEILING (ctl explainability)
+		s.mu.Unlock()
+	}
+	if h.QualityTarget > 0 { // live constant-quality change (rare; the budget usually moves the ceiling)
+		qp := medialink.QualityToQP(s.encCodec, h.QualityTarget)
+		C.rpw_set_quality(s.h, C.int(qp))
+		s.mu.Lock()
+		s.encQuality = h.QualityTarget
+		s.mu.Unlock()
 	}
 	if h.MaxHeight != s.lastMaxH { // 0 = restore native coded size
 		s.lastMaxH = h.MaxHeight
@@ -297,11 +316,21 @@ func (s *pwSource) PipeStats() medialink.PipelineStats {
 	_, capFPS := s.capRate.Rate(now) // dmabuf frames/s captured
 	bpf := s.outRate.PerEvent(now)   // bytes per AU (content oracle)
 	auBytes, auCount := s.outRate.Totals()
+	// Adaptive-budget quality signal (CQP mode): present + avg QP + rate-limited (ceiling binding).
+	var present, rateLimited C.int
+	var avgQP C.double
+	C.rpw_enc_feedback(s.h, &present, &avgQP, &rateLimited)
+	s.mu.Lock()
+	quality, kbps := s.encQuality, s.encKbps
+	s.mu.Unlock()
 	return medialink.PipelineStats{
 		Encoder: s.encName, OutFPS: outFPS, CapFPS: capFPS,
 		Dropped: drops, ZeroCopy: importOK,
 		AUBytes: auBytes, AUCount: auCount, AUBytesPerFrame: bpf,
-		DevPolicy: s.encNode,
+		DevPolicy:     s.encNode,
+		QualityTarget: quality, BudgetKbps: kbps,
+		Feedback: medialink.EncoderFeedback{
+			Present: present != 0, AvgQP: float64(avgQP), RateLimited: rateLimited != 0},
 	}
 }
 
@@ -334,3 +363,13 @@ func (s *pwSource) encTelemetry() {
 
 // fmtf is a tiny one-decimal formatter (avoids pulling fmt into the hot path).
 func fmtf(v float64) string { return fmt.Sprintf("%.1f", v) }
+
+// qpNext is the cgo seam for the pure constant-quality ceiling controller (rva_qp_next): cgo cannot
+// live in a _test.go file, so the controller unit test calls this wrapper with injected rates.
+func qpNext(cur, target int, winBits int64, frames, fps int, budget int64, under *int) int {
+	cu := C.int(*under)
+	r := int(C.rva_qp_next(C.int(cur), C.int(target), C.longlong(winBits),
+		C.int(frames), C.int(fps), C.longlong(budget), &cu))
+	*under = int(cu)
+	return r
+}
