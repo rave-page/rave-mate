@@ -310,6 +310,10 @@ type Options struct {
 	GovernorEnabled  func() bool
 	GovernorFloorMB  uint64
 	GovernorBaseKbps func() int
+	// Adaptive bitrate budget (auto mode): BudgetMode returns "auto"/"fixed" (""=auto) and
+	// BudgetUserCeilKbps the user's bitrate ceiling (0=none). nil => fixed behaviour (GovernorBaseKbps).
+	BudgetMode         func() string
+	BudgetUserCeilKbps func() int
 }
 
 // RouteManager owns the media listener + negotiation. Create with New, attach sources/sinks, then
@@ -345,7 +349,9 @@ type RouteManager struct {
 	headroom    func() (freeMB uint64, present bool) // recv-side VRAM governor input (nil = no governor)
 	governorOn  func() bool                          // governor live enable (nil = on when headroom present)
 	govFloorMB  uint64                               // free-VRAM floor the governor protects (0 = default)
-	govBaseKbps func() int                           // route base bitrate ceiling (config.Bitrate)
+	govBaseKbps func() int                           // route base bitrate ceiling (config.Bitrate / fixed mode)
+	budgetMode  func() string                        // adaptive bitrate mode ("auto"/"fixed"; nil=fixed)
+	budgetUserK func() int                           // adaptive user ceiling kbps (0=none)
 
 	sampler procstat.Sampler // daemon RSS sampler for the media memory watchdog
 
@@ -402,6 +408,7 @@ func New(opts Options) *RouteManager {
 		encPolicy: opts.EncodePolicy, encDevice: opts.EncodeDevice,
 		headroom: opts.Headroom, governorOn: opts.GovernorEnabled,
 		govFloorMB: opts.GovernorFloorMB, govBaseKbps: opts.GovernorBaseKbps,
+		budgetMode: opts.BudgetMode, budgetUserK: opts.BudgetUserCeilKbps,
 		udp:     opts.UDP,
 		sources: map[string]sourceReg{}, sinks: map[string]sinkReg{},
 		remoteAdvert: map[string]Advert{}, pendingAns: map[string]*pendingAnswer{},
@@ -686,9 +693,10 @@ func (rm *RouteManager) RemoteAdverts() map[string]Advert {
 // OfferOptions tunes an OfferRoute call (§3.2 P4 surface).
 type OfferOptions struct {
 	Codec       Codec    // explicit codec (raw/audio echo); CodecNone on video = matrix negotiation
-	BitrateKbps int      // video bitrate budget (Offer.Bitrate; 0 = sender default)
+	BitrateKbps int      // video bitrate budget/ceiling (Offer.Bitrate; 0 = sender default)
 	Decoders    []string // per-offer decode-cap override (preferred-codec filter); nil = node set
 	ForceTCP    bool     // offer TCP only (the §2.5 mid-route UDP-blackout fallback re-offer)
+	QualityMode bool     // auto budget: ask the sender for constant-quality-with-ceiling rate control
 }
 
 // Offer requests to receive target's SourceID into local SinkID (must be a registered sink). Codec
@@ -745,7 +753,8 @@ func (rm *RouteManager) OfferRoute(target, sourceID, sinkID string, opt OfferOpt
 
 	off := Offer{Session: session, Target: target, SourceID: sourceID, SinkID: sinkID, Codec: opt.Codec,
 		Transport: TransportTCP, Transports: rm.offerTransports(opt.ForceTCP), NACK: true, Bitrate: opt.BitrateKbps,
-		Enc: enc, Local: local, RouteNonce: offerNonce, Caps: &Caps{Report: true, Sync: true, Decoders: decoders}}
+		QualityMode: opt.QualityMode,
+		Enc:         enc, Local: local, RouteNonce: offerNonce, Caps: &Caps{Report: true, Sync: true, Decoders: decoders}}
 	if raw, err := json.Marshal(off); err == nil {
 		rm.bus.Publish(TopicOffer, raw)
 	}
@@ -1073,6 +1082,9 @@ func (rm *RouteManager) pumpSource(ctx context.Context, session string, pa *pend
 		spec := EncodeSpec{Encoder: pa.choice.Encoder, Codec: pa.choice.Codec, Tier: pa.choice.Tier,
 			Software: pa.choice.Software, Width: pa.srcDesc.Width, Height: pa.srcDesc.Height,
 			FPS: pa.srcDesc.FPS, BitrateKbps: pa.offer.Bitrate, MaxHeight: maxH, DeviceIndex: -1}
+		if pa.offer.QualityMode { // adaptive budget: encode constant-quality capped at BitrateKbps
+			spec.QualityTarget = QualityDefault
+		}
 		if rm.encDevice != nil {
 			spec.DeviceLUID, spec.DeviceIndex = rm.encDevice(spec.Width, spec.Height, int(spec.FPS), spec.Encoder)
 		}
@@ -1372,10 +1384,9 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 	// compose. On a TCP route (no per-datagram loss/delay signal) only the VRAM governor runs.
 	// Compressed video only.
 	if ans.Codec.CompressedVideo() {
-		base := 0
-		if rm.govBaseKbps != nil {
-			base = rm.govBaseKbps()
-		}
+		// Adaptive budget: the governor ceiling is the quality-model target for THIS route's codec +
+		// geometry (fixed mode => the configured value), not a flat config number.
+		base := rm.adaptiveBase(ans.Codec, srcDesc.Width, srcDesc.Height, int(srcDesc.FPS))
 		switch {
 		case udp != nil:
 			go rm.guard("congestGovernor", func() { rm.congestGovernor(rctx, rio, udp, ans.Stream, base, int(srcDesc.FPS)) })

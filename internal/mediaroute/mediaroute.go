@@ -369,9 +369,16 @@ func (m *Manager) StartReceive(peer, sourceID string) (string, error) {
 			return m.openReceiveSink(sender, w, h)
 		})
 	cfg := m.cfg()
+	// Adaptive budget: in auto mode the Offer carries the quality-model target (capped by the user
+	// ceiling) for the preferred codec + source geometry, and asks the sender for constant-quality
+	// rate control; fixed mode sends the configured number as today. The governor refines continuously.
+	mode := medialink.NormalizeBitrateMode(cfg.BitrateModeString())
+	base := medialink.AdaptiveBaseKbps(mode, cfg.UserBitrateCeilKbps(), cfg.Bitrate(),
+		preferredCodecForModel(cfg.PreferCodec), desc.Width, desc.Height, int(desc.FPS))
 	opt := medialink.OfferOptions{
-		BitrateKbps: cfg.Bitrate(),
+		BitrateKbps: base,
 		Decoders:    preferDecoders(cfg.PreferCodec, ad.Caps),
+		QualityMode: mode == medialink.BitrateAuto,
 	}
 	session, err := m.router.OfferRoute(peer, sourceID, sinkID, opt)
 	if err != nil {
@@ -412,6 +419,20 @@ func (m *Manager) StopReceive(session string) {
 	if destroyNow != nil {
 		_ = destroyNow.Close()
 		m.log.Info(source, "receive stopped - kept-alive sender destroyed", map[string]any{"session": session})
+	}
+}
+
+// preferredCodecForModel maps the config preferred-codec string to the wire codec used to estimate
+// the adaptive budget's model target at offer time (the governor refines with the actual negotiated
+// codec). Unknown/auto => H.264 (the highest-bitrate estimate, a safe initial ceiling).
+func preferredCodecForModel(prefer string) medialink.Codec {
+	switch strings.ToLower(strings.TrimSpace(prefer)) {
+	case "hevc", "h265":
+		return medialink.CodecHEVC
+	case "av1":
+		return medialink.CodecAV1
+	default:
+		return medialink.CodecH264
 	}
 }
 

@@ -487,8 +487,11 @@ func TestStartReceiveOffersAndStop(t *testing.T) {
 	}
 	opt := fr.offers[0]
 	fr.mu.Unlock()
-	if opt.BitrateKbps != 8000 || opt.Decoders != nil {
-		t.Fatalf("offer options: %+v", opt)
+	// Auto budget (default): the offer carries the quality-model target for 720p60 (<= the 8000
+	// ceiling) and asks for quality mode, not the flat config number.
+	want := medialink.AdaptiveBaseKbps(medialink.BitrateAuto, 8000, 8000, medialink.CodecH264, 1280, 720, 60)
+	if opt.BitrateKbps != want || opt.BitrateKbps > 8000 || !opt.QualityMode || opt.Decoders != nil {
+		t.Fatalf("offer options: %+v (want bitrate %d, quality mode)", opt, want)
 	}
 	if got := m.Receives(); len(got) != 1 || got[0].Peer != "peerB" || got[0].Name != "OBS" {
 		t.Fatalf("receives: %+v", got)

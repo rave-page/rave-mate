@@ -79,6 +79,10 @@ type RateHint struct {
 	MaxBitrateKbps int      `json:"br,omitempty"`   // 0 = no bitrate cap (reduced FIRST)
 	MaxFPS         int      `json:"fps,omitempty"`  // 0 = no fps cap (reduced SECOND)
 	MaxHeight      int      `json:"maxh,omitempty"` // 0 = no downscale (LAST resort)
+	// QualityTarget carries a live constant-quality level change (1..100; 0 = no change). Rarely set -
+	// the adaptive budget normally moves the bitrate CEILING (MaxBitrateKbps), not the quality level.
+	// Additive + omitempty: old peers ignore it and keep reading the single `br` number.
+	QualityTarget int `json:"q,omitempty"`
 }
 
 // SyncPing is the NTP-style (RFC 5905 on-wire semantics, pairwise, §2.3 tier 2) clock probe:

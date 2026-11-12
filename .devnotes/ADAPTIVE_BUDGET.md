@@ -1,0 +1,111 @@
+# Adaptive per-route bitrate budget (2026-11-12)
+
+Owner: "the budget should be adaptive so it gets the best quality value per system it runs on."
+Replaces the flat `Offer.Bitrate = config.bitrateKbps` target with a per-route, continuous AUTO
+budget that picks the bitrate giving the best quality for what both systems + the link sustain.
+
+## OS-neutral interface for the Linux VA engine (publish first — hand this to the Linux agent)
+
+All in `internal/medialink/pipeline.go` + `metaframe.go` (committed before the controller):
+
+- `EncodeSpec.QualityTarget int` — enables constant-quality-with-ceiling rate control. 0 = disabled
+  (legacy CBR/VBR to `BitrateKbps`, unchanged). 1..100 = target visual quality (higher = better;
+  `medialink.QualityDefault = 70`); `BitrateKbps` is the MAX. The engine maps this to its own RC:
+  MF = QVBR / quality mode with max bitrate; ffmpeg = `-rc`/`-cq`/QVBR per family; VA = constant-QP
+  or constant-quality (ca. QP = map(QualityTarget)) with the enforced bitrate ceiling as the cap.
+  Simple content undershoots the ceiling; complex content spends up to it.
+- `RateHint.QualityTarget int` (`json:"q,omitempty"`) — a live quality-level change (0 = none).
+  Rarely used; the budget normally moves the bitrate ceiling (`MaxBitrateKbps`), not the quality
+  level. Additive + omitempty: old peers ignore it and keep reading the single `br` number.
+- `PipelineStats.Feedback EncoderFeedback{Present bool; AvgQP float64; RateLimited bool}` — the
+  per-second quality signal. `Present=false` = the encoder exposes no QP (controller uses the model
+  target alone). `AvgQP` = mean quantizer over the last ~1 s. `RateLimited=true` = the bitrate
+  ceiling forced QP above the quality target (content wants more than the ceiling allows). The VA
+  engine should fill this from its rate-control stats; it already enforces the bitrate ceiling, so
+  `RateLimited` = "clamped to the ceiling AND QP above the target-quality QP".
+
+Wire compatibility: everything above is additive/omitempty. The computed bitrate target still rides
+the existing single `br` number (`Offer.Bitrate` and `RateHint.MaxBitrateKbps`), so an old peer that
+only understands one number keeps working.
+
+## Design
+
+Receiver-authoritative, old-peer-safe. The RECEIVER computes the per-route bitrate TARGET and sends
+it as the single `br` number (Offer.Bitrate + RateHint.MaxBitrateKbps); the sender encodes to it,
+constant-quality-capped when `QualityMode` is set. Three layers compose:
+
+1. **Quality model (`QualityTargetKbps`)** - the "good quality" bitrate in bits-per-pixel, seeded
+   from measured points (4K60 ~35/22 Mbps H.264/HEVC, 1080p60 ~12/8). bpp drops with resolution
+   (compression efficiency rises); codec (av1<hevc<h264), family (software x264 +30%) and content
+   scale it. Monotonic in pixel rate + fps. Follows the CODED size (a cap lowers it, a restore
+   raises it).
+2. **Ceilings, min()** - `AdaptiveBudget.Step` = min(user ceiling, static link ceiling, model [+QP
+   bump]). The binding one is the `Reason`. The LINK adaptation is the existing congestion
+   controller (`congest.go`): its ceiling is now this model target (so it probes only as far as
+   quality needs, brief 3b) and it backs off on loss/delay. The DECODER-VRAM ceiling composes via
+   the VRAM `rateLadder`'s min() already in the governors (a resolution cap there also trims the
+   bitrate). The ENCODER-capability ceiling affects fps/resolution (the planner), not the bitrate
+   target directly - documented.
+3. **Quality-driven refinement** - the sender's encoder runs constant-quality-with-ceiling
+   (`EncodeSpec.QualityTarget`), so simple content UNDERSHOOTS and complex content spends up to the
+   ceiling: the "fall when not needed, rise when needed" for free, no feedback loop. The QP BUMP
+   (raise the ceiling above the model when even the model is rate-limited) is in `Step` with
+   hysteresis; it needs the sender's `EncoderFeedback` to reach the controller (see deferred).
+
+Wiring: `mediaroute.OfferRoute` sets Offer.Bitrate = `AdaptiveBaseKbps` (auto: model at nominal
+capped by user; fixed: config) + `QualityMode`. The governor ceiling is `rm.adaptiveBase(codec,
+w,h,fps)` (same model, actual negotiated codec). `router.go` sets `spec.QualityTarget` from the
+offer. All additive; an old sender ignores `QualityMode` and encodes to the number.
+
+## Config + migration
+
+`mediaLink.bitrateMode` = `auto` (default, ""→auto) | `fixed`. Auto: `bitrateKbps` is the CEILING
+(50000 keeps meaning "never above 50"); fixed: `bitrateKbps` is the exact target (today's behaviour,
+byte-identical). Migration: an existing config with only `bitrateKbps` becomes AUTO with that value
+as the ceiling (lead's choice) - better quality within the same cap, no action needed. `fixed`
+configs are untouched.
+
+## Codec choice (quality-per-bit)
+
+Already satisfied by the negotiation matrix (`codec.go`): priority AV1(1) > HEVC(2) > H264(3), so
+when both ends advertise a more-efficient codec it is chosen - better quality per bit at equal
+ceilings. The receiver offers only decoders it holds (`preferDecoders`), and decode VRAM is gated by
+`mfenc.DecAdmit`/gpubudget (HEVC-4K vs H.264 learned costs). A decode-VRAM-aware codec PREFERENCE
+(drop to H.264 when HEVC-4K decode would be too costly) is a refinement, not wired here.
+
+## Defaults chosen (reasoning)
+
+- `auto` is the new default: the owner wants best-quality-per-system; auto delivers it while
+  respecting the existing `bitrateKbps` as a ceiling, so nobody's cap is exceeded.
+- `QualityDefault = 70` (1..100): a good visual quality the encoder spends up to the ceiling to hold.
+- bpp anchors from the measured rig points; `qpBumpFactor 1.5`, hysteresis 3 up / 5 down ticks
+  (anti-flap); budget clamp [1, 80] Mbps.
+
+## Deferred / follow-ups
+
+- **QP-bump continuous wiring**: `Step`'s rate-limited bump needs the SENDER's `EncoderFeedback`
+  (QP/RateLimited) at the RECEIVER's governor. The sender exposes it in `PipelineStats.Feedback`;
+  a sender→receiver feedback field (receiver reports are receiver→sender today) is needed. Until
+  then the controller runs with `Feedback.Present=false` (model target stands) and the CQ-capped
+  encoder provides the undershoot. The bump logic is tested in isolation.
+- **Per-engine constant-quality mode**: the Linux VA engine implements `QualityTarget` against the
+  published interface (Linux agent); Windows MF/Zig quality mode (QVBR/rate-control-mode property)
+  is GPU-gated + unverified here (the owner's 4K VRChat route is live on this GPU) - deferred;
+  ffmpeg `-cq`/QVBR args belong in `internal/mediapipe/args.go` (other agent). Today the budget
+  NUMBER is adaptive on every engine; the CQ undershoot activates per engine as each lands.
+- **Exact model-at-capped-height per tick**: today a MaxHeight cap lowers the bitrate via the VRAM
+  ladder's coupled trim (coarse); the per-tick model recompute at the capped height (finer) is a
+  governor refinement.
+- **Aggregate per-link split** (`SplitLinkCeiling`, tested): the pure helper exists; tracking
+  concurrent routes per link to feed it is not wired (single-route rigs unaffected).
+- **ctl routes reason/model fields**: shows mode + ceiling + encoder QP today; the governor's full
+  binding-reason + live model target need the decision stored on the route (the governor logs
+  `maxKbps`).
+
+## Verify live (lead)
+
+On the rig (sus Linux → DJ PC, 4K60 VRChat): `rave-mate ctl routes` shows per route `budget
+mode=auto (quality q70, ...) ceil=<kbps>` and, once the VA engine reports it, `encoder qp=.. [RATE-
+LIMITED]`. Default config (bitrateKbps 50000, no mode) → auto, target ~35 Mbps H.264 / ~22 HEVC at
+4K60 (below the 50 ceiling), dropping on simple content. Set `bitrateMode: fixed` → the exact 50000
+as today. A VRAM/network MaxHeight cap lowers the bitrate; a restore raises it back toward the model.

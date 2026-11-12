@@ -467,6 +467,21 @@ func formatRoutes(stats []medialink.RouteStat) string {
 		// Bitrate.
 		fmt.Fprintf(&b, "    bitrate=%.0f kbps  frames=%d bytes=%d keyframes=%d\n",
 			s.RateBps/1000, s.Frames, s.Bytes, s.Keyframes)
+		// Adaptive budget: mode + ceiling + encoder quality feedback (the "best value per system").
+		if s.Pipe != nil && (s.Pipe.BudgetKbps > 0 || s.Pipe.QualityTarget > 0) {
+			mode := "fixed"
+			if s.Pipe.QualityTarget > 0 {
+				mode = fmt.Sprintf("auto (quality q%d, bitrate is the ceiling)", s.Pipe.QualityTarget)
+			}
+			line := fmt.Sprintf("    budget mode=%s ceil=%d kbps", mode, s.Pipe.BudgetKbps)
+			if fb := s.Pipe.Feedback; fb.Present {
+				line += fmt.Sprintf("  encoder qp=%.0f", fb.AvgQP)
+				if fb.RateLimited {
+					line += " RATE-LIMITED (content wants more than the ceiling)"
+				}
+			}
+			b.WriteString(line + "\n")
+		}
 		// Loss / recovery.
 		if s.SeqGaps > 0 || s.LostEst > 0 || s.Recovered > 0 || s.NACKsSent > 0 || s.Retransmits > 0 {
 			fmt.Fprintf(&b, "    seqGaps=%d lostEst=%d recovered=%d nacksSent=%d retransmits=%d pli=%d\n",

@@ -121,12 +121,16 @@ type Offer struct {
 	// Transports lists the requester's supported media transports in PREFERENCE ORDER (e.g.
 	// ["udp","tcp"], §2.5). Absent = an old peer → TCP only (reads Transport). Additive, omitempty.
 	Transports []string `json:"transports,omitempty"`
-	NACK       bool     `json:"nack,omitempty"`  // requester supports NACK/retransmit (§2.5)
-	FEC        *FEC     `json:"fec,omitempty"`   // reserved (§2.5)
-	Caps       *Caps    `json:"caps,omitempty"`  // requester session caps (P2+; absent = P1 peer)
-	Bitrate    int      `json:"br,omitempty"`    // video bitrate budget, kbps (P4 additive; 0 = sender default)
-	Enc        string   `json:"enc,omitempty"`   // requester's media-plane enc pref (EncAuto/EncOn/EncOff; "" = ON)
-	Local      bool     `json:"local,omitempty"` // requester sees Target on a directly-connected private subnet (enc=auto input)
+	NACK       bool     `json:"nack,omitempty"` // requester supports NACK/retransmit (§2.5)
+	FEC        *FEC     `json:"fec,omitempty"`  // reserved (§2.5)
+	Caps       *Caps    `json:"caps,omitempty"` // requester session caps (P2+; absent = P1 peer)
+	Bitrate    int      `json:"br,omitempty"`   // video bitrate budget/ceiling, kbps (P4 additive; 0 = sender default)
+	// QualityMode asks the sender to use constant-quality-with-ceiling rate control (adaptive budget):
+	// encode at QualityDefault and spend up to Bitrate only as content needs. Additive + omitempty: an
+	// old sender ignores it and encodes CBR/VBR to Bitrate (today's behaviour), still interoperable.
+	QualityMode bool   `json:"qm,omitempty"`
+	Enc         string `json:"enc,omitempty"`   // requester's media-plane enc pref (EncAuto/EncOn/EncOff; "" = ON)
+	Local       bool   `json:"local,omitempty"` // requester sees Target on a directly-connected private subnet (enc=auto input)
 	// RouteNonce is the requester's ≥128-bit contribution to the PER-ROUTE key salt (§key-schedule).
 	// Both ends' nonces + the session id form the HKDF salt, so every route instance derives fresh
 	// AES-GCM keys + nonce prefix + token - no key/nonce reuse across routes, restarts or fallbacks.
