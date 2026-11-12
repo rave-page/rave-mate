@@ -20,8 +20,10 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -40,6 +42,29 @@
 
 #define RPW_MAX_MODS 64
 #define RPW_MAX_PLANES 4
+
+/* Lock-free SPSC AU ring (encode path): the PipeWire loop thread (producer) hands encoded AUs to the
+ * Go consumer (rpw_wait_au) without a mutex on the per-frame path, so a jittery downstream (packetize/
+ * pace/send) can be absorbed instead of forcing the single-slot newest-wins drop that caused the live
+ * stutter. Bounded by COUNT (AU_RING_N) AND BYTES (AU_RING_MAXBYTES). Buffers are preallocated
+ * (AU_RING_SLOT_INIT) and only realloc on a rare oversize AU - no steady-state malloc. Overflow policy:
+ * the consumer is behind by more than the ring (a real stall, not jitter) => DROP-NEWEST (keep the
+ * queued oldest frames the consumer will read next; a lock-free SPSC producer cannot advance the
+ * consumer's read index to drop-oldest without a race) AND force an IDR on the next encoded frame +
+ * count it, because dropping any AU breaks the inter-frame reference chain - never silently drop a
+ * P-frame without a keyframe to resync. */
+#define AU_RING_N 3
+#define AU_RING_SLOT_INIT (4 * 1024 * 1024) /* 4 MB/slot preallocation (>> a 4K IDR) */
+#define AU_RING_MAXBYTES (16 * 1024 * 1024) /* byte ceiling on queued AUs */
+
+struct au_slot {
+	unsigned char *buf;
+	int cap;
+	int len;
+	int keyframe;
+	int w, h; /* coded dims */
+	long long pts;
+};
 
 static int egl_dbg = 0;
 #define DBG(...)                            \
@@ -289,6 +314,14 @@ struct rpw_capture {
 	                      * 0 = top-down (Spout2PW/DX + PipeWire convention); 1 = bottom-up (GL producer) */
 	long long slot_pts;  /* capture-clock PTS (ns) of the AU/frame in slot (from SPA_META_Header) */
 
+	/* lock-free SPSC AU ring (encode path only; the raw RGBA path keeps the single slot above). */
+	struct au_slot ring[AU_RING_N];
+	_Atomic unsigned ring_head; /* consumer-owned read index (monotonic; %N on access) */
+	_Atomic unsigned ring_tail; /* producer-owned write index (monotonic) */
+	_Atomic long ring_bytes;    /* queued AU bytes (producer +=, consumer -=) */
+	int ring_hiwater;           /* max fill seen (producer-only) */
+	long ring_overflow;         /* AUs dropped because the consumer fell behind the ring (producer-only) */
+
 	/* EGL (dmabuf import) - display/context built in rpw_start (no current); made current lazily
 	 * on the loop thread in on_process. */
 	int egl_ready;        /* display+context+modifiers queried */
@@ -304,6 +337,71 @@ struct rpw_capture {
 	uint64_t mods[N_OFFER][RPW_MAX_MODS];
 	int n_mods[N_OFFER];
 };
+
+/* au_ring_init preallocates the ring slot buffers + resets indices (at encode engage). */
+static void au_ring_init(struct rpw_capture *c) {
+	for (int i = 0; i < AU_RING_N; i++) {
+		if (!c->ring[i].buf) {
+			c->ring[i].buf = malloc(AU_RING_SLOT_INIT);
+			c->ring[i].cap = c->ring[i].buf ? AU_RING_SLOT_INIT : 0;
+		}
+		c->ring[i].len = 0;
+	}
+	atomic_store(&c->ring_head, 0);
+	atomic_store(&c->ring_tail, 0);
+	atomic_store(&c->ring_bytes, 0);
+	c->ring_hiwater = 0;
+}
+
+/* au_ring_free releases the slot buffers (after the loop thread stopped). */
+static void au_ring_free(struct rpw_capture *c) {
+	for (int i = 0; i < AU_RING_N; i++) {
+		free(c->ring[i].buf);
+		c->ring[i].buf = NULL;
+		c->ring[i].cap = 0;
+	}
+}
+
+/* au_ring_push enqueues one encoded AU (producer = the PipeWire loop thread; lock-free: a relaxed
+ * tail read, an acquire head read, a release tail publish - no mutex on the per-frame path). Returns 1
+ * when the caller must force an IDR next (an overflow drop happened; see the ring doc). */
+static int au_ring_push(struct rpw_capture *c, const unsigned char *au, int aulen, int kf, long long pts) {
+	unsigned t = atomic_load_explicit(&c->ring_tail, memory_order_relaxed);
+	unsigned h = atomic_load_explicit(&c->ring_head, memory_order_acquire);
+	long qbytes = atomic_load_explicit(&c->ring_bytes, memory_order_relaxed);
+	if ((t - h) >= AU_RING_N || qbytes + aulen > AU_RING_MAXBYTES) {
+		c->ring_overflow++; /* consumer stalled > ring depth: drop THIS (newest) + force IDR + count */
+		c->enc_drops++;
+		c->dropped++;
+		return 1;
+	}
+	struct au_slot *s = &c->ring[t % AU_RING_N];
+	if (aulen > s->cap) { /* rare: an AU bigger than the preallocation; grow (not per-frame) */
+		int ncap = aulen < AU_RING_SLOT_INIT ? AU_RING_SLOT_INIT : aulen;
+		unsigned char *nb = realloc(s->buf, ncap);
+		if (!nb) {
+			c->ring_overflow++;
+			c->enc_drops++;
+			c->dropped++;
+			return 1;
+		}
+		s->buf = nb;
+		s->cap = ncap;
+	}
+	memcpy(s->buf, au, aulen);
+	s->len = aulen;
+	s->keyframe = kf;
+	s->pts = pts;
+	s->w = c->coded_w;
+	s->h = c->coded_h;
+	atomic_fetch_add_explicit(&c->ring_bytes, aulen, memory_order_relaxed);
+	atomic_store_explicit(&c->ring_tail, t + 1, memory_order_release); /* publish */
+	int depth = (int)(t + 1 - h);
+	if (depth > c->ring_hiwater)
+		c->ring_hiwater = depth;
+	c->enc_aus++;
+	return 0;
+}
 
 /* egl_setup_display: open the render node, GBM device, EGL display + GLES context (NOT current),
  * and query dmabuf modifiers per offered format. Runs on the caller thread in rpw_start. */
@@ -860,28 +958,15 @@ static void on_process(void *data) {
 						/* snapshot the quality feedback on the loop thread (the getter reads these scalars,
 						 * never c->enc, so a recreate on another path cannot cause a use-after-free). */
 						rva_enc_feedback(c->enc, &c->fb_present, &c->fb_avg_qp, &c->fb_rate_limited);
-						pthread_mutex_lock(&c->mu);
-						if (aulen > c->slot_cap) {
-							unsigned char *n = realloc(c->slot, aulen);
-							if (n) {
-								c->slot = n;
-								c->slot_cap = aulen;
-							}
-						}
-						if (aulen <= c->slot_cap) {
-							memcpy(c->slot, au, aulen);
-							c->slot_len = aulen;
-							c->slot_keyframe = kf;
-							c->slot_pts = pts;
-							if (c->has_frame) {
-								c->dropped++;
-								c->enc_drops++;
-							}
-							c->has_frame = 1;
-							c->enc_aus++;
+						/* lock-free hand-off to the Go consumer; the data path takes no mutex. */
+						if (au_ring_push(c, au, aulen, kf, pts)) {
+							c->force_idr = 1; /* overflow dropped a frame: resync with an IDR next */
+						} else {
+							/* wake a blocked consumer (bare signal, no data copy under the lock). */
+							pthread_mutex_lock(&c->mu);
 							pthread_cond_signal(&c->cv);
+							pthread_mutex_unlock(&c->mu);
 						}
-						pthread_mutex_unlock(&c->mu);
 					} else {
 						c->dropped++;
 						c->enc_drops++;
@@ -1072,13 +1157,40 @@ int rpw_set_encode(struct rpw_capture *c, int codec, int kbps, int max_h, int fp
 	c->enc_mode = 1;
 	c->has_frame = 0; /* discard any readback frame captured before the mode switch */
 	c->slot_len = 0;
+	au_ring_init(c); /* preallocate + empty the AU ring */
 	pthread_mutex_unlock(&c->mu);
 	return 1;
 }
 
 /* rpw_wait_au is rpw_wait_frame for the encode path: it returns one Annex-B AU (H.264/HEVC), sets
  * *keyframe, and reports the CODED dims in *w/*h (<= source; VPP downscaled). Same return contract:
- * >0 bytes, 0 timeout (incl. mid-reconnect), -1 fatal, -2 cap too small (dims set, AU kept). */
+ * >0 bytes, 0 timeout (incl. mid-reconnect), -1 fatal, -2 cap too small (dims set, AU kept).
+ *
+ * Lock-free DATA path: the AU copy-out is a bare acquire-load of the ring tail + memcpy, no mutex
+ * (the memcpy never runs under a lock - the single-slot's main cost). The mutex + cond are used only
+ * to BLOCK when the ring is empty (immediate wakeup: the producer signals after its lock-free enqueue;
+ * the critical section is a bare signal, no data copy), so the consumer does not poll and the cadence
+ * stays tight. */
+static int au_ring_pop(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int *h, int *keyframe, long long *pts) {
+	unsigned hh = atomic_load_explicit(&c->ring_head, memory_order_relaxed);
+	unsigned tt = atomic_load_explicit(&c->ring_tail, memory_order_acquire);
+	if (tt == hh)
+		return -3; /* empty */
+	struct au_slot *s = &c->ring[hh % AU_RING_N]; /* producer won't reuse ring[hh] until head advances */
+	*w = s->w > 0 ? s->w : c->width;
+	*h = s->h > 0 ? s->h : c->height;
+	*keyframe = s->keyframe;
+	if (pts)
+		*pts = s->pts;
+	if (s->len > cap)
+		return -2; /* caller grows dst + retries; head NOT advanced */
+	int n = s->len;
+	memcpy(dst, s->buf, n);
+	atomic_fetch_sub_explicit(&c->ring_bytes, n, memory_order_relaxed);
+	atomic_store_explicit(&c->ring_head, hh + 1, memory_order_release); /* free the slot */
+	return n;
+}
+
 int rpw_wait_au(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int *h, int *keyframe, long long *pts, long timeout_ms) {
 	struct timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
@@ -1088,45 +1200,34 @@ int rpw_wait_au(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int 
 		ts.tv_sec++;
 		ts.tv_nsec -= 1000000000L;
 	}
-	pthread_mutex_lock(&c->mu);
-	if (c->need_reconnect && !c->has_frame) {
-		c->need_reconnect = 0;
+	for (;;) {
+		int n = au_ring_pop(c, dst, cap, w, h, keyframe, pts); /* lock-free fast path */
+		if (n != -3)
+			return n; /* >0 AU, or -2 cap-too-small */
+		/* ring empty: block on the cond until the producer enqueues or a flag flips. Re-check the ring
+		 * UNDER the lock (the producer signals under the lock) so a wakeup can't be missed. */
+		pthread_mutex_lock(&c->mu);
+		if (atomic_load_explicit(&c->ring_tail, memory_order_acquire) != atomic_load_explicit(&c->ring_head, memory_order_relaxed)) {
+			pthread_mutex_unlock(&c->mu);
+			continue; /* producer raced in: dequeue it */
+		}
+		if (c->need_reconnect) {
+			c->need_reconnect = 0;
+			pthread_mutex_unlock(&c->mu);
+			do_reconnect(c);
+			return 0;
+		}
+		if (c->fatal) {
+			pthread_mutex_unlock(&c->mu);
+			return -1;
+		}
+		int rc = pthread_cond_timedwait(&c->cv, &c->mu, &ts);
 		pthread_mutex_unlock(&c->mu);
-		do_reconnect(c);
-		return 0;
+		if (rc != 0) { /* timeout: one last lock-free check, else give up */
+			n = au_ring_pop(c, dst, cap, w, h, keyframe, pts);
+			return n == -3 ? 0 : n;
+		}
 	}
-	while (!c->has_frame && !c->fatal && !c->need_reconnect) {
-		if (pthread_cond_timedwait(&c->cv, &c->mu, &ts) != 0)
-			break;
-	}
-	if (c->need_reconnect && !c->has_frame) {
-		c->need_reconnect = 0;
-		pthread_mutex_unlock(&c->mu);
-		do_reconnect(c);
-		return 0;
-	}
-	if (c->fatal && !c->has_frame) {
-		pthread_mutex_unlock(&c->mu);
-		return -1;
-	}
-	if (!c->has_frame) {
-		pthread_mutex_unlock(&c->mu);
-		return 0;
-	}
-	int need = c->slot_len;
-	*w = c->coded_w > 0 ? c->coded_w : c->width;
-	*h = c->coded_h > 0 ? c->coded_h : c->height;
-	*keyframe = c->slot_keyframe;
-	if (pts)
-		*pts = c->slot_pts;
-	if (need > cap) {
-		pthread_mutex_unlock(&c->mu);
-		return -2;
-	}
-	memcpy(dst, c->slot, need);
-	c->has_frame = 0;
-	pthread_mutex_unlock(&c->mu);
-	return need;
 }
 
 /* rpw_request_keyframe forces an IDR on the next encoded frame (PLI / route start / reconnect). */
@@ -1186,6 +1287,16 @@ long rpw_reconnects(struct rpw_capture *c) { return c ? c->reconnects : 0; }
 int rpw_import_ok(struct rpw_capture *c) { return c ? c->import_ok : 0; }
 int rpw_coded_w(struct rpw_capture *c) { return c ? c->coded_w : 0; }
 int rpw_coded_h(struct rpw_capture *c) { return c ? c->coded_h : 0; }
+/* AU-ring telemetry: current fill, high-water, and overflow drops (consumer-behind-the-ring). */
+int rpw_ring_depth(struct rpw_capture *c) {
+	if (!c)
+		return 0;
+	unsigned t = atomic_load_explicit(&c->ring_tail, memory_order_relaxed);
+	unsigned h = atomic_load_explicit(&c->ring_head, memory_order_relaxed);
+	return (int)(t - h);
+}
+int rpw_ring_hiwater(struct rpw_capture *c) { return c ? c->ring_hiwater : 0; }
+long rpw_ring_overflow(struct rpw_capture *c) { return c ? c->ring_overflow : 0; }
 
 void rpw_stop(struct rpw_capture *c) {
 	if (!c)
@@ -1204,6 +1315,7 @@ void rpw_stop(struct rpw_capture *c) {
 		PW.tl_destroy(c->loop);
 	if (c->enc) /* loop stopped: no more on_process, safe to tear down the VA encode session */
 		rva_enc_free(c->enc);
+	au_ring_free(c); /* loop stopped: no more producer; release the ring buffers */
 	/* EGL teardown: the context was made current on the loop thread, now stopped. Best-effort. */
 	if (c->egl_ready) {
 		if (c->egl_ctx)

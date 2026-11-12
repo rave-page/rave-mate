@@ -328,6 +328,7 @@ func (s *pwSource) PipeStats() medialink.PipelineStats {
 		Dropped: drops, ZeroCopy: importOK,
 		AUBytes: auBytes, AUCount: auCount, AUBytesPerFrame: bpf,
 		DevPolicy:     s.encNode,
+		QueueDepth:    int(C.rpw_ring_depth(s.h)), // AUs buffered in the lock-free hand-off ring
 		QualityTarget: quality, BudgetKbps: kbps,
 		Feedback: medialink.EncoderFeedback{
 			Present: present != 0, AvgQP: float64(avgQP), RateLimited: rateLimited != 0},
@@ -356,13 +357,21 @@ func (s *pwSource) encTelemetry() {
 				"engine": st.Encoder, "coded": sizeStr(cw, ch), "import": importPath,
 				"renderNode": s.encNode, "capFps": fmtf(st.CapFPS), "encFps": fmtf(st.OutFPS),
 				"dropped": st.Dropped, "bytesPerFrame": uint64(st.AUBytesPerFrame),
-				"reconnects": int64(C.rpw_reconnects(s.h))})
+				"ringDepth": int(C.rpw_ring_depth(s.h)), "ringHiwater": int(C.rpw_ring_hiwater(s.h)),
+				"ringOverflow": int64(C.rpw_ring_overflow(s.h)),
+				"reconnects":   int64(C.rpw_reconnects(s.h))})
 		}
 	}
 }
 
 // fmtf is a tiny one-decimal formatter (avoids pulling fmt into the hot path).
 func fmtf(v float64) string { return fmt.Sprintf("%.1f", v) }
+
+// ringStats exposes the AU hand-off ring telemetry (depth, high-water, overflow drops) to in-package
+// tests (cgo can't live in a _test.go file).
+func (s *pwSource) ringStats() (depth, hiwater int, overflow int64) {
+	return int(C.rpw_ring_depth(s.h)), int(C.rpw_ring_hiwater(s.h)), int64(C.rpw_ring_overflow(s.h))
+}
 
 // qpNext is the cgo seam for the pure constant-quality ceiling controller (rva_qp_next): cgo cannot
 // live in a _test.go file, so the controller unit test calls this wrapper with injected rates.

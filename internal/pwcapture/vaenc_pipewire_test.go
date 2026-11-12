@@ -4,6 +4,7 @@ package pwcapture
 
 import (
 	"context"
+	"math/rand"
 	"os"
 	"sort"
 	"strconv"
@@ -264,31 +265,38 @@ func TestDMABufEncodeHistogram(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(secs+30)*time.Second)
 	defer cancel()
 	pr, _ := esrc.(medialink.PipelineReporter)
+	// RPW_JITTER_MS>0 simulates a jittery downstream (packetize/pace/send): sleep a random 0..N ms
+	// after each AU. The ring must absorb jitter up to its depth with no drops/keyframe storms.
+	jitterMs, _ := strconv.Atoi(os.Getenv("RPW_JITTER_MS"))
 	warm := 60
 	var intervals []float64 // ms between successive AUs
 	var last, winStart time.Time
 	var dropAtWarm uint64
+	var keyframes int
 	for i := 0; ; i++ {
 		fr, err := esrc.Next(ctx)
 		if err != nil {
 			t.Fatalf("Next after %d: %v", i, err)
 		}
-		_ = fr
 		now := time.Now()
+		if i > warm && fr.Keyframe() {
+			keyframes++
+		}
 		if i == warm {
 			winStart = now
 			last = now
 			if pr != nil {
 				dropAtWarm = pr.PipeStats().Dropped
 			}
-			continue
-		}
-		if i > warm {
+		} else if i > warm {
 			intervals = append(intervals, now.Sub(last).Seconds()*1000)
 			last = now
 			if now.Sub(winStart) >= time.Duration(secs)*time.Second {
 				break
 			}
+		}
+		if jitterMs > 0 && rand.Intn(3) == 0 { // spike on ~1/3 of frames (avg stays under the frame
+			time.Sleep(time.Duration(rand.Intn(jitterMs+1)) * time.Millisecond) // period: the ring absorbs it)
 		}
 	}
 	sort.Float64s(intervals)
@@ -325,6 +333,11 @@ func TestDMABufEncodeHistogram(t *testing.T) {
 		sum/float64(max1(len(intervals))), pct(50), pct(90), pct(99), pct(100), over25, over50)
 	t.Logf("HIST engine: newest-wins drops(window)=%d capFps=%.2f outFps=%.2f zeroCopy=%v bytes/frame=%.0f",
 		drops, st.CapFPS, st.OutFPS, st.ZeroCopy, st.AUBytesPerFrame)
+	if ps, ok := esrc.(*pwSource); ok {
+		depth, hiwater, overflow := ps.ringStats()
+		t.Logf("HIST ring: depth=%d hiwater=%d overflow(total)=%d  keyframes(window)=%d jitterMs=%d",
+			depth, hiwater, overflow, keyframes, jitterMs)
+	}
 	if len(intervals) < secs*20 {
 		t.Errorf("far too few frames (%d) in %ds - capture stalled", len(intervals), secs)
 	}
