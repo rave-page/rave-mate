@@ -505,9 +505,9 @@ func formatRoutes(stats []medialink.RouteStat) string {
 			b.WriteString(line + "\n")
 		}
 		// Loss / recovery.
-		if s.SeqGaps > 0 || s.LostEst > 0 || s.Recovered > 0 || s.NACKsSent > 0 || s.Retransmits > 0 {
-			fmt.Fprintf(&b, "    seqGaps=%d lostEst=%d recovered=%d nacksSent=%d retransmits=%d pli=%d\n",
-				s.SeqGaps, s.LostEst, s.Recovered, s.NACKsSent, s.Retransmits, s.PLIRequests)
+		if s.SeqGaps > 0 || s.LostEst > 0 || s.Recovered > 0 || s.NACKsSent > 0 || s.NACKsRecv > 0 || s.Retransmits > 0 {
+			fmt.Fprintf(&b, "    seqGaps=%d lostEst=%d recovered=%d nacksSent=%d nacksRecv=%d retransmits=%d pli=%d\n",
+				s.SeqGaps, s.LostEst, s.Recovered, s.NACKsSent, s.NACKsRecv, s.Retransmits, s.PLIRequests)
 		}
 		// UDP transport telemetry.
 		if u := s.UDP; u != nil {

@@ -1191,6 +1191,7 @@ func (rm *RouteManager) tryAttachNativeTX(pa *pendingAnswer, udp *udpConn, src S
 		InitialSeq: udp.sendSeq(), BitrateKbps: pa.offer.Bitrate, FPS: int(pa.srcDesc.FPS),
 		StartupGrace: udpDefStartupGrace,
 	}
+	params.MediaClockNs = rm.clock.Now() // last: as close to rm_tx_open as Go gets
 	tx, err := nts.AttachNativeTX(params)
 	if err != nil {
 		rm.warnf("native tx attach failed - Go pump fallback", map[string]any{"session": pa.offer.Session, "error": err.Error()})

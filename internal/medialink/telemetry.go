@@ -148,6 +148,7 @@ type routeStat struct {
 	lostEst     uint64
 	recovered   uint64 // late frames (retransmit/dup) that filled a prior gap
 	nacksSent   uint64
+	nacksRecv   uint64 // send side (native): NACK datagrams received
 	retransmits uint64
 	pliReqs     uint64
 	reportsSent uint64
@@ -238,6 +239,7 @@ func (st *routeStat) setNativeStats(s NativeTXStats) {
 	st.frames = s.AUsSent
 	st.bytes = s.BytesSent
 	st.retransmits = s.Retransmits
+	st.nacksRecv = s.NacksRecv
 	st.sentHighest = uint32(s.Seq)
 	st.sentAny = true
 	now := st.now()
@@ -423,7 +425,7 @@ func (st *routeStat) snapshot() RouteStat {
 		Encoder: st.encoder, Tier: st.tier, Software: st.software, Encrypted: st.encrypted,
 		Transport: st.transport, TransportImpl: st.transportImpl, Keyframes: st.keyframes,
 		SeqGaps: st.seqGaps, LostEst: st.lostEst, Recovered: st.recovered,
-		NACKsSent: st.nacksSent, Retransmits: st.retransmits, PLIRequests: st.pliReqs,
+		NACKsSent: st.nacksSent, NACKsRecv: st.nacksRecv, Retransmits: st.retransmits, PLIRequests: st.pliReqs,
 		ReportsSent: st.reportsSent, ReportsRecv: st.reportsRecv,
 		LatUnsynced: st.latBad, RemoteAt: st.remoteAt,
 	}
@@ -486,6 +488,7 @@ type RouteStat struct {
 	Recovered uint64 // late frames that filled a counted gap (retransmit/dup)
 
 	NACKsSent   uint64 // recv side: NACK meta frames emitted (§2.5)
+	NACKsRecv   uint64 // send side (native sender): NACK datagrams received
 	Retransmits uint64 // send side: frames re-sent on NACK
 	PLIRequests uint64 // keyframe requests (sent or honoured)
 

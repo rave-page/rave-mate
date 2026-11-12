@@ -44,6 +44,7 @@ pub const Stats = struct {
     seq: u64 = 0,
     queue_depth: i32 = 0,
     dead: i32 = 0,
+    nacks_recv: u64 = 0,
 };
 
 const au_slots = 6;
@@ -131,6 +132,7 @@ pub const Sender = struct {
     s_retx: std.atomic.Value(u64) = .init(0),
     s_seq: std.atomic.Value(u64) = .init(0),
     s_dead: std.atomic.Value(i32) = .init(0),
+    s_nacks: std.atomic.Value(u64) = .init(0),
 
     on_idr: ?*const fn (?*anyopaque) callconv(.c) void = null,
     idr_user: ?*anyopaque = null,
@@ -194,6 +196,7 @@ pub const Sender = struct {
             .retransmits = s.s_retx.load(.monotonic),
             .seq = s.s_seq.load(.monotonic),
             .dead = s.s_dead.load(.monotonic),
+            .nacks_recv = s.s_nacks.load(.monotonic),
         };
     }
 
@@ -334,6 +337,7 @@ pub const Sender = struct {
     }
 
     fn handleNack(s: *Sender, body: []const u8) void {
+        _ = s.s_nacks.fetchAdd(1, .monotonic);
         if (body.len < 2) return;
         var cnt = std.mem.readInt(u16, body[0..2], .big);
         if (cnt > 85) cnt = 85;
@@ -352,7 +356,7 @@ pub const Sender = struct {
     }
 };
 
-fn nowNs() i64 {
+pub fn nowNs() i64 {
     var ts: linux.timespec = undefined;
     _ = linux.clock_gettime(.MONOTONIC, &ts);
     return @as(i64, @intCast(ts.sec)) * std.time.ns_per_s + @as(i64, @intCast(ts.nsec));
