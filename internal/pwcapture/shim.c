@@ -669,6 +669,8 @@ static void on_process(void *data) {
 		if (d->type == SPA_DATA_DmaBuf) {
 			if (!c->va_probed && getenv("RPW_VA_PROBE")) { /* one-shot go/no-go for the VA import path */
 				c->va_probed = 1;
+				const char *cnode = getenv("RPW_EGL_DEVICE");
+				rva_log_enc_caps(cnode && *cnode ? cnode : "/dev/dri/renderD128");
 				int np = sb->n_datas < RPW_MAX_PLANES ? (int)sb->n_datas : RPW_MAX_PLANES;
 				int fds[RPW_MAX_PLANES];
 				unsigned offs[RPW_MAX_PLANES], strs[RPW_MAX_PLANES];

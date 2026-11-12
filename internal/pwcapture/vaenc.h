@@ -21,4 +21,7 @@ int rva_import_probe(const char *node, uint32_t drm_fourcc, uint64_t modifier, i
                      int n_planes, const int *fds, const unsigned *offsets, const unsigned *strides,
                      unsigned char corners[12]);
 
+/* rva_log_enc_caps logs the H.264 encode caps (rate control / packed headers / max refs). */
+void rva_log_enc_caps(const char *node);
+
 #endif

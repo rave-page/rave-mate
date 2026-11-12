@@ -50,6 +50,7 @@ struct va_api {
 	VAStatus (*DestroyImage)(VADisplay, VAImageID);
 	VAStatus (*MapBuffer)(VADisplay, VABufferID, void **);
 	VAStatus (*UnmapBuffer)(VADisplay, VABufferID);
+	VAStatus (*GetConfigAttributes)(VADisplay, VAProfile, VAEntrypoint, VAConfigAttrib *, int);
 	/* libva-drm */
 	VADisplay (*GetDisplayDRM)(int);
 };
@@ -91,6 +92,7 @@ static int va_load(void) {
 		{"vaDestroyImage", (void **)&VA.DestroyImage, l},
 		{"vaMapBuffer", (void **)&VA.MapBuffer, l},
 		{"vaUnmapBuffer", (void **)&VA.UnmapBuffer, l},
+		{"vaGetConfigAttributes", (void **)&VA.GetConfigAttributes, l},
 		{"vaGetDisplayDRM", (void **)&VA.GetDisplayDRM, d},
 	};
 	for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
@@ -205,6 +207,31 @@ static void yuv2rgb(int y, int u, int v, unsigned char *rgb) {
 	rgb[0] = r < 0 ? 0 : r > 255 ? 255 : r;
 	rgb[1] = g < 0 ? 0 : g > 255 ? 255 : g;
 	rgb[2] = b < 0 ? 0 : b > 255 ? 255 : b;
+}
+
+/* rva_log_enc_caps logs H.264 EncSlice rate-control + packed-header + max-ref caps (determines the
+ * encoder design: whether the app must write packed SPS/PPS/slice headers). Diagnostic. */
+void rva_log_enc_caps(const char *node) {
+	if (!va_load())
+		return;
+	int fd = open(node, O_RDWR | O_CLOEXEC);
+	if (fd < 0)
+		return;
+	VADisplay dpy = VA.GetDisplayDRM(fd);
+	int maj, min;
+	if (!dpy || VA.Initialize(dpy, &maj, &min) != VA_STATUS_SUCCESS) {
+		close(fd);
+		return;
+	}
+	VAConfigAttrib a[3];
+	a[0].type = VAConfigAttribRateControl;
+	a[1].type = VAConfigAttribEncPackedHeaders;
+	a[2].type = VAConfigAttribEncMaxRefFrames;
+	VAStatus st = VA.GetConfigAttributes(dpy, VAProfileH264High, VAEntrypointEncSlice, a, 3);
+	fprintf(stderr, "RVA_ENC_CAPS H264High st=%d ratecontrol=0x%x packedheaders=0x%x maxref=0x%x\n",
+		st, a[0].value, a[1].value, a[2].value);
+	VA.Terminate(dpy);
+	close(fd);
 }
 
 int rva_import_probe(const char *node, uint32_t drm_fourcc, uint64_t modifier, int w, int h,
