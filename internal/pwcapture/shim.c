@@ -48,19 +48,19 @@
 #define RPW_MAX_MODS 64
 #define RPW_MAX_PLANES 4
 
-/* Lock-free SPSC AU ring (encode path): the PipeWire loop thread (producer) hands encoded AUs to the
- * Go consumer (rpw_wait_au) without a mutex on the per-frame path, so a jittery downstream (packetize/
- * pace/send) can be absorbed instead of forcing the single-slot newest-wins drop that caused the live
- * stutter. Bounded by COUNT (AU_RING_N) AND BYTES (AU_RING_MAXBYTES). Buffers are preallocated
- * (AU_RING_SLOT_INIT) and only realloc on a rare oversize AU - no steady-state malloc. Overflow policy:
- * the consumer is behind by more than the ring (a real stall, not jitter) => DROP-NEWEST (keep the
- * queued oldest frames the consumer will read next; a lock-free SPSC producer cannot advance the
- * consumer's read index to drop-oldest without a race) AND force an IDR on the next encoded frame +
- * count it, because dropping any AU breaks the inter-frame reference chain - never silently drop a
- * P-frame without a keyframe to resync. */
-#define AU_RING_N 3
-#define AU_RING_SLOT_INIT (4 * 1024 * 1024) /* 4 MB/slot preallocation (>> a 4K IDR) */
-#define AU_RING_MAXBYTES (16 * 1024 * 1024) /* byte ceiling on queued AUs */
+/* Lock-free SPSC AU ring (encode path): the encode thread (producer) hands encoded AUs to the Go
+ * consumer (rpw_wait_au) without a mutex on the per-frame path, so a jittery/stalled downstream
+ * (packetize/pace/send, a receiver hiccup blocking TCP) is absorbed. Bounded by COUNT (AU_RING_N =
+ * 200 ms at 60 fps: rides through the 20-140 ms receiver stalls measured on the rig) AND BYTES
+ * (AU_RING_MAXBYTES). Slots start at AU_RING_SLOT_INIT and only realloc on a rare larger AU. Overflow
+ * policy: the encode thread checks for room BEFORE encoding and SKIPS the frame when full (pre-encode:
+ * the frame never enters the encoder, so the reference chain stays intact - no IDR, no keyframe storm;
+ * counted as ring_skips). Only a post-encode byte-cap miss drops an AU, which forces ONE IDR (no
+ * further forcing while that IDR is outstanding). */
+#define AU_RING_N 12
+#define AU_RING_SLOT_INIT (512 * 1024)       /* 512 KB/slot start (a 4K P ~100 KB); grows rarely */
+#define AU_RING_MAXBYTES (32 * 1024 * 1024)  /* byte ceiling on queued AUs */
+#define AU_RING_HEADROOM (4 * 1024 * 1024)   /* pre-encode room check: > any single AU */
 
 struct au_slot {
 	unsigned char *buf;
@@ -362,6 +362,14 @@ struct rpw_capture {
 	 * (deliberate rate-cap, PRE-encode -> no reference break, no IDR; surfaced as RateCapped). */
 	long long enc_grid_next; /* next grid PTS (ns); 0 = uninitialised */
 	long grid_drops;
+	int enc_src_w, enc_src_h; /* source dims the encoder was built for (recreate on change) */
+	/* robustness (encode thread writes, getters read): */
+	_Atomic int streaming;   /* pw stream STREAMING (loop thread): cadence repeats only while live */
+	long repeats;            /* cadence AUs emitted without a new source frame (static/slow/hitch) */
+	long ring_skips;         /* frames skipped PRE-encode because the AU ring was full (no ref break) */
+	long start_holds;        /* frames skipped pre-encode while the route's first AU was unconsumed */
+	long forced_idrs;        /* IDRs forced by a post-encode drop (byte cap) - at most one per episode */
+	int enc_sync;            /* RPW_ENC_SYNC: emit every frame synchronously (no 1-frame pipeline) */
 
 	/* Native realtime TX (unit 3): when the router attaches a native sender (UDP route + per-route
 	 * keys), the encode thread submits AUs straight to it (rm_tx_submit_au) instead of the AU ring ->
@@ -462,6 +470,24 @@ static int au_ring_push(struct rpw_capture *c, const unsigned char *au, int aule
 		c->ring_hiwater = depth;
 	c->enc_aus++;
 	return 0;
+}
+
+/* au_ring_room: 1 when two more AUs fit (one encode step can emit the pipelined previous frame AND
+ * flush the current one) incl. byte headroom. Producer-side, lock-free. */
+static int au_ring_room(struct rpw_capture *c) {
+	unsigned t = atomic_load_explicit(&c->ring_tail, memory_order_relaxed);
+	unsigned h = atomic_load_explicit(&c->ring_head, memory_order_acquire);
+	long qb = atomic_load_explicit(&c->ring_bytes, memory_order_relaxed);
+	return (t - h) + 2 <= AU_RING_N && qb + 2 * AU_RING_HEADROOM <= AU_RING_MAXBYTES;
+}
+
+/* au_ring_first_unconsumed: the route's first AU (the IDR) is queued but not yet read. Route start-up:
+ * the consumer is still opening (TCP slow start, receiver decoder open); encoding on would only queue
+ * stale frames (latency burst) or overflow (drop burst + IDR storm, the live "36 drops in the first
+ * second"). Hold - skip pre-encode - until it is read; the next encoded frame is then fresh. */
+static int au_ring_first_unconsumed(struct rpw_capture *c) {
+	return atomic_load_explicit(&c->ring_head, memory_order_acquire) == 0 &&
+	       atomic_load_explicit(&c->ring_tail, memory_order_relaxed) > 0;
 }
 
 /* egl_setup_display: open the render node, GBM device, EGL display + GLES context (NOT current),
@@ -911,7 +937,9 @@ static void on_param_changed(void *data, uint32_t id, const struct spa_pod *para
 	c->fmt = raw.format;
 	c->modifier = pmod ? raw.modifier : DRM_FORMAT_MOD_INVALID;
 	c->is_dmabuf = (pmod != NULL);
+	c->force_idr = 1; /* (re)negotiated = new producer/pool: resume on an IDR */
 	pthread_mutex_unlock(&c->mu);
+	c->enc_grid_next = 0; /* loop-thread-owned: re-prime the PTS grid (new producer = new PTS origin) */
 	DBG("format: %dx%d fmt=%d dmabuf=%d mod=0x%llx\n", c->width, c->height, c->fmt, c->is_dmabuf, (unsigned long long)c->modifier);
 	request_buffers(c, c->is_dmabuf);
 }
@@ -942,7 +970,15 @@ static int enc_ensure(struct rpw_capture *c) {
 		} else {
 			c->coded_w = ow;
 			c->coded_h = oh;
+			c->enc_src_w = c->width;
+			c->enc_src_h = c->height;
 		}
+	}
+	if (c->enc && (c->width != c->enc_src_w || c->height != c->enc_src_h)) {
+		/* producer came back at another size: rebuild at the new coded size (fresh encoder => IDR) */
+		rva_enc_free(c->enc);
+		c->enc = NULL;
+		return enc_ensure(c);
 	}
 	if (!c->enc)
 		return 0;
@@ -981,6 +1017,8 @@ static int enc_ensure(struct rpw_capture *c) {
 				c->enc = ne;
 				c->coded_w = ow;
 				c->coded_h = oh;
+				c->enc_src_w = c->width;
+				c->enc_src_h = c->height;
 				c->enc_maxh = want_maxh;
 			}
 		}
@@ -988,9 +1026,43 @@ static int enc_ensure(struct rpw_capture *c) {
 	return idr;
 }
 
-/* enc_thread_main: the dedicated encode thread. Blocks on the pending slot, encodes (VPP + VA submit +
- * vaSyncSurface + map + emit - the blocking that used to stall the callback), pushes the AU to the
- * ring, then requeues the pw buffer under the loop lock. */
+/* enc_emit_au hands one encoded AU downstream: the native sender (non-blocking; it owns its bounded
+ * queue + drop + IDR callback) or the Go AU ring. A post-encode ring miss (byte cap only - room was
+ * checked pre-encode) drops the AU and forces ONE IDR. Encode thread. */
+static void enc_emit_au(struct rpw_capture *c, rm_sender *tx, unsigned char *au, int aulen, int kf, long long pts) {
+	if (tx) {
+		rm_tx_submit_au(tx, au, (size_t)aulen, (int64_t)pts, (uint32_t)(kf ? RM_FLAG_KEYFRAME : 0));
+		c->enc_aus++;
+		return;
+	}
+	if (au_ring_push(c, au, aulen, kf, pts)) {
+		pthread_mutex_lock(&c->mu);
+		if (!c->force_idr) {
+			c->force_idr = 1;
+			c->forced_idrs++;
+		}
+		pthread_mutex_unlock(&c->mu);
+		return;
+	}
+	pthread_mutex_lock(&c->mu);
+	pthread_cond_signal(&c->cv);
+	pthread_mutex_unlock(&c->mu);
+}
+
+/* enc_thread_main: the dedicated encode thread. Waits for the callback's hand-off (newest buffer),
+ * encodes (VPP + VA submit + sync + map - the blocking that used to stall the PipeWire callback), emits
+ * the AU, requeues the pw buffer under the loop lock.
+ *
+ * Cadence (period p = 1/negotiated fps): the encoder pipelines (frame N is emitted when N+1 is
+ * submitted), so a source that slows, hitches or goes static would hold its last frame back and starve
+ * the route (receiver: gap, then burst). The thread therefore also wakes on deadlines:
+ *  - pipelined frame still pending at t_submit + 1.5p (next frame late) => flush it now;
+ *  - nothing pending, no real frame for 1.5p (hitch) - or the source runs slower than ~0.8x the rate -
+ *    and no AU for p => re-encode the last frame (P-skip, tiny) so the route keeps the full cadence.
+ *    Only while the stream is STREAMING; a vanished producer stops repeats (receiver holds).
+ *  - a real frame arriving after a gap >= 1.5p (or the first) is flushed at once instead of waiting a
+ *    period in the pipeline.
+ * PTS: each AU carries ITS frame's capture PTS (strictly increasing); repeats advance by p. */
 static void *enc_thread_main(void *arg) {
 	struct rpw_capture *c = arg;
 	/* best-effort elevated scheduling so the encode is not starved under load (both usually need
@@ -1000,10 +1072,38 @@ static void *enc_thread_main(void *arg) {
 	sp.sched_priority = 10;
 	if (pthread_setschedparam(pthread_self(), SCHED_RR, &sp) != 0)
 		setpriority(PRIO_PROCESS, 0, -5); /* fall back to a nice bump (also best-effort) */
+	/* encode-thread-local cadence state (ns, CLOCK_MONOTONIC) */
+	long long t_real = 0, t_emit = 0, t_sub = 0, src_iv = 0, last_pts = 0, pend_pts = 0;
+	int enc_pend = 0; /* encoder holds a submitted, not yet emitted frame */
+	struct rva_enc *enc_seen = NULL;
 	for (;;) {
+		long long period = 1000000000LL / (c->enc_fps > 0 ? c->enc_fps : 60);
+		long long dl = 0;
 		pthread_mutex_lock(&c->enc_mu);
-		while (!c->enc_pending && !c->enc_stop)
-			pthread_cond_wait(&c->enc_cv, &c->enc_mu);
+		for (;;) {
+			dl = 0;
+			if (c->enc_pending || c->enc_stop)
+				break;
+			if (c->enc && c->enc == enc_seen) {
+				if (enc_pend) {
+					dl = t_sub + period * 3 / 2;
+				} else if (t_emit && atomic_load_explicit(&c->streaming, memory_order_relaxed)) {
+					long long gate = src_iv > period * 5 / 4 ? 0 : period * 3 / 2; /* slow source: even fill */
+					dl = t_emit + period;
+					if (t_real + gate > dl)
+						dl = t_real + gate;
+				}
+			}
+			if (!dl) {
+				pthread_cond_wait(&c->enc_cv, &c->enc_mu);
+				continue;
+			}
+			if (mono_ns() >= dl)
+				break;
+			struct timespec ts = {(time_t)(dl / 1000000000LL), (long)(dl % 1000000000LL)};
+			if (pthread_cond_timedwait(&c->enc_cv, &c->enc_mu, &ts) != 0 && !c->enc_pending)
+				break; /* deadline */
+		}
 		struct pw_buffer *buf = c->enc_pending;
 		c->enc_pending = NULL;
 		int stop = c->enc_stop;
@@ -1023,29 +1123,91 @@ static void *enc_thread_main(void *arg) {
 
 		if (stop)
 			break; /* shutting down: drop any held buffer - pw_stream_destroy frees the pool */
-		if (!buf)
+		unsigned char *au = NULL;
+		int aulen = 0, kf = 0;
+		if (!buf) { /* cadence deadline: flush the pending frame, or repeat the last one */
+			if (!c->enc || c->enc != enc_seen)
+				continue;
+			if (!tx && (!au_ring_room(c) || au_ring_first_unconsumed(c))) {
+				/* downstream stalled / start-up hold: never queue cadence fill (a stale burst later) */
+				t_emit = dl ? dl : mono_ns();
+				if (enc_pend)
+					t_sub = mono_ns(); /* re-check the pending flush in 1.5p, not in a busy loop */
+				continue;
+			}
+			int idr = enc_pend ? 0 : enc_ensure(c);
+			if (c->enc != enc_seen) /* enc_ensure rebuilt it (size/quality change): wait for real input */
+				continue;
+			int was_pend = enc_pend;
+			int rc = was_pend ? rva_enc_flush(c->enc, &au, &aulen, &kf) : rva_enc_repeat(c->enc, idr, &au, &aulen, &kf);
+			enc_pend = 0;
+			long long tn = mono_ns();
+			t_emit = (dl && tn - dl < period) ? dl : tn; /* stay on the ideal grid (no encode-time drift) */
+			if (rc == 0 && aulen > 0) {
+				long long apts = was_pend ? pend_pts : last_pts + period;
+				if (apts <= last_pts)
+					apts = last_pts + 1;
+				last_pts = apts;
+				if (!was_pend)
+					c->repeats++;
+				enc_emit_au(c, tx, au, aulen, kf, apts);
+			}
 			continue;
-		int idr = enc_ensure(c);
-		if (c->enc) {
-			unsigned char *au = NULL;
-			int aulen = 0, kf = 0;
-			if (rva_enc_frame(c->enc, fourcc, mod, w, h, np, fds, off, str, flip, idr, &au, &aulen, &kf) == 0 && aulen > 0) {
-				c->import_ok = 1;
-				rva_enc_feedback(c->enc, &c->fb_present, &c->fb_avg_qp, &c->fb_rate_limited);
-				if (tx) {
-					/* native realtime path: submit the AU straight to the Zig sender (non-blocking; it
-					 * owns the bounded TX queue + drop-oldest + IDR callback). The Go pump never runs. */
-					rm_tx_submit_au(tx, au, (size_t)aulen, (int64_t)pts, (uint32_t)(kf ? RM_FLAG_KEYFRAME : 0));
-				} else if (au_ring_push(c, au, aulen, kf, pts)) { /* Go-ring fallback path */
-					c->force_idr = 1;
-				} else {
-					pthread_mutex_lock(&c->mu);
-					pthread_cond_signal(&c->cv);
-					pthread_mutex_unlock(&c->mu);
+		}
+		long long now = mono_ns();
+		/* start-up hold / downstream stall: skip PRE-encode (frame never enters the encoder => no
+		 * reference break, no IDR). The pending pipelined frame is untouched. */
+		if (!tx && au_ring_first_unconsumed(c)) {
+			c->start_holds++;
+		} else if (!tx && !au_ring_room(c)) {
+			c->ring_skips++;
+			c->dropped++;
+		} else {
+			int idr = enc_ensure(c);
+			if (c->enc != enc_seen) { /* new/rebuilt encoder: empty pipeline */
+				enc_seen = c->enc;
+				enc_pend = 0;
+				t_emit = 0;
+			}
+			if (c->enc) {
+				long long gap = t_real ? now - t_real : 0;
+				if (t_real) { /* source interval estimate (clamped: one hitch must not flip the mode) */
+					long long g = gap < 2 * period ? gap : 2 * period;
+					src_iv = src_iv ? (src_iv * 7 + g) / 8 : g;
 				}
-			} else {
-				c->dropped++;
-				c->enc_drops++;
+				int prev_pend = enc_pend;
+				long long prev_pts = pend_pts;
+				int sync_now = c->enc_sync || gap == 0 || gap >= period * 3 / 2;
+				if (pts <= 0)
+					pts = now;
+				int rc = rva_enc_frame(c->enc, fourcc, mod, w, h, np, fds, off, str, flip, idr, &au, &aulen, &kf);
+				if (rc == 0) {
+					c->import_ok = 1;
+					rva_enc_feedback(c->enc, &c->fb_present, &c->fb_avg_qp, &c->fb_rate_limited);
+					enc_pend = 1;
+					pend_pts = pts;
+					t_sub = now;
+					t_real = now;
+					if (aulen > 0 && prev_pend) { /* the previous frame, emitted by this submit */
+						long long apts = prev_pts > last_pts ? prev_pts : last_pts + 1;
+						last_pts = apts;
+						t_emit = now;
+						enc_emit_au(c, tx, au, aulen, kf, apts);
+					}
+					if (sync_now) {
+						/* first frame / after a gap: emit THIS frame now, not one period later */
+						if (rva_enc_flush(c->enc, &au, &aulen, &kf) == 0 && aulen > 0) {
+							long long apts = pend_pts > last_pts ? pend_pts : last_pts + 1;
+							last_pts = apts;
+							t_emit = mono_ns();
+							enc_emit_au(c, tx, au, aulen, kf, apts);
+						}
+						enc_pend = 0;
+					}
+				} else {
+					c->dropped++;
+					c->enc_drops++;
+				}
 			}
 		}
 		/* requeue the held buffer from this thread (pw_stream is not thread-safe -> lock the loop). */
@@ -1124,16 +1286,18 @@ static void on_process(void *data) {
 					if (c->enc_fps > 0) {
 						long long period = 1000000000LL / c->enc_fps;
 						long long tol = period / 4;
-						if (c->enc_grid_next == 0) {
-							c->enc_grid_next = gpts + period; /* prime on the first frame (accepted) */
+						if (c->enc_grid_next == 0 || gpts + 4 * period < c->enc_grid_next) {
+							/* prime on the first frame; re-prime when PTS jumped BACK (new producer /
+							 * clock origin) instead of pacing everything out until it catches up */
+							c->enc_grid_next = gpts + period;
 						} else if (gpts + tol < c->enc_grid_next) {
 							PW.stream_queue(c->stream, last); /* sub-grid: pace it out (pre-encode skip) */
 							c->grid_drops++;
 							return;
 						} else {
 							c->enc_grid_next += period;
-							while (c->enc_grid_next <= gpts + tol) /* catch up after a gap / slow source */
-								c->enc_grid_next += period;
+							if (c->enc_grid_next <= gpts + tol) /* catch up after a gap / slow source */
+								c->enc_grid_next += ((gpts + tol - c->enc_grid_next) / period + 1) * period;
 						}
 					}
 					int np = sb->n_datas < RPW_MAX_PLANES ? (int)sb->n_datas : RPW_MAX_PLANES;
@@ -1155,7 +1319,7 @@ static void on_process(void *data) {
 					c->enc_p_w = c->width;
 					c->enc_p_h = c->height;
 					c->enc_p_flip = want_flip(c, sb);
-					c->enc_p_pts = buffer_pts(sb);
+					c->enc_p_pts = gpts; /* capture PTS, else arrival (monotonic) - never 0 */
 					c->enc_pending = last; /* handed off; the thread requeues it */
 					pthread_cond_signal(&c->enc_cv);
 					pthread_mutex_unlock(&c->enc_mu);
@@ -1180,6 +1344,7 @@ static void on_state_changed(void *data, enum pw_stream_state old, enum pw_strea
 	(void)old;
 	struct rpw_capture *c = data;
 	DBG("state: %d%s%s\n", state, error ? " err=" : "", error ? error : "");
+	atomic_store_explicit(&c->streaming, state == PW_STREAM_STATE_STREAMING, memory_order_relaxed);
 	/* ERROR means the producer vanished mid-stream (VRChat/producer restart) and AUTOCONNECT does
 	 * NOT recover from ERROR - flag a reconnect; rpw_wait_frame (Go thread) re-arms the stream. */
 	if (state == PW_STREAM_STATE_ERROR) {
@@ -1258,11 +1423,16 @@ struct rpw_capture *rpw_start(const char *target_node) {
 	pthread_mutex_init(&c->mu, NULL);
 	pthread_cond_init(&c->cv, NULL);
 	pthread_mutex_init(&c->enc_mu, NULL);
-	pthread_cond_init(&c->enc_cv, NULL);
+	pthread_condattr_t ca; /* encode-thread cadence deadlines are CLOCK_MONOTONIC (mono_ns) */
+	pthread_condattr_init(&ca);
+	pthread_condattr_setclock(&ca, CLOCK_MONOTONIC);
+	pthread_cond_init(&c->enc_cv, &ca);
+	pthread_condattr_destroy(&ca);
 	c->modifier = DRM_FORMAT_MOD_INVALID;
 	c->drm_fd = -1;
 	c->flip_default = getenv("RPW_FLIP_V") != NULL; /* default no-flip (Spout2PW/DX, PipeWire convention) */
 	c->pending_maxh = -1;                           /* -1 = no live coded-height cap pending */
+	c->enc_sync = getenv("RPW_ENC_SYNC") != NULL;
 
 	const char *rn = getenv("RPW_EGL_DEVICE");
 	egl_setup_display(c, rn && *rn ? rn : "/dev/dri/renderD128");
@@ -1503,6 +1673,10 @@ long rpw_enc_drops(struct rpw_capture *c) { return c ? c->enc_drops : 0; }
 long rpw_cap_frames(struct rpw_capture *c) { return c ? c->cap_frames : 0; }
 long rpw_reconnects(struct rpw_capture *c) { return c ? c->reconnects : 0; }
 int rpw_egl_ready(struct rpw_capture *c) { return c ? c->egl_ready : 0; }
+long rpw_repeats(struct rpw_capture *c) { return c ? c->repeats : 0; }
+long rpw_ring_skips(struct rpw_capture *c) { return c ? c->ring_skips : 0; }
+long rpw_start_holds(struct rpw_capture *c) { return c ? c->start_holds : 0; }
+long rpw_forced_idrs(struct rpw_capture *c) { return c ? c->forced_idrs : 0; }
 int rpw_import_ok(struct rpw_capture *c) { return c ? c->import_ok : 0; }
 int rpw_coded_w(struct rpw_capture *c) { return c ? c->coded_w : 0; }
 int rpw_coded_h(struct rpw_capture *c) { return c ? c->coded_h : 0; }

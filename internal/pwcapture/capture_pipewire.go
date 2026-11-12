@@ -315,7 +315,7 @@ func (s *pwSource) PipeStats() medialink.PipelineStats {
 	if !s.encMode {
 		return medialink.PipelineStats{}
 	}
-	drops := uint64(C.rpw_enc_drops(s.h))
+	drops := uint64(C.rpw_enc_drops(s.h)) + uint64(C.rpw_ring_skips(s.h)) // encode errors + downstream-stall skips
 	importOK := C.rpw_import_ok(s.h) != 0
 	now := time.Now()
 	_, outFPS := s.outRate.Rate(now) // AUs/s leaving the encoder (windowed; accurate on one read)
@@ -478,6 +478,8 @@ func (s *pwSource) encTelemetry() {
 				"ringOverflow": int64(C.rpw_ring_overflow(s.h)), "capDrops": int64(C.rpw_cap_drops(s.h)),
 				"gridDrops":  int64(C.rpw_grid_drops(s.h)),
 				"reconnects": int64(C.rpw_reconnects(s.h)), "node": s.node,
+				"repeats": int64(C.rpw_repeats(s.h)), "ringSkips": int64(C.rpw_ring_skips(s.h)),
+				"startHolds": int64(C.rpw_start_holds(s.h)), "forcedIDRs": int64(C.rpw_forced_idrs(s.h)),
 				"dmabufOffer": s.eglReady()}) // false = SHM-only offer: a dmabuf producer cannot link
 		}
 	}
@@ -496,6 +498,12 @@ func (s *pwSource) ringStats() (depth, hiwater int, overflow, capDrops, gridDrop
 // eglReady reports whether this capture built the dmabuf (EGL modifier) offer; false = SHM-only, which
 // a dmabuf-only producer (libfunnel/Spout2PW) can never link.
 func (s *pwSource) eglReady() bool { return C.rpw_egl_ready(s.h) != 0 }
+
+// robustStats exposes the cadence/stall counters to in-package tests.
+func (s *pwSource) robustStats() (repeats, ringSkips, startHolds, forcedIDRs int64) {
+	return int64(C.rpw_repeats(s.h)), int64(C.rpw_ring_skips(s.h)),
+		int64(C.rpw_start_holds(s.h)), int64(C.rpw_forced_idrs(s.h))
+}
 
 // reconnectCount is the stream re-arm counter (tests).
 func (s *pwSource) reconnectCount() int64 { return int64(C.rpw_reconnects(s.h)) }

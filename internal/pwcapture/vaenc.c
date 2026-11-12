@@ -500,14 +500,19 @@ struct rva_enc {
 	int have_pending;
 	int pend_idx;
 	int pend_idr;
+	int last_idx;  /* nv12[] holding the last real frame's VPP output (rva_enc_repeat source) */
+	int have_last;
 	unsigned char *au; /* returned AU buffer (AUD + coded) */
 	int au_cap;
 	/* import-surface cache: the PipeWire pool cycles a fixed set of dmabuf fds; create a VASurface
 	 * per fd once + reuse (per-frame vaCreateSurfaces import was the ~55fps-at-4K bottleneck + a slow
-	 * RSS creep). Keyed by the plane-0 fd; the pool's layout per fd is stable. */
+	 * RSS creep). Keyed by plane-0 fd AND its dmabuf inode: after a producer restart the new pool's fds
+	 * reuse the old numbers, and an fd-only key would encode the OLD buffer forever (frozen picture). */
 	int cache_fd[16];
+	unsigned long long cache_ino[16];
 	VASurfaceID cache_surf[16];
 	int cache_n;
+	int cache_next; /* round-robin eviction slot when full */
 };
 
 /* enc_init_qp is the init QP written into the PPS and the picture param: the live cur_qp in quality
@@ -776,21 +781,40 @@ static void write_slice_hdr_hevc(struct bs *b, struct rva_enc *e, int idr) {
  * plane-0 fd (the pool cycles a fixed fd set). Cache full / miss on a fresh fd => import + store. */
 static VASurfaceID import_cached(struct rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int h,
                                  int n_planes, const int *fds, const unsigned *offsets, const unsigned *strides) {
-	for (int i = 0; i < e->cache_n; i++)
-		if (e->cache_fd[i] == fds[0])
+	struct stat sb;
+	unsigned long long ino = fstat(fds[0], &sb) == 0 ? (unsigned long long)sb.st_ino : 0;
+	int slot = -1;
+	for (int i = 0; i < e->cache_n; i++) {
+		if (e->cache_fd[i] != fds[0])
+			continue;
+		if (e->cache_ino[i] == ino)
 			return e->cache_surf[i];
+		slot = i; /* same fd number, different buffer (producer restarted): re-import into this slot */
+		break;
+	}
 	VASurfaceID s = VA_INVALID_ID;
 	VAStatus st = import_dmabuf(e->dpy, drm_fourcc, modifier, w, h, n_planes, fds, offsets, strides, &s);
 	if (st != VA_STATUS_SUCCESS) {
 		VDBG("enc: import: %s\n", VA.ErrorStr(st));
 		return VA_INVALID_ID;
 	}
-	if (e->cache_n < (int)(sizeof(e->cache_fd) / sizeof(e->cache_fd[0]))) {
-		e->cache_fd[e->cache_n] = fds[0];
-		e->cache_surf[e->cache_n] = s;
-		e->cache_n++;
-	} /* else: not cached, destroyed by the caller via a one-shot path - but pools are small, so the
-	     cache never fills in practice; if it did we'd leak this surface. Guarded by the 16 cap. */
+	const int capn = (int)(sizeof(e->cache_fd) / sizeof(e->cache_fd[0]));
+	int evict = slot >= 0;
+	if (slot < 0) {
+		if (e->cache_n < capn) {
+			slot = e->cache_n++;
+		} else { /* full: evict round-robin (bounded; never leaks) */
+			slot = e->cache_next;
+			e->cache_next = (e->cache_next + 1) % capn;
+			evict = 1;
+		}
+	}
+	/* stale import: the driver refcounts the underlying resource, so an in-flight VPP read stays valid */
+	if (evict && e->cache_surf[slot] != VA_INVALID_ID)
+		VA.DestroySurfaces(e->dpy, &e->cache_surf[slot], 1);
+	e->cache_fd[slot] = fds[0];
+	e->cache_ino[slot] = ino;
+	e->cache_surf[slot] = s;
 	return s;
 }
 
@@ -1113,16 +1137,11 @@ static int build_hevc_bufs(struct rva_enc *e, int idx, int idr, VABufferID *bufs
 	return 0;
 }
 
-int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int h, int n_planes,
-                  const int *fds, const unsigned *offsets, const unsigned *strides,
-                  int flip, int force_idr, unsigned char **au, int *au_len, int *keyframe) {
-	if (!e || !au || !au_len || !keyframe)
-		return -1;
-	*au_len = 0;
-	int idx = e->pp;
-	if (vpp_to_nv12(e, e->nv12[idx], drm_fourcc, modifier, w, h, n_planes, fds, offsets, strides, flip) != 0)
-		return -2;
+/* enc_submit builds the codec params for recon/coded[idx] and submits an encode of src (no sync).
+ * Advances the frame/GOP state; *out_idr = whether this frame is an IDR. 0 = ok. */
+static int enc_submit(rva_enc *e, int idx, VASurfaceID src, int force_idr, int *out_idr) {
 	int idr = (e->since_idr == 0) || force_idr;
+	*out_idr = idr;
 	if (idr) {
 		e->since_idr = 0;
 		e->frame_num = 0;
@@ -1289,7 +1308,7 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 	bufs[nb++] = slb;
 
 do_submit:
-	st = VA.BeginPicture(e->dpy, e->enc_ctx, e->nv12[idx]);
+	st = VA.BeginPicture(e->dpy, e->enc_ctx, src);
 	if (st == VA_STATUS_SUCCESS)
 		st = VA.RenderPicture(e->dpy, e->enc_ctx, bufs, nb);
 	if (st == VA_STATUS_SUCCESS)
@@ -1308,20 +1327,13 @@ do_submit:
 		e->since_idr = 0;
 	e->have_ref = 1;
 	e->pp ^= 1;
+	return 0;
+}
 
-	/* emit the PREVIOUS frame (its GPU encode overlapped with building+submitting this one). The
-	 * first frame primes the pipeline and returns no AU. */
-	if (!e->have_pending) {
-		e->have_pending = 1;
-		e->pend_idx = idx;
-		e->pend_idr = idr;
-		return 0; /* *au_len stays 0 */
-	}
-	int pidx = e->pend_idx;
-	int pidr = e->pend_idr;
-	e->pend_idx = idx; /* this frame becomes the new pending regardless of the emit outcome */
-	e->pend_idr = idr;
-	st = VA.SyncSurface(e->dpy, e->nv12[pidx]);
+/* enc_emit waits for the encode whose input surface is sync (submitted into coded[pidx]), copies the
+ * Annex-B AU out (+ H.264 AUD) and runs the rate controllers. */
+static int enc_emit(rva_enc *e, VASurfaceID sync, int pidx, int pidr, unsigned char **au, int *au_len, int *keyframe) {
+	VAStatus st = VA.SyncSurface(e->dpy, sync);
 	if (st != VA_STATUS_SUCCESS) {
 		VDBG("enc: sync pending: %s\n", VA.ErrorStr(st));
 		return -6;
@@ -1397,6 +1409,62 @@ do_submit:
 	*au_len = off;
 	*keyframe = pidr;
 	return 0;
+}
+
+int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int h, int n_planes,
+                  const int *fds, const unsigned *offsets, const unsigned *strides,
+                  int flip, int force_idr, unsigned char **au, int *au_len, int *keyframe) {
+	if (!e || !au || !au_len || !keyframe)
+		return -1;
+	*au_len = 0;
+	int idx = e->pp, idr = 0;
+	if (vpp_to_nv12(e, e->nv12[idx], drm_fourcc, modifier, w, h, n_planes, fds, offsets, strides, flip) != 0)
+		return -2;
+	int r = enc_submit(e, idx, e->nv12[idx], force_idr, &idr);
+	if (r != 0)
+		return r;
+	e->last_idx = idx; /* repeat source (rva_enc_repeat) */
+	e->have_last = 1;
+	/* emit the PREVIOUS frame (its GPU encode overlapped with building+submitting this one). The
+	 * first frame primes the pipeline and returns no AU. */
+	if (!e->have_pending) {
+		e->have_pending = 1;
+		e->pend_idx = idx;
+		e->pend_idr = idr;
+		return 0; /* *au_len stays 0 */
+	}
+	int pidx = e->pend_idx, pidr = e->pend_idr;
+	e->pend_idx = idx; /* this frame becomes the new pending regardless of the emit outcome */
+	e->pend_idr = idr;
+	return enc_emit(e, e->nv12[pidx], pidx, pidr, au, au_len, keyframe);
+}
+
+int rva_enc_flush(rva_enc *e, unsigned char **au, int *au_len, int *keyframe) {
+	if (!e || !au || !au_len || !keyframe)
+		return -1;
+	*au_len = 0;
+	if (!e->have_pending)
+		return 0;
+	e->have_pending = 0;
+	return enc_emit(e, e->nv12[e->pend_idx], e->pend_idx, e->pend_idr, au, au_len, keyframe);
+}
+
+int rva_enc_repeat(rva_enc *e, int force_idr, unsigned char **au, int *au_len, int *keyframe) {
+	if (!e || !au || !au_len || !keyframe)
+		return -1;
+	*au_len = 0;
+	if (e->have_pending) /* the pending real frame is the cadence AU */
+		return rva_enc_flush(e, au, au_len, keyframe);
+	if (!e->have_last)
+		return -1;
+	/* re-encode the last VPP output (still in nv12[last_idx]: the next real frame VPPs into the other
+	 * surface, and this is synchronous) into recon/coded[pp]; identical content => P-skip, tiny AU. */
+	int idx = e->pp, idr = 0;
+	VASurfaceID src = e->nv12[e->last_idx];
+	int r = enc_submit(e, idx, src, force_idr, &idr);
+	if (r != 0)
+		return r;
+	return enc_emit(e, src, idx, idr, au, au_len, keyframe);
 }
 
 void rva_enc_set_bitrate(rva_enc *e, int kbps) {

@@ -72,6 +72,12 @@ long rpw_reconnects(struct rpw_capture *c);
 /* rpw_egl_ready: 1 = dmabuf (EGL modifier) offer built; 0 = SHM-only offer (a dmabuf-only producer
  * such as libfunnel/Spout2PW can never link). */
 int rpw_egl_ready(struct rpw_capture *c);
+/* robustness counters: cadence repeats (static/slow/hitching source), pre-encode skips on a full AU
+ * ring (downstream stall; no reference break), start-up holds (first AU unconsumed), forced IDRs. */
+long rpw_repeats(struct rpw_capture *c);
+long rpw_ring_skips(struct rpw_capture *c);
+long rpw_start_holds(struct rpw_capture *c);
+long rpw_forced_idrs(struct rpw_capture *c);
 int rpw_import_ok(struct rpw_capture *c);
 int rpw_coded_w(struct rpw_capture *c);
 int rpw_coded_h(struct rpw_capture *c);
