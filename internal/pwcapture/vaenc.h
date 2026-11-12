@@ -39,6 +39,10 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
                   const int *fds, const unsigned *offsets, const unsigned *strides,
                   int force_idr, unsigned char **au, int *au_len, int *keyframe);
 
+/* rva_enc_set_bitrate updates the live target bitrate (kbps); applied on the next encoded frame via
+ * a re-sent VBR rate-control misc param (no reopen). */
+void rva_enc_set_bitrate(rva_enc *e, int kbps);
+
 /* rva_enc_free tears down the session (in order). */
 void rva_enc_free(rva_enc *e);
 

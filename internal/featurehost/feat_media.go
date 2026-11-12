@@ -60,6 +60,22 @@ type mediaFeature struct {
 	seqByOrigin map[string]uint64 // synthetic per-origin seq for down-injected events (dedup-safe)
 }
 
+// withVAAPINativeEncoders appends the Linux zero-copy VA engine's encoder name to the advertised set
+// when this box can run it (libva + PipeWire capture). The name is honoured natively only for a
+// dmabuf source; any other source (webcam) falls back to the ffmpeg *_vaapi readback, same wire codec.
+// HEVC-native is not advertised yet (the native engine is H.264-only; HEVC routes use ffmpeg hevc_vaapi).
+func withVAAPINativeEncoders(encoders []string) []string {
+	if !pwcapture.VAEncodeAvailable() {
+		return encoders
+	}
+	for _, e := range encoders {
+		if e == medialink.EncoderVAAPINativeH264 {
+			return encoders
+		}
+	}
+	return append(append([]string(nil), encoders...), medialink.EncoderVAAPINativeH264)
+}
+
 func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 	var in mediaInit
 	if err := json.Unmarshal(params, &in); err != nil {
@@ -125,7 +141,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 		GovernorBaseKbps: func() int { return liveCfg().Bitrate() },
 	})
 	if len(in.Encoders) > 0 || len(in.Decoders) > 0 {
-		f.router.SetCodecCaps(in.Encoders, in.Decoders)
+		f.router.SetCodecCaps(withVAAPINativeEncoders(in.Encoders), in.Decoders)
 	}
 	f.router.SetSyncPeer(in.SyncPeer)
 
@@ -214,7 +230,7 @@ func (f *mediaFeature) HandleEvent(event string, data json.RawMessage) {
 	case evMediaCodecs:
 		var cc codecCaps
 		if json.Unmarshal(data, &cc) == nil {
-			f.router.SetCodecCaps(cc.Encoders, cc.Decoders)
+			f.router.SetCodecCaps(withVAAPINativeEncoders(cc.Encoders), cc.Decoders)
 		}
 	case evMediaAdvert:
 		f.router.Advertise()

@@ -17,6 +17,9 @@ import (
 
 func captureAvailable() bool { return false }
 
+// VAEncodeAvailable is always false without the Linux -tags pipewire capture shim.
+func VAEncodeAvailable() bool { return false }
+
 func openCapture(context.Context, *logbus.Bus, string) (medialink.Source, error) {
 	return nil, errors.New("pwcapture: PipeWire capture not built (needs linux + -tags pipewire)")
 }

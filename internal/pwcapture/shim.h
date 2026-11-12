@@ -29,6 +29,32 @@ long rpw_dropped(struct rpw_capture *c);
  * means the producer is DMA-BUF only and the EGL import path is required. */
 long rpw_dmabuf_skipped(struct rpw_capture *c);
 
+/* ---- vaapi-native encode mode (zero-copy dmabuf -> VA -> H.264/HEVC AU) ---- */
+
+/* rpw_set_encode switches the capture to fused in-process VA encode (codec 0=H.264, 1=HEVC), coded
+ * height capped by max_h (0 = native). Call before consuming any AU. 1 = VA usable (use rpw_wait_au),
+ * 0 = VA unavailable (fall back to rpw_wait_frame + ffmpeg). */
+int rpw_set_encode(struct rpw_capture *c, int codec, int kbps, int max_h, int fps, const char *node);
+
+/* rpw_wait_au returns one Annex-B AU into dst (blocks up to timeout_ms), sets *keyframe and the CODED
+ * dims in *w/*h. >0 bytes, 0 timeout, -1 fatal, -2 cap too small (dims set, AU kept). */
+int rpw_wait_au(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int *h, int *keyframe, long timeout_ms);
+
+/* rpw_request_keyframe forces an IDR on the next encoded frame (PLI / route start / reconnect). */
+void rpw_request_keyframe(struct rpw_capture *c);
+
+/* rpw_set_bitrate sets the live target bitrate (kbps), applied on the next encoded frame. */
+void rpw_set_bitrate(struct rpw_capture *c, int kbps);
+
+/* encode telemetry getters. */
+long rpw_enc_aus(struct rpw_capture *c);
+long rpw_enc_drops(struct rpw_capture *c);
+long rpw_cap_frames(struct rpw_capture *c);
+long rpw_reconnects(struct rpw_capture *c);
+int rpw_import_ok(struct rpw_capture *c);
+int rpw_coded_w(struct rpw_capture *c);
+int rpw_coded_h(struct rpw_capture *c);
+
 /* rpw_stop disconnects + frees the capture. */
 void rpw_stop(struct rpw_capture *c);
 

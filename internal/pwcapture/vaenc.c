@@ -446,6 +446,8 @@ struct rva_enc {
 	int fd;
 	VADisplay dpy;
 	int in_w, in_h, out_w, out_h, fps, kbps;
+	int rc_dirty; /* kbps changed via rva_enc_set_bitrate: re-send the RC misc param next frame */
+	int codec;    /* 0 = H.264, 1 = HEVC */
 	int mbw, mbh;
 	int log2_max_fn;
 	/* VPP (rgb import -> nv12 scale/convert) */
@@ -625,12 +627,14 @@ static int vpp_to_nv12(struct rva_enc *e, VASurfaceID target, uint32_t drm_fourc
 }
 
 rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps, int bitrate_kbps) {
-	(void)codec; /* H.264 only for now */
 	if (!va_load() || out_w < 16 || out_h < 16 || out_w > 8192 || out_h > 8192)
+		return NULL;
+	if (codec != 0) /* H.264 only in this engine; HEVC lands in a follow-up (caller falls back) */
 		return NULL;
 	struct rva_enc *e = calloc(1, sizeof(*e));
 	if (!e)
 		return NULL;
+	e->codec = codec;
 	e->fd = open(node, O_RDWR | O_CLOEXEC);
 	if (e->fd < 0) {
 		free(e);
@@ -674,7 +678,7 @@ rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps,
 	ea[0].type = VAConfigAttribRTFormat;
 	ea[0].value = VA_RT_FORMAT_YUV420;
 	ea[1].type = VAConfigAttribRateControl;
-	ea[1].value = VA_RC_CBR;
+	ea[1].value = VA_RC_VBR; /* constrained VBR: average=target, burst to peak, NO CBR filler on static content */
 	ea[2].type = VAConfigAttribEncPackedHeaders;
 	ea[2].value = VA_ENC_PACKED_HEADER_SEQUENCE | VA_ENC_PACKED_HEADER_PICTURE | VA_ENC_PACKED_HEADER_SLICE;
 	if (VA.CreateConfig(e->dpy, VAProfileH264ConstrainedBaseline, VAEntrypointEncSlice, ea, 3, &e->enc_cfg) != VA_STATUS_SUCCESS) {
@@ -729,7 +733,7 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 		sp.intra_period = e->gop;
 		sp.intra_idr_period = e->gop;
 		sp.ip_period = 1;
-		sp.bits_per_second = (unsigned)e->kbps * 1000;
+		sp.bits_per_second = (unsigned)e->kbps * 1000 + (unsigned)e->kbps * 1000 / 2; /* peak (VBR HRD) */
 		sp.max_num_ref_frames = 1;
 		sp.picture_width_in_mbs = e->mbw;
 		sp.picture_height_in_mbs = e->mbh;
@@ -748,7 +752,13 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 		if (st != VA_STATUS_SUCCESS)
 			return -3;
 		bufs[nb++] = sb;
+	}
 
+	/* Rate control (idr OR a live SetBitrate): constrained VBR - average at the budget, burst to a
+	 * capped peak, and NO CBR filler, so a static/flat source drops to its natural low bitrate instead
+	 * of the budget (the ffmpeg-path "50 Mbps of flat colour" shape). */
+	if (idr || e->rc_dirty) {
+		e->rc_dirty = 0;
 		VAEncMiscParameterBuffer *mb;
 		VABufferID rcb;
 		if (VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncMiscParameterBufferType,
@@ -757,8 +767,9 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 			mb->type = VAEncMiscParameterTypeRateControl;
 			VAEncMiscParameterRateControl *rc = (VAEncMiscParameterRateControl *)mb->data;
 			memset(rc, 0, sizeof(*rc));
-			rc->bits_per_second = (unsigned)e->kbps * 1000;
-			rc->target_percentage = 90;
+			unsigned target = (unsigned)e->kbps * 1000;
+			rc->bits_per_second = target + target / 2; /* peak = 1.5x target (constrained VBR cap) */
+			rc->target_percentage = 67;                /* average ~= target; static content falls below */
 			rc->window_size = 1000;
 			rc->initial_qp = 26;
 			rc->min_qp = 10;
@@ -938,6 +949,13 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 	*au_len = off;
 	*keyframe = pidr;
 	return 0;
+}
+
+void rva_enc_set_bitrate(rva_enc *e, int kbps) {
+	if (!e || kbps <= 0)
+		return;
+	e->kbps = kbps;
+	e->rc_dirty = 1; /* re-send the VBR rate-control misc param on the next frame */
 }
 
 void rva_enc_free(rva_enc *e) {

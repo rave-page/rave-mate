@@ -67,6 +67,20 @@ type ZeroCopySource interface {
 	SharedTexture() (handle uint64, dxgiFormat uint32, w, h int, name string, ok bool)
 }
 
+// DMABufEncodeSource is a raw-video Source that can instead encode ITSELF in-process on the GPU
+// (Linux zero-copy: PipeWire dmabuf → VA import → VPP NV12 → H.264/HEVC), emitting compressed AUs so
+// the frames never become Go pixels. The vaapi-native engine asks it to switch at encode-setup; the
+// returned Source replaces the raw one and SHOULD also implement KeyframeSource / RateControlSource /
+// PipelineReporter. ok=false = it cannot (not a dmabuf source, VA unavailable, or the buffer layout is
+// not VA-importable): the caller falls back to the readback + ffmpeg *_vaapi path, same wire codec.
+//
+// Like ZeroCopySource, the implementation must NOT have started a host readback before this is called
+// - the whole point is that a native route never opens the readback.
+type DMABufEncodeSource interface {
+	Source
+	StartDMABufEncode(spec EncodeSpec) (Source, bool, error)
+}
+
 // ZeroCopySink is the receive-side mirror of ZeroCopySource: a raw-video Sink whose DESTINATION
 // pixels live in a GPU shared texture a decoder may render into DIRECTLY - no raw frame down a
 // pipe, none on the Go heap. A decode engine that can drive such a texture (the native MF child,

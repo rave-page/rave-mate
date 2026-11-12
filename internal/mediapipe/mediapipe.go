@@ -50,7 +50,33 @@ func Factories(log *logbus.Bus) (medialink.EncoderFactory, medialink.DecoderFact
 		log.Info(source, fmt.Sprintf(format, args...), nil)
 	}
 	var mfWarned, mfEncHeldWarned bool
+	var vaNativeWarned bool
 	enc := func(ctx context.Context, spec medialink.EncodeSpec, src medialink.Source) (medialink.Source, error) {
+		if encodeEngine(spec) == engineVAAPINative {
+			// Zero-copy in-process VA engine: honoured only for a dmabuf source that can encode itself.
+			// Anything else (webcam / SHM / layout not VA-importable) falls back to the ffmpeg *_vaapi
+			// readback path, which produces the SAME wire codec the peer was answered with.
+			if de, ok := src.(medialink.DMABufEncodeSource); ok {
+				s, started, err := de.StartDMABufEncode(spec)
+				if err == nil && started {
+					return s, nil
+				}
+				if !vaNativeWarned {
+					vaNativeWarned = true
+					reason := "source is not a VA-importable dmabuf"
+					if err != nil {
+						reason = err.Error()
+					}
+					log.Warn(source, "VA-API native encode unavailable - falling back to the ffmpeg *_vaapi readback path (same codec; expect host readback)", map[string]any{"reason": reason, "encoder": spec.Encoder})
+				}
+			}
+			sub, ok := ffmpegVAAPIFallback(spec.Codec)
+			if !ok {
+				return nil, fmt.Errorf("mediapipe: VA-API native encode unavailable and no ffmpeg *_vaapi fallback probed for codec %d", spec.Codec)
+			}
+			spec.Encoder = sub
+			spec.Software = false
+		}
 		if encodeEngine(spec) == engineMFNative {
 			if mfenc.ChildAvailable() {
 				s, err := newMFBridge(ctx, log, spec, src)
@@ -134,6 +160,7 @@ type encodeEngineKind int
 const (
 	engineFfmpegChild encodeEngineKind = iota // supervised ffmpeg child, raw RGBA over stdin
 	engineMFNative                            // internal/mfenc: pipe-free, in-process, GPU-resident
+	engineVAAPINative                         // internal/pwcapture: zero-copy dmabuf→VA, Linux
 )
 
 // encodeEngine reports which engine serves a spec. Keyed on the NEGOTIATED ENCODER NAME so the
@@ -141,10 +168,37 @@ const (
 // every H.264 spec to mfenc, including a negotiated libx264 - the route then reported a tier-4
 // software encode while hardware silicon did the work, and SWOnly ("force software") didn't.
 func encodeEngine(spec medialink.EncodeSpec) encodeEngineKind {
-	if spec.Encoder == medialink.EncoderMFNative {
+	switch spec.Encoder {
+	case medialink.EncoderMFNative:
 		return engineMFNative
+	case medialink.EncoderVAAPINativeH264, medialink.EncoderVAAPINativeHEVC:
+		return engineVAAPINative
 	}
 	return engineFfmpegChild
+}
+
+// ffmpegVAAPIFallback picks the ffmpeg *_vaapi encoder for a wire codec when the native VA engine
+// can't serve the source (non-dmabuf / non-importable). Same codec the peer was answered with, so the
+// readback substitution is invisible on the wire. ok=false when that encoder was not probed.
+func ffmpegVAAPIFallback(codec medialink.Codec) (string, bool) {
+	caps, ok := Cached()
+	if !ok {
+		return "", false
+	}
+	want := "h264_vaapi"
+	if codec == medialink.CodecHEVC {
+		want = "hevc_vaapi"
+	}
+	for _, e := range caps.Encoders {
+		if e == want {
+			return want, true
+		}
+	}
+	// Last resort within the same codec family: any probed encoder for it (keeps the wire codec).
+	if codec == medialink.CodecH264 {
+		return pickH264(caps.Encoders)
+	}
+	return "", false
 }
 
 // h264FallbackOrder is the ffmpeg H.264 encoder preference when the native MF engine can't open:

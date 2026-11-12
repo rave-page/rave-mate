@@ -24,6 +24,18 @@ const (
 // pipe-fed tier-3 candidate.
 const EncoderMFNative = "h264_mf_native"
 
+// EncoderVAAPINativeH264 / EncoderVAAPINativeHEVC name the Linux sender's ZERO-COPY in-process VA-API
+// engine (internal/pwcapture: PipeWire dmabuf → vaDeriveImage-free VA import → VPP NV12 → EncSlice,
+// no ffmpeg child and no host readback - the frames never become Go pixels). Advertised ONLY when the
+// box has both a working VA encoder and PipeWire capture, and honoured natively only for a DMA-BUF
+// source; for any other source the mediapipe factory falls back to the ffmpeg *_vaapi readback path,
+// which produces the SAME wire codec (the peer decodes ordinary H.264/HEVC either way). Distinct from
+// ffmpeg's own "h264_vaapi"/"hevc_vaapi", which stay normal pipe/readback tier candidates.
+const (
+	EncoderVAAPINativeH264 = "h264_vaapi_native"
+	EncoderVAAPINativeHEVC = "hevc_vaapi_native"
+)
+
 // CodecChoice is a negotiated video codec selection (§3.2).
 type CodecChoice struct {
 	Codec    Codec
@@ -53,10 +65,12 @@ var codecTiers = []struct {
 	// cards), VA-API, V4L2 M2M (SoC/custom), VideoToolbox. The prober only advertises what actually
 	// test-encoded, so listing a backend here is harmless on machines that lack it.
 	{1, CodecAV1, DecodeAV1, false, []string{"av1_nvenc", "av1_qsv", "av1_amf", "av1_vaapi", "av1_mf"}},
-	{2, CodecHEVC, DecodeHEVC, false, []string{"hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_vaapi", "hevc_mf", "hevc_videotoolbox", "hevc_v4l2m2m"}},
-	// EncoderMFNative first: same silicon as the *_nvenc/_amf/_qsv siblings, minus the ffmpeg child
-	// and the multi-GB/s rawvideo pipe. Cheapest way to serve this tier when it is advertised.
-	{3, CodecH264, DecodeH264, false, []string{EncoderMFNative, "h264_nvenc", "h264_qsv", "h264_amf", "h264_vaapi", "h264_mf", "h264_videotoolbox", "h264_v4l2m2m", "h264_omx"}},
+	// EncoderVAAPINativeHEVC first: same silicon as hevc_vaapi, minus the ffmpeg child and the host
+	// readback (zero-copy dmabuf→VA). Cheapest way to serve this tier when it is advertised.
+	{2, CodecHEVC, DecodeHEVC, false, []string{EncoderVAAPINativeHEVC, "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_vaapi", "hevc_mf", "hevc_videotoolbox", "hevc_v4l2m2m"}},
+	// EncoderMFNative / EncoderVAAPINativeH264 first: same silicon as the *_nvenc/_amf/_qsv/_vaapi
+	// siblings, minus the ffmpeg child and the rawvideo pipe / host readback. Cheapest when advertised.
+	{3, CodecH264, DecodeH264, false, []string{EncoderMFNative, EncoderVAAPINativeH264, "h264_nvenc", "h264_qsv", "h264_amf", "h264_vaapi", "h264_mf", "h264_videotoolbox", "h264_v4l2m2m", "h264_omx"}},
 	{4, CodecH264, DecodeH264, true, []string{"libx264"}},
 	{4, CodecAV1, DecodeAV1, true, []string{"libsvtav1"}},
 	{5, CodecJPEG, DecodeJPEG, false, []string{"mjpeg"}},
@@ -136,6 +150,19 @@ func Negotiate(encoders, decoders []string, o NegotiateOpts) (CodecChoice, bool)
 				}
 			}
 		}
+	}
+	// Zero-copy VA-API native preemption (Linux dmabuf sources): the in-process capture+encode engine
+	// beats the ffmpeg *_vaapi readback path - no ffmpeg child, no host readback, and it is the only
+	// path that imports a 4K multi-plane tiled dmabuf at all. Advertised only when VA encode + PipeWire
+	// capture both work; honoured natively only for a dmabuf source (else the factory falls back to the
+	// ffmpeg *_vaapi readback, same wire codec). HEVC-native first (better compression at the budget).
+	if enc[EncoderVAAPINativeHEVC] && dec[DecodeHEVC] {
+		ch, _ := choiceFor(EncoderVAAPINativeHEVC)
+		return ch, true
+	}
+	if enc[EncoderVAAPINativeH264] && dec[DecodeH264] {
+		ch, _ := choiceFor(EncoderVAAPINativeH264)
+		return ch, true
 	}
 	if enc[EncoderMFNative] && dec[DecodeH264] {
 		ch, _ := choiceFor(EncoderMFNative)
