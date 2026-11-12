@@ -1,13 +1,13 @@
 {
-  "version": "nightly-e3aaa36",
-  "build": 435,
-  "commit": "e3aaa36",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-435-20261112-e3aaa36.exe",
-  "sha256": "5ec9eed159cc4e3aa5c3e9e79e28b1030db0fc737c94a779a55e79ff8e660176",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-435-20261112-e3aaa36.exe",
-  "installer_sha256": "b92f2a0c860530a877f9a9c5577f21b4c2c03a8d3e7cae3ebd1bdfbd8522b923",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-435-20261112-e3aaa36",
-  "linux_sha256": "7460690258b543a3a4ffe16f5d1d7b2d43100563a5b62325dbe95789bb193081",
+  "version": "nightly-9fba676",
+  "build": 436,
+  "commit": "9fba676",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-436-20261112-9fba676.exe",
+  "sha256": "e8a2f58da8ee976fd1258cd6d28df473632e3a85716c44ec574ce566fea98130",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-436-20261112-9fba676.exe",
+  "installer_sha256": "649f689e8d76a98a67bd3266345c0d219aecc5809a496d96f675e05af9eee4f4",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-436-20261112-9fba676",
+  "linux_sha256": "259adb3e725f9f39d59ad19430dd8af53403a014d9d6aceaaf84a8e933da25c1",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-11-12T17:25:58Z",
-  "notes": "Merge feat/udp-transport: Zig reassembler, publish histogram, jitter-sized playout margin"
+  "released": "2026-11-12T17:45:41Z",
+  "notes": "Merge feat/pw-4k: recorded-set producer read-ahead, native TX wiring from the VA encode thread, pinned Zig in the Linux build box"
 }
