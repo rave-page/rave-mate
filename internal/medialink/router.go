@@ -330,6 +330,8 @@ type RouteManager struct {
 
 	streamSeq atomic.Uint32 // stream-id allocator (starts at 1; 0 = meta)
 
+	proc *ProcRuntime // STEP-0 Go GC/scheduler pause sampler (this process = the media plane)
+
 	reportEvery time.Duration // report meta cadence (§2.1 ~1/s; shortened in tests)
 	syncBurst   time.Duration // probe cadence while acquiring lock (§2.3: 8 probes / 2 s)
 	syncSteady  time.Duration // probe cadence once locked (§2.3: 1 / 10 s)
@@ -413,10 +415,15 @@ func New(opts Options) *RouteManager {
 		sources: map[string]sourceReg{}, sinks: map[string]sinkReg{},
 		remoteAdvert: map[string]Advert{}, pendingAns: map[string]*pendingAnswer{},
 		pendingOff: map[string]*pendingOffer{}, active: map[string]*activeRoute{},
+		proc: NewProcRuntime(),
 	}
 	rm.streamSeq.Store(1)
 	return rm
 }
+
+// ProcRuntime samples this process's Go GC/scheduler pauses since the last call (STEP-0 hang
+// evidence). Called at ~1 Hz by the media child's telemetry emit (child mode) or on ctl read (in-proc).
+func (rm *RouteManager) ProcRuntime() ProcRuntimeSnapshot { return rm.proc.Snapshot() }
 
 // RegisterSource attaches a media source (the P1 seam later phases fill: dshow audio, Spout, webcam).
 func (rm *RouteManager) RegisterSource(desc SourceDesc, open SourceOpen) {
@@ -1460,11 +1467,13 @@ func (rm *RouteManager) runJitter(ctx context.Context, conn frameConn, jb *jitte
 		}
 		f, wake := jb.pop(rm.clock.Now())
 		if f != nil {
+			st.stages.JBRelease.Mark(monoNs()) // STEP-0: jitter buffer released a frame for playout
 			if err := sink.Write(f); err != nil {
 				rm.warnf("video sink write failed", map[string]any{"session": st.session, "error": err.Error()})
 				_ = conn.Close()
 				return
 			}
+			st.stages.DecSubmit.Mark(monoNs()) // STEP-0: cadence of frames accepted by the decode/publish sink (backpressure)
 			continue
 		}
 		if wake == 0 { // empty - wait for a push
@@ -1515,6 +1524,7 @@ func (rm *RouteManager) runSend(ctx context.Context, rio *routeIO, src Source) e
 			}
 			return err
 		}
+		rio.st.stages.EncDone.Mark(monoNs()) // STEP-0: cadence of encoded AUs reaching the send loop
 		f.Stream = rio.st.stream
 		f.Seq = seq
 		seq++
@@ -1533,6 +1543,7 @@ func (rm *RouteManager) runSend(ctx context.Context, rio *routeIO, src Source) e
 		if err := rio.conn.WriteFrame(f); err != nil {
 			return err
 		}
+		rio.st.stages.TxQueue.Mark(monoNs()) // STEP-0: cadence of frames packetized + queued to the pacer
 		rio.st.sent(f)
 		rio.retainOrRelease(f) // NACK window (§2.5) vs pooled capture buffer (see nack.go)
 	}
@@ -1570,6 +1581,7 @@ func (rm *RouteManager) runReceive(ctx context.Context, rio *routeIO, sink Sink)
 			}
 			continue
 		}
+		rio.st.stages.RxComplete.Mark(monoNs()) // STEP-0: a media frame left the transport (reassembled+auth)
 		if gap := rio.st.recvMedia(f, arrival); gap.Gapped && rio.caps.nack {
 			// Request retransmit of the missing range (RFC 4585 semantics). A write failure here
 			// means the conn is dying - the next ReadFrame surfaces it.

@@ -17,7 +17,8 @@ type MediaControl interface {
 	Stats() []RouteStat
 	SyncStats() []SyncStat
 	ClockQuality() ClockQuality
-	LocalSources() []SourceDesc // this node's advertised media sources (ctl media-sources; read-only)
+	LocalSources() []SourceDesc       // this node's advertised media sources (ctl media-sources; read-only)
+	ProcRuntime() ProcRuntimeSnapshot // STEP-0: media-plane process GC/scheduler pauses (ctl media-perf)
 }
 
 var _ MediaControl = (*RouteManager)(nil)

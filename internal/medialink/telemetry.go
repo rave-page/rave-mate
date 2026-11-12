@@ -121,6 +121,10 @@ type routeStat struct {
 	// now is the clock the rate window closes against (time.Now; a test seam).
 	now func() time.Time
 
+	// stages holds per-pipeline-stage inter-frame interval histograms (STEP-0 hang localization);
+	// marked lock-free on the realtime goroutines, snapshotted off-thread. Never nil after construction.
+	stages *FrameStages
+
 	mu        sync.Mutex
 	encoder   string // §3.2 negotiated encoder ("" = raw/echo route)
 	tier      int
@@ -153,7 +157,7 @@ type routeStat struct {
 
 func newRouteStat(session, peer string, stream uint16, direction string) *routeStat {
 	return &routeStat{session: session, peer: peer, stream: stream, direction: direction,
-		streams: map[uint16]*streamRecv{}, now: time.Now}
+		streams: map[uint16]*streamRecv{}, now: time.Now, stages: &FrameStages{}}
 }
 
 // count records one frame's payload and closes the rate window when it is due. Caller holds st.mu.
@@ -389,6 +393,7 @@ func (st *routeStat) snapshot() RouteStat {
 		r := st.remote
 		out.Remote = &r
 	}
+	out.Stages = st.stages.Snapshot()
 	return out
 }
 
@@ -449,7 +454,8 @@ type RouteStat struct {
 	Remote   *Report // last report from the far end (nil = none yet)
 	RemoteAt time.Time
 
-	JB   *JitterStats   // recv video routes: adaptive buffer state (§3.3); nil = no buffer
-	Pipe *PipelineStats // encode/decode child telemetry; nil = passthrough route
-	UDP  *UDPStats      // §2.5 UDP transport telemetry (loss/NACK/retransmit/pacer/owd); nil = TCP route
+	JB     *JitterStats   // recv video routes: adaptive buffer state (§3.3); nil = no buffer
+	Pipe   *PipelineStats // encode/decode child telemetry; nil = passthrough route
+	UDP    *UDPStats      // §2.5 UDP transport telemetry (loss/NACK/retransmit/pacer/owd); nil = TCP route
+	Stages *StageStats    // STEP-0 per-stage inter-frame interval histograms (hang localization); nil = none yet
 }

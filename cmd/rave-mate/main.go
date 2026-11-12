@@ -609,8 +609,15 @@ func runCtl(args []string) int {
 			return 1
 		}
 		fmt.Println(resp)
-	case "routes": // active routes both directions: transport/codec/geometry/fps/bitrate + UDP stats (multi-line)
+	case "routes": // active routes both directions: transport/codec/geometry/fps/bitrate + UDP stats + per-stage histograms (multi-line)
 		resp, err := app.SendMulti("ROUTES")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
+	case "media-perf": // media-plane Go GC/scheduler pause distributions (STEP-0 hang evidence)
+		resp, err := app.SendMulti("MEDIA-PERF")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ctl:", err)
 			return 1
