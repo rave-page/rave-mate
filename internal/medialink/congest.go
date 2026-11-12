@@ -137,6 +137,7 @@ func (rm *RouteManager) congestGovernor(ctx context.Context, rio *routeIO, udp *
 	if ceil <= 0 {
 		ceil = defaultCongestCeilKbps
 	}
+	assertBudgetSane(rm, stream, ceil)
 	cc := newCongestController(congestConfig{CeilKbps: ceil, BaseFPS: baseFPS, Stream: stream})
 	t := time.NewTicker(rm.reportEvery)
 	defer t.Stop()
@@ -162,6 +163,7 @@ func (rm *RouteManager) congestGovernor(ctx context.Context, rio *routeIO, udp *
 		}
 		capBudgetToCoded(&h, budget) // item 2: a resolution cap lowers the bitrate to the coded-size model
 		h.Type, h.Stream = MetaRate, stream
+		rio.st.setBudget(rm.budgetModeStr(), h.MaxBitrateKbps, ceil, 0, budgetReason(h, ceil, baseFPS)) // item 5
 		if sent && h == last {
 			continue
 		}

@@ -312,6 +312,16 @@ func SplitLinkCeiling(totalKbps int, pixelRates []int64) []int {
 	return out
 }
 
+// assertBudgetSane logs once (at governor start) if the model target is implausibly low for a
+// compressed video route (< 2000 kbps; any >=720p route models far above this). Catches a model
+// collapse like the fps=0 regression - an auto budget must never go this low on its own account.
+func assertBudgetSane(rm *RouteManager, stream uint16, baseKbps int) {
+	if baseKbps < 2000 {
+		rm.warnf("adaptive budget: implausibly low auto target - route inputs may be unknown (fps/geometry)",
+			map[string]any{"stream": stream, "baseKbps": baseKbps})
+	}
+}
+
 // budgetModeStr is the route's bitrate mode for ctl ("auto"/"fixed").
 func (rm *RouteManager) budgetModeStr() string {
 	if rm.budgetMode != nil {

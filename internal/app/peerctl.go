@@ -467,7 +467,16 @@ func formatRoutes(stats []medialink.RouteStat) string {
 		// Bitrate.
 		fmt.Fprintf(&b, "    bitrate=%.0f kbps  frames=%d bytes=%d keyframes=%d\n",
 			s.RateBps/1000, s.Frames, s.Bytes, s.Keyframes)
-		// Adaptive budget: mode + ceiling + encoder quality feedback (the "best value per system").
+		// Adaptive budget, recv-governor view (item 5): mode + live target + model + binding reason.
+		if s.BudgetMode != "" && s.BudgetTargetKbps > 0 {
+			line := fmt.Sprintf("    budget mode=%s target=%d kbps model=%d kbps  reason=%s",
+				s.BudgetMode, s.BudgetTargetKbps, s.BudgetModelKbps, s.BudgetReason)
+			if s.BudgetLinkKbps > 0 {
+				line += fmt.Sprintf("  linkCeil=%d kbps", s.BudgetLinkKbps)
+			}
+			b.WriteString(line + "\n")
+		}
+		// Adaptive budget, encoder (sender) view: mode + ceiling + quality feedback (best value per system).
 		if s.Pipe != nil && (s.Pipe.BudgetKbps > 0 || s.Pipe.QualityTarget > 0) {
 			mode := "fixed"
 			if s.Pipe.QualityTarget > 0 {

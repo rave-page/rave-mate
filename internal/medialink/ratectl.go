@@ -94,6 +94,7 @@ func (rm *RouteManager) rateGovernor(ctx context.Context, rio *routeIO, stream u
 	if rm.headroom == nil || baseKbps <= 0 {
 		return
 	}
+	assertBudgetSane(rm, stream, baseKbps)
 	t := time.NewTicker(rm.reportEvery)
 	defer t.Stop()
 	var last RateHint
@@ -112,7 +113,8 @@ func (rm *RouteManager) rateGovernor(ctx context.Context, rio *routeIO, stream u
 			continue // headroom unknown: fail open
 		}
 		h := rateLadder(free, rm.govFloorMB, budget(0), baseFPS, stream)
-		capBudgetToCoded(&h, budget) // item 2: a resolution cap lowers the bitrate to the coded-size model
+		capBudgetToCoded(&h, budget)                                                                            // item 2: a resolution cap lowers the bitrate to the coded-size model
+		rio.st.setBudget(rm.budgetModeStr(), h.MaxBitrateKbps, baseKbps, 0, budgetReason(h, baseKbps, baseFPS)) // item 5
 		if sent && h == last {
 			continue
 		}
