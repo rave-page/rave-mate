@@ -2063,7 +2063,7 @@ func run(parent context.Context, serviceMode bool) error {
 		perfmon.RegisterProbe("recorder.reconcile", ar.Stats)
 		debuglog.Go(log, "auto-reconcile", func() { ar.Start(ctx) })
 	}
-	ctl = &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, ui: u, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, mediaCaps: mediaCapsPlan, mediaRoutes: mediaRoutesCtl, vram: vramBudget.Budget, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, workers: workers, quit: cancel}
+	ctl = &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, ui: u, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, disc: disc, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, mediaCtl: mediaCtl, mediaCaps: mediaCapsPlan, mediaRoutes: mediaRoutesCtl, vram: vramBudget.Budget, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, workers: workers, quit: cancel}
 	remotectl.RegisterScreenshot(remoteCtl, ctl)  // peer-driven app-window + VR-View screenshot
 	remotectl.RegisterVRDiag(remoteCtl, ctl)      // peer-driven VR input/binding diagnostics
 	remotectl.RegisterPerf(remoteCtl, ctl)        // peer-driven perf diagnosis (remote-perf)
@@ -2685,7 +2685,8 @@ type appControl struct {
 	vrStats     *vrstats.Collector            // VR perf telemetry snapshot (ctl vrperf); may be nil
 	vrOverlay   vroverlay.Surface             // VR overlay control plane (ctl vrinput binding diagnostics); may be nil
 	perfMon     *perfmon.Monitor              // always-on perf collector (ctl perf / peer app.perf); may be nil
-	peerMgr     *peerlink.Manager             // paired peers (ctl remote-screenshot / list-peers); may be nil
+	peerMgr     *peerlink.Manager             // paired peers (ctl remote-screenshot / list-peers / peers / pair); may be nil
+	disc        *discovery.Discovery          // mDNS LAN discovery (ctl peers / pair target resolution); may be nil
 	remoteCtl   *remotectl.Endpoint           // peer RPC endpoint (drive a paired peer); may be nil
 	appGroups   *appgroups.Service            // application-group launcher (ctl launch-group); may be nil
 	obsControl  *obscontrol.Manager           // cross-instance OBS control + media-sync status (ctl obs-sync-status); may be nil
@@ -2696,6 +2697,7 @@ type appControl struct {
 	tc          *timecode.Service             // house timecode outputs (ctl tc-status/tc-start/tc-stop); may be nil
 	gpuRec      *gpuRecovery                  // GPU-fault recovery (ctl gpu-selftest); nil in service mode
 	media       *medialink.RouteManager       // media plane (ctl encoder-scan: probed encoders); may be nil
+	mediaCtl    medialink.MediaControl        // route plane control surface (in-proc OR child proxy; ctl routes/media-sources); may be nil
 	mediaCaps   *mediaCaps                    // encode-capability advertisement planner (ctl encoder-scan); may be nil
 	mediaRoutes mediaroute.ReceiveControl     // receive routes + frame shots (ctl frame-shot); may be nil
 	vram        *gpubudget.Budget             // VRAM admission budget (ctl encoder-scan: cap/free/reserve/learned costs); may be nil

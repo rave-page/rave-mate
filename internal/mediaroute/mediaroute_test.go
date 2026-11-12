@@ -515,6 +515,39 @@ func TestStartReceiveOffersAndStop(t *testing.T) {
 	}
 }
 
+// TestPwcaptureSourceReceivable: a PipeWire-shaped source (ID "pw:<node>") advertised by a peer
+// shows up in RemoteVideoSources (the peer side of `ctl media-sources`) and starts with StartReceive
+// (the `ctl route-start` path). The fakeRouter is the loopback seam standing in for the peer's advert.
+func TestPwcaptureSourceReceivable(t *testing.T) {
+	fr := newFakeRouter()
+	desc := medialink.SourceDesc{
+		ID: "pw:spout2pw.VRChat.VRCSender1", Name: "VRChat (spout2pw.VRChat.VRCSender1)",
+		Kind: medialink.KindVideo, Codec: medialink.CodecNRGBA, Width: 1920, Height: 1080, FPS: 60,
+	}
+	fr.adverts["susNode"] = advertWith(desc, "hevc_nvenc")
+	m := testManager(fr, config.MediaLinkFeature{BitrateKbps: 8000}, nil)
+
+	srcs := m.RemoteVideoSources()
+	if len(srcs) != 1 || srcs[0].Peer != "susNode" || srcs[0].Desc.ID != "pw:spout2pw.VRChat.VRCSender1" {
+		t.Fatalf("pwcapture source not listed as a remote source: %+v", srcs)
+	}
+	sess, err := m.StartReceive("susNode", "pw:spout2pw.VRChat.VRCSender1")
+	if err != nil || sess == "" {
+		t.Fatalf("StartReceive(pw source): %v %q", err, sess)
+	}
+	got := m.Receives()
+	if len(got) != 1 || got[0].Peer != "susNode" || got[0].Name != desc.Name {
+		t.Fatalf("receive not recorded: %+v", got)
+	}
+	// The receive registered a local sink to materialize the route ("rave-mate link <name>").
+	fr.mu.Lock()
+	nSinks := len(fr.sinks)
+	fr.mu.Unlock()
+	if nSinks != 1 {
+		t.Fatalf("expected 1 receive sink, got %d", nSinks)
+	}
+}
+
 func TestStartReceiveGuards(t *testing.T) {
 	fr := newFakeRouter()
 	desc := medialink.SourceDesc{ID: "s", Name: "S", Kind: medialink.KindVideo, Width: 640, Height: 480}
