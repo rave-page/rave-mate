@@ -321,17 +321,34 @@ static void egl_setup_display(struct rpw_capture *c, const char *node) {
 		DBG("egl: CreateContext failed 0x%x\n", E.GetError());
 		return;
 	}
-	/* modifiers per format */
+	/* modifiers per format. By default we DROP AMD DCC-enabled modifiers from the offered list so the
+	 * producer's GBM allocator is forced to a single-plane tiled layout - the only one both VA's
+	 * DRM_PRIME_2 import AND EGL import accept at 4K (the 3-plane DCC_RETILE layout the driver picks at
+	 * 4K is rejected by both; nodcc is otherwise a producer-side AMD_DEBUG the consumer can't set, e.g.
+	 * VRChat under Proton). AMD DCC = modifier bit 13 (AMD_FMT_MOD_DCC); LINEAR + non-AMD kept as-is.
+	 * RPW_ALLOW_DCC keeps the full list (A/B testing / non-AMD GPUs where the heuristic shouldn't bite). */
+	int allow_dcc = getenv("RPW_ALLOW_DCC") != NULL;
 	if (E.QueryDmaBufModifiersEXT) {
 		for (size_t i = 0; i < N_OFFER; i++) {
 			uint32_t drm = spa_to_drm_fourcc(OFFER_FORMATS[i]);
+			uint64_t tmp[RPW_MAX_MODS];
 			EGLint num = 0;
-			if (E.QueryDmaBufModifiersEXT(c->dpy, drm, RPW_MAX_MODS, c->mods[i], NULL, &num) && num > 0)
-				c->n_mods[i] = num;
+			if (!E.QueryDmaBufModifiersEXT(c->dpy, drm, RPW_MAX_MODS, tmp, NULL, &num) || num <= 0)
+				continue;
+			int k = 0;
+			for (int j = 0; j < num && k < RPW_MAX_MODS; j++) {
+				uint64_t m = tmp[j];
+				int amd = ((m >> 56) & 0xff) == 0x02;   /* DRM_FORMAT_MOD_VENDOR_AMD */
+				int dcc = amd && ((m >> 13) & 1);        /* AMD_FMT_MOD_DCC */
+				if (dcc && !allow_dcc)
+					continue; /* skip DCC: not importable at 4K */
+				c->mods[i][k++] = m;
+			}
+			c->n_mods[i] = k;
 		}
 	}
 	c->egl_ready = 1;
-	DBG("egl: display ready, mods[BGRA]=%d\n", c->n_mods[0]);
+	DBG("egl: display ready, mods[BGRA]=%d (allowDcc=%d)\n", c->n_mods[0], allow_dcc);
 }
 
 /* egl_make_current binds the context to the CURRENT (loop) thread, once. */
