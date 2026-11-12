@@ -21,6 +21,7 @@ import (
 
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/medialink"
+	"rave.page/mate/internal/ratewin"
 )
 
 // captureAvailable dlopens libpipewire-0.3 (once, in the shim) and reports whether it resolved.
@@ -73,15 +74,14 @@ type pwSource struct {
 	encCodec medialink.Codec
 	encName  string // negotiated engine name (PipelineStats.Encoder)
 	encNode  string // VA render node
+	lastMaxH int    // last MaxHeight applied via SetRateHint (coded-height cap; 0 = native)
 
-	// telemetry sampling (PipeStats computes fps/bytes-per-frame as deltas between calls)
-	tmu       sync.Mutex
-	lastAUs   int64
-	lastCap   int64
-	lastBytes uint64
-	lastT     time.Time
-	auBytes   uint64
-	auCount   uint64
+	// telemetry: windowed rates ticked per AU, so OutFPS/CapFPS/bytes-per-frame are accurate on ANY
+	// single read (the route's ctl stats poll once) - the MF bridge does the same. Earlier the engine
+	// computed read-time deltas, which read 0 on a single poll (the "fps out=0" bug).
+	outRate     ratewin.Ring // emitted AUs: OutFPS + bytes/frame + AU totals
+	capRate     ratewin.Ring // dmabuf frames captured (from the C cap_frames counter delta): CapFPS
+	lastCapTick int64        // last cap_frames seen; nextAU is called serially by the pump (no lock)
 }
 
 // Next implements medialink.Source. In vaapi-native encode mode it returns compressed Annex-B AUs
@@ -184,6 +184,7 @@ func (s *pwSource) StartDMABufEncode(spec medialink.EncodeSpec) (medialink.Sourc
 	s.encCodec = spec.Codec
 	s.encName = spec.Encoder
 	s.encNode = node
+	s.lastMaxH = spec.MaxHeight // initial coded cap applied at engage; SetRateHint diffs against it
 	if s.done == nil {
 		s.done = make(chan struct{})
 	}
@@ -219,13 +220,16 @@ func (s *pwSource) nextAU(ctx context.Context) (*medialink.Frame, error) {
 		s.mu.Unlock()
 		switch {
 		case n > 0:
-			s.tmu.Lock()
-			s.auBytes += uint64(n)
-			s.auCount++
-			s.tmu.Unlock()
+			now := time.Now()
+			s.outRate.Add(uint64(n), 1, now) // bytes + 1 AU
+			cap := int64(C.rpw_cap_frames(s.h))
+			if d := cap - s.lastCapTick; d > 0 {
+				s.capRate.Add(0, uint64(d), now)
+			}
+			s.lastCapTick = cap
 			pts := int64(cpts) // capture-clock PTS from the buffer; 0 => stamp now
 			if pts == 0 {
-				pts = time.Now().UnixNano()
+				pts = now.UnixNano()
 			}
 			f := &medialink.Frame{Kind: medialink.KindVideo, Codec: s.encCodec,
 				Payload: buf[:n], PTS: pts}
@@ -260,8 +264,9 @@ func (s *pwSource) RequestKeyframe() {
 }
 
 // SetRateHint implements medialink.RateControlSource: the receiver's VRAM governor caps our output.
-// Bitrate is the live lever (VBR target, no reopen); MaxHeight/MaxFPS are reserved (logged, not yet
-// applied live on the native path - the coded size is fixed at engage).
+// Bitrate is the live lever (the corrector-scaled CBR target, no reopen). MaxHeight is now LIVE: the
+// encoder re-creates at the capped CODED size (nominal source geometry unchanged - the receiver
+// upscales). MaxFPS stays reserved (logged).
 func (s *pwSource) SetRateHint(h medialink.RateHint) {
 	if !s.encMode {
 		return
@@ -269,9 +274,13 @@ func (s *pwSource) SetRateHint(h medialink.RateHint) {
 	if h.MaxBitrateKbps > 0 {
 		C.rpw_set_bitrate(s.h, C.int(h.MaxBitrateKbps))
 	}
-	if (h.MaxHeight > 0 || h.MaxFPS > 0) && s.log != nil {
-		s.log.Debug(source, "rate hint: height/fps cap not yet live on the native path (reserved); applied bitrate", map[string]any{
-			"maxHeight": h.MaxHeight, "maxFPS": h.MaxFPS, "maxBitrateKbps": h.MaxBitrateKbps})
+	if h.MaxHeight != s.lastMaxH { // 0 = restore native coded size
+		s.lastMaxH = h.MaxHeight
+		C.rpw_set_cap_height(s.h, C.int(h.MaxHeight))
+	}
+	if h.MaxFPS > 0 && s.log != nil {
+		s.log.Debug(source, "rate hint: fps cap not yet live on the native path (reserved); applied bitrate + height", map[string]any{
+			"maxFPS": h.MaxFPS, "maxHeight": h.MaxHeight, "maxBitrateKbps": h.MaxBitrateKbps})
 	}
 }
 
@@ -281,29 +290,13 @@ func (s *pwSource) PipeStats() medialink.PipelineStats {
 	if !s.encMode {
 		return medialink.PipelineStats{}
 	}
-	aus := int64(C.rpw_enc_aus(s.h))
-	capF := int64(C.rpw_cap_frames(s.h))
 	drops := uint64(C.rpw_enc_drops(s.h))
 	importOK := C.rpw_import_ok(s.h) != 0
-
-	s.tmu.Lock()
 	now := time.Now()
-	bytes := s.auBytes
-	var outFPS, capFPS, bpf float64
-	if !s.lastT.IsZero() {
-		dt := now.Sub(s.lastT).Seconds()
-		if dt > 0 {
-			outFPS = float64(aus-s.lastAUs) / dt
-			capFPS = float64(capF-s.lastCap) / dt
-		}
-		if dc := aus - s.lastAUs; dc > 0 && bytes > s.lastBytes {
-			bpf = float64(bytes-s.lastBytes) / float64(dc)
-		}
-	}
-	s.lastT, s.lastAUs, s.lastCap, s.lastBytes = now, aus, capF, bytes
-	auBytes, auCount := s.auBytes, s.auCount
-	s.tmu.Unlock()
-
+	_, outFPS := s.outRate.Rate(now) // AUs/s leaving the encoder (windowed; accurate on one read)
+	_, capFPS := s.capRate.Rate(now) // dmabuf frames/s captured
+	bpf := s.outRate.PerEvent(now)   // bytes per AU (content oracle)
+	auBytes, auCount := s.outRate.Totals()
 	return medialink.PipelineStats{
 		Encoder: s.encName, OutFPS: outFPS, CapFPS: capFPS,
 		Dropped: drops, ZeroCopy: importOK,

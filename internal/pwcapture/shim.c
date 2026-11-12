@@ -271,6 +271,8 @@ struct rpw_capture {
 	char enc_node[96];   /* VA render node */
 	int force_idr;       /* rpw_request_keyframe sets it; on_process consumes + clears (under mu) */
 	int pending_kbps;    /* rpw_set_bitrate sets it; on_process applies live (under mu) */
+	int pending_maxh;    /* rpw_set_cap_height sets it (-1 = none); on_process re-creates the encoder at
+	                      * the new coded size (nominal source geometry unchanged; receiver upscales) */
 	int slot_keyframe;   /* keyframe flag of the AU in slot */
 	int coded_w, coded_h; /* coded output dims (telemetry) */
 	/* encode telemetry (read via getters; written on the loop thread) */
@@ -795,9 +797,30 @@ static void on_process(void *data) {
 					pthread_mutex_lock(&c->mu);
 					int idr = c->force_idr; c->force_idr = 0;
 					int newkbps = c->pending_kbps; c->pending_kbps = 0;
+					int newmaxh = c->pending_maxh; c->pending_maxh = -1;
 					pthread_mutex_unlock(&c->mu);
 					if (newkbps > 0)
 						rva_enc_set_bitrate(c->enc, newkbps);
+					if (newmaxh >= 0) { /* live coded-size cap: recompute out dims, recreate if changed */
+						int ow = c->width, oh = c->height;
+						if (newmaxh > 0 && oh > newmaxh) {
+							ow = ow * newmaxh / oh;
+							oh = newmaxh;
+						}
+						ow &= ~1; oh &= ~1;
+						if (oh != c->coded_h || ow != c->coded_w) {
+							const char *en = c->enc_node[0] ? c->enc_node : "/dev/dri/renderD128";
+							struct rva_enc *ne = rva_enc_new(en, c->enc_codec, ow, oh,
+								c->enc_fps > 0 ? c->enc_fps : 60, c->enc_kbps > 0 ? c->enc_kbps : 20000);
+							if (ne) { /* nominal source geometry unchanged; coded size shrinks, receiver upscales */
+								rva_enc_free(c->enc);
+								c->enc = ne;
+								c->coded_w = ow;
+								c->coded_h = oh;
+								c->enc_maxh = newmaxh;
+							}
+						}
+					}
 					c->cap_frames++;
 					int np = sb->n_datas < RPW_MAX_PLANES ? (int)sb->n_datas : RPW_MAX_PLANES;
 					int efds[RPW_MAX_PLANES];
@@ -907,6 +930,7 @@ struct rpw_capture *rpw_start(const char *target_node) {
 	c->modifier = DRM_FORMAT_MOD_INVALID;
 	c->drm_fd = -1;
 	c->flip_default = getenv("RPW_FLIP_V") != NULL; /* default no-flip (Spout2PW/DX, PipeWire convention) */
+	c->pending_maxh = -1;                           /* -1 = no live coded-height cap pending */
 
 	const char *rn = getenv("RPW_EGL_DEVICE");
 	egl_setup_display(c, rn && *rn ? rn : "/dev/dri/renderD128");
@@ -1096,6 +1120,17 @@ void rpw_set_bitrate(struct rpw_capture *c, int kbps) {
 		return;
 	pthread_mutex_lock(&c->mu);
 	c->pending_kbps = kbps;
+	pthread_mutex_unlock(&c->mu);
+}
+
+/* rpw_set_cap_height applies a live CODED-height cap (0 = native): the encoder is re-created at the
+ * capped coded size on the next frame if it changed. The nominal source geometry is unchanged - the
+ * receiver upscales the smaller coded frame back to nominal. */
+void rpw_set_cap_height(struct rpw_capture *c, int max_h) {
+	if (!c || max_h < 0)
+		return;
+	pthread_mutex_lock(&c->mu);
+	c->pending_maxh = max_h;
 	pthread_mutex_unlock(&c->mu);
 }
 
