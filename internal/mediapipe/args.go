@@ -239,12 +239,16 @@ func encodeArgs(spec medialink.EncodeSpec, forceSW bool) []string {
 		args = append(args, "-c:v", spec.Encoder, "-preset", "veryfast", "-async_depth", "1")
 		args = append(args, rc...)
 	case "h264_vaapi", "hevc_vaapi":
-		// VA-API low-latency: CBR (maxrate==b:v via rc), async_depth 1 (minimal encode
-		// pipelining), no B-frames (-bf 0 in rc). Parameter-set repetition + AUD come from the
-		// post framing below (vaapi is not _amf, so it takes the dump_extra + {codec}_metadata=aud
-		// path, which is exactly the Annex-B framing the AU splitter expects). Verified on an
-		// RX 7900 XTX (radeonsi, ffmpeg 9): 1080p60 ~7.5x, 4K60 ~2.5x, hevc 1080p60 ~7.7x realtime.
-		args = append(args, "-c:v", spec.Encoder, "-rc_mode", "CBR", "-async_depth", "1")
+		// VA-API low-latency: CONSTRAINED VBR (maxrate == b:v is the peak CEILING; the encoder
+		// undershoots on static content instead of CBR-padding a flat source to the full budget -
+		// the 50 Mbps-on-a-flat-source waste), async_depth 1 (minimal encode pipelining), no
+		// B-frames (-bf 0 in rc). Parameter-set repetition + AUD come from the post framing below
+		// (vaapi is not _amf, so it takes the dump_extra + {codec}_metadata=aud path, which is
+		// exactly the Annex-B framing the AU splitter expects). CHANGED from -rc_mode CBR; LINUX
+		// AGENT: verify the encode still opens on radeonsi/iHD (VBR is standard but driver-gated)
+		// and that a flat source now emits well under the budget - fall back to CBR, or try QVBR
+		// with a quality target + maxrate, if a driver rejects VBR.
+		args = append(args, "-c:v", spec.Encoder, "-rc_mode", "VBR", "-async_depth", "1")
 		args = append(args, rc...)
 	case "h264_amf":
 		// AMF omits SPS/PPS in-band by default → the bitstream filter/decoder starves. header_spacing

@@ -65,15 +65,17 @@ const (
 	udpDefFrameDeadline = 200 * time.Millisecond
 	udpDefKeepalive     = 500 * time.Millisecond
 	udpDefLiveness      = 2 * time.Second
-	udpMaintTick        = 5 * time.Millisecond // NACK-scan + sweep cadence
-	udpRebindMin        = time.Second          // min interval between authenticated remote rebinds
-	udpNackStale        = 3 * time.Millisecond // a frame incomplete this long is NACKed (≥ LAN RTT)
-	udpNackRetry        = 8 * time.Millisecond // min gap between re-NACKs of the same frame
-	udpRecvQueue        = 128                  // completed-frame handoff queue (newest-wins on overflow)
-	udpRingFrames       = 2048                 // retransmit ring datagram cap
-	udpRingBytes        = 4 << 20              // retransmit ring byte cap
-	udpRetransFrac      = 0.25                 // retransmit bytes ≤ this fraction of the send rate
-	udpReadBufBytes     = 1 << 20              // SO_RCVBUF/SO_SNDBUF best-effort target
+	udpMaintTick        = 5 * time.Millisecond   // NACK-scan + sweep cadence
+	udpRebindMin        = time.Second            // min interval between authenticated remote rebinds
+	owdBucketNs         = int64(2 * time.Second) // one-way-delay baseline window bucket (queuing-delay min)
+	udpNackStale        = 3 * time.Millisecond   // sub-ms-reorder floor before a proven hole is NACKed
+	udpNackRetry        = 8 * time.Millisecond   // min gap between re-NACKs of the same frame
+	udpNackDeadlineLead = 30 * time.Millisecond  // last-chance NACK this long before the reassembly deadline
+	udpRecvQueue        = 128                    // completed-frame handoff queue (newest-wins on overflow)
+	udpRingFrames       = 2048                   // retransmit ring datagram cap
+	udpRingBytes        = 4 << 20                // retransmit ring byte cap
+	udpRetransFrac      = 0.25                   // retransmit bytes ≤ this fraction of the send rate
+	udpReadBufBytes     = 1 << 20                // SO_RCVBUF/SO_SNDBUF best-effort target
 )
 
 // UDPStats is a UDP-transport telemetry snapshot (§7 + the Unit-4 congestion controller). Crosses
@@ -124,11 +126,17 @@ type udpConn struct {
 	reasm   *reassembler
 	seqTrk  *replayWin
 	lastRTx map[uint16]int64 // per-stream last transit (OWD jitter)
+	// owd queuing-delay baseline (recvLoop-owned, no lock): windowed-min transit over 2 buckets.
+	owdBucketMin int64
+	owdBucketAt  int64
+	owdHasBucket bool
+	owdPrevMin   int64
+	owdHasPrev   bool
 
 	lastRecvNs atomic.Int64 // media-clock ns of the last AUTHENTICATED datagram (liveness)
 	rttNs      atomic.Int64
 	owdJitter  atomic.Int64 // |transit delta| EWMA (telemetry)
-	owdNs      atomic.Int64 // smoothed signed one-way delay (congestion delay-gradient input)
+	owdNs      atomic.Int64 // smoothed QUEUING delay above baseline, ns (offset-free; cc gradient input)
 
 	st udpStatsMu
 
@@ -476,16 +484,41 @@ func (u *udpConn) onMedia(h dgHeader, chunk []byte) {
 		u.owdJitter.Store(j)
 	}
 	u.lastRTx[f.Stream] = transit
-	// Smoothed SIGNED one-way delay: its TREND is the congestion controller's delay-gradient input.
-	// A constant clock-domain offset is irrelevant (the controller differentiates it away).
+	u.updateOwd(transit, now)
+	u.deliver(f)
+}
+
+// updateOwd maintains the one-way-delay signal as QUEUING DELAY above a windowed-min baseline
+// (transit − recent-min-transit), so it is offset-free (independent of absolute clock agreement) and
+// never negative - the fix for the "-39 ms owd" display (item 4). Its trend is the congestion
+// controller's delay-gradient input; a constant clock offset cancels in both the baseline and the
+// gradient, so the detector does not depend on clock agreement. recvLoop-owned (no lock); only the
+// published owdNs is atomic.
+func (u *udpConn) updateOwd(transit, now int64) {
+	switch {
+	case !u.owdHasBucket:
+		u.owdBucketMin, u.owdBucketAt, u.owdHasBucket = transit, now, true
+	case now-u.owdBucketAt >= owdBucketNs:
+		u.owdPrevMin, u.owdHasPrev = u.owdBucketMin, true
+		u.owdBucketMin, u.owdBucketAt = transit, now
+	case transit < u.owdBucketMin:
+		u.owdBucketMin = transit
+	}
+	base := u.owdBucketMin
+	if u.owdHasPrev && u.owdPrevMin < base {
+		base = u.owdPrevMin
+	}
+	q := transit - base
+	if q < 0 {
+		q = 0
+	}
 	o := u.owdNs.Load()
 	if o == 0 {
-		o = transit
+		o = q
 	} else {
-		o += (transit - o) / 8
+		o += (q - o) / 8
 	}
 	u.owdNs.Store(o)
-	u.deliver(f)
 }
 
 // deliver hands a completed frame to ReadFrame, newest-wins on overflow (bounded latency).
@@ -606,23 +639,36 @@ func (u *udpConn) maintLoop() {
 // scanNack collects missing fragments of stale-incomplete frames (recvLoop state; called only from
 // maintLoop, which does not race recvLoop... except both touch reasm). Guard reasm with the recv
 // goroutine: maintLoop and recvLoop both run, so reasm needs its own lock.
+// scanNack collects missing fragments WORTH requesting. A hole is only requested once it is PROVEN
+// missing, not merely in-flight: either a LATER frame on the same stream has started arriving (the
+// sender transmits a frame fully before the next, so an incomplete OVERTAKEN frame really lost
+// fragments), or the frame is close to its playout deadline (last-chance recovery before the
+// reassembler drops it). The frame currently still arriving - the newest, unpaced-bursted or paced
+// over a few ms, or briefly reordered within itself - is never NACKed. This kills the spurious NACKs
+// seen at 0% loss (item 1). A small stale floor absorbs sub-ms LAN reorder; per-frame rate-limited.
 func (u *udpConn) scanNack(now int64) []nackItem {
 	u.reasm.mu.Lock()
 	defer u.reasm.mu.Unlock()
+	deadlineCut := now - int64(u.deadline) + int64(udpNackDeadlineLead) // request before the sweep drops it
 	var out []nackItem
 	for _, key := range u.reasm.order {
 		e := u.reasm.entries[key]
 		if e == nil {
 			continue
 		}
+		stream := uint16(key >> 32)
+		fseq := uint32(key)
+		overtaken := int32(u.reasm.maxFrameSeq[stream]-fseq) > 0
+		deadlineNear := e.addedAt <= deadlineCut
+		if !overtaken && !deadlineNear {
+			continue // still the newest in-flight frame + time left - its fragments are arriving, not lost
+		}
 		if now-e.addedAt < int64(udpNackStale) {
-			continue // too fresh - give fragments a chance to arrive
+			continue // sub-ms reorder tolerance even once overtaken
 		}
 		if e.lastNack != 0 && now-e.lastNack < int64(udpNackRetry) {
 			continue
 		}
-		stream := uint16(key >> 32)
-		fseq := uint32(key)
 		for i, fr := range e.frags {
 			if fr == nil {
 				out = append(out, nackItem{Stream: stream, FrameSeq: fseq, FragIdx: uint16(i)})
@@ -674,6 +720,30 @@ func bestEffortUDPBuffers(pc packetConn) {
 
 func dgKey(stream uint16, frameSeq uint32, fragIdx uint16) uint64 {
 	return uint64(stream)<<48 | uint64(frameSeq)<<16 | uint64(fragIdx)
+}
+
+const (
+	// pacingGain spreads a frame's datagrams at this MULTIPLE of the negotiated bitrate - NOT the bare
+	// target (which would stretch one frame over several frame intervals and add latency, item 2). At
+	// 8× target the per-frame send duration is a small fraction of a frame interval, so each frame
+	// finishes well inside one interval on a gigabit LAN while a 4K-keyframe microburst is still
+	// smoothed instead of blasted at line rate into a switch buffer (brief req 2).
+	pacingGain = 8
+	// pacerMinRateBytes floors the pacing rate so a low-bitrate route still bursts fast enough; and
+	// pacingRateFor returns this (≈256 Mbps, effectively unpaced on GbE) when the budget is unknown.
+	pacerMinRateBytes = 32 << 20
+)
+
+// pacingRateFor derives the send-pacer rate (bytes/s) from the negotiated video bitrate.
+func pacingRateFor(bitrateKbps int) float64 {
+	if bitrateKbps <= 0 {
+		return pacerMinRateBytes
+	}
+	r := float64(bitrateKbps) * 1000 / 8 * pacingGain
+	if r < pacerMinRateBytes {
+		r = pacerMinRateBytes
+	}
+	return r
 }
 
 // bindRemote sets/updates the send target from an AUTHENTICATED datagram's source. First bind is

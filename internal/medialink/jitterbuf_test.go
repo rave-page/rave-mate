@@ -56,6 +56,7 @@ func TestJitterBufferReleasesInOrder(t *testing.T) {
 
 func TestJitterBufferGrowOnBigLate(t *testing.T) {
 	b := newJitterBuffer(100, true)
+	b.warmupNs = 0 // exercise the grow mechanism directly (warmup covered by TestJitterBufferWarmupNoGrow)
 	for i := uint32(0); i < 10; i++ {
 		jbtPush(b, i, jbtBase, true)
 	}
@@ -68,6 +69,7 @@ func TestJitterBufferGrowOnBigLate(t *testing.T) {
 
 func TestJitterBufferGrowOnLateRate(t *testing.T) {
 	b := newJitterBuffer(100, true)
+	b.warmupNs = 0
 	// 24 on-time frames, then one mildly late (late by < interval): 1/25 = 4% > 2% with ≥20 samples.
 	for i := uint32(0); i < 24; i++ {
 		jbtPush(b, i, jbtBase, true)
@@ -80,6 +82,7 @@ func TestJitterBufferGrowOnLateRate(t *testing.T) {
 
 func TestJitterBufferDecayAfterClean(t *testing.T) {
 	b := newJitterBuffer(100, true)
+	b.warmupNs = 0
 	jbtPush(b, 0, jbtBase, true)
 	jbtPush(b, 1, jbtBase+2*jbtInterval+jbtInterval/2, true) // grow → depth 2
 	if b.stats().Depth != 2 {
@@ -93,6 +96,23 @@ func TestJitterBufferDecayAfterClean(t *testing.T) {
 	}
 	if s := b.stats(); s.Depth != 1 || s.Decays != 1 {
 		t.Fatalf("decay: %+v", s)
+	}
+}
+
+// TestJitterBufferWarmupNoGrow: a big-late frame in the startup warmup window must NOT grow the
+// depth (item 2 - startup transients used to pin the buffer at 3-4 frames on a clean LAN); the same
+// lateness after warmup does grow.
+func TestJitterBufferWarmupNoGrow(t *testing.T) {
+	b := newJitterBuffer(100, true) // default warmup
+	jbtPush(b, 0, jbtBase, true)
+	jbtPush(b, 5, jbtBase+2*jbtInterval+jbtInterval/2, true) // big-late, but during warmup
+	if s := b.stats(); s.Grows != 0 || s.Depth != 1 {
+		t.Fatalf("grew during warmup: %+v", s)
+	}
+	warmSeq := uint32(jbWarmupNs/jbtInterval) + 10 // arrival past the 2 s warmup
+	jbtPush(b, warmSeq, jbtBase+2*jbtInterval+jbtInterval/2, true)
+	if s := b.stats(); s.Grows != 1 || s.Depth != 2 {
+		t.Fatalf("did not grow after warmup: %+v", s)
 	}
 }
 
