@@ -336,6 +336,12 @@ struct rpw_capture {
 	pthread_cond_t enc_cv;         /* wakes the encode thread */
 	struct pw_buffer *enc_pending; /* the held pw buffer handed to the thread; NULL = none */
 	long cap_drops;                /* buffers dropped at the capture hand-off (encoder behind) */
+	/* B.3 PTS-grid frame selection: when the source runs faster than the negotiated rate (VRChat 120 ->
+	 * 60), emit the newest frame per 1/fps grid slot by capture PTS, so the output is evenly spaced in
+	 * source time (not bunched by the callback's own timing). grid_drops = sub-grid frames paced out
+	 * (deliberate rate-cap, PRE-encode -> no reference break, no IDR; surfaced as RateCapped). */
+	long long enc_grid_next; /* next grid PTS (ns); 0 = uninitialised */
+	long grid_drops;
 	/* pending-frame metadata (captured from the buffer in the callback; the buffer stays valid while
 	 * held, but copying keeps the thread off the spa_buffer). */
 	int enc_p_np, enc_p_fds[RPW_MAX_PLANES];
@@ -360,6 +366,13 @@ struct rpw_capture {
 	uint64_t mods[N_OFFER][RPW_MAX_MODS];
 	int n_mods[N_OFFER];
 };
+
+/* mono_ns is a monotonic nanosecond clock (grid fallback when a buffer carries no capture PTS). */
+static long long mono_ns(void) {
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return (long long)t.tv_sec * 1000000000LL + t.tv_nsec;
+}
 
 /* au_ring_init preallocates the ring slot buffers + resets indices (at encode engage). */
 static void au_ring_init(struct rpw_capture *c) {
@@ -1047,6 +1060,28 @@ static void on_process(void *data) {
 					 * encoder is still busy with a pending buffer, requeue that stale one here (loop thread
 					 * -> safe) and keep the freshest. The thread requeues `last` after it has consumed the
 					 * dmabuf (implicit dmabuf sync makes the post-submit requeue safe, as before). */
+					/* B.3: PTS-grid gate - emit the newest frame per 1/fps slot (even pacing from a faster
+					 * source). Prefer the capture PTS (VRChat/Spout2PW carries it); fall back to a monotonic
+					 * arrival clock when the source has none. Tolerance period/4 keeps a jittery exactly-60
+					 * source (every frame) while decimating 120->60 cleanly. */
+					long long gpts = buffer_pts(sb);
+					if (gpts <= 0)
+						gpts = mono_ns();
+					if (c->enc_fps > 0) {
+						long long period = 1000000000LL / c->enc_fps;
+						long long tol = period / 4;
+						if (c->enc_grid_next == 0) {
+							c->enc_grid_next = gpts + period; /* prime on the first frame (accepted) */
+						} else if (gpts + tol < c->enc_grid_next) {
+							PW.stream_queue(c->stream, last); /* sub-grid: pace it out (pre-encode skip) */
+							c->grid_drops++;
+							return;
+						} else {
+							c->enc_grid_next += period;
+							while (c->enc_grid_next <= gpts + tol) /* catch up after a gap / slow source */
+								c->enc_grid_next += period;
+						}
+					}
 					int np = sb->n_datas < RPW_MAX_PLANES ? (int)sb->n_datas : RPW_MAX_PLANES;
 					c->cap_frames++; /* captured frames handed to the encoder stage (CapFPS) */
 					pthread_mutex_lock(&c->enc_mu);
@@ -1399,6 +1434,8 @@ int rpw_ring_hiwater(struct rpw_capture *c) { return c ? c->ring_hiwater : 0; }
 long rpw_ring_overflow(struct rpw_capture *c) { return c ? c->ring_overflow : 0; }
 /* capture-side drops: buffers dropped at the callback->encode-thread hand-off (encoder behind). */
 long rpw_cap_drops(struct rpw_capture *c) { return c ? c->cap_drops : 0; }
+/* grid drops: frames paced out by the PTS-grid (source faster than the negotiated rate) - deliberate. */
+long rpw_grid_drops(struct rpw_capture *c) { return c ? c->grid_drops : 0; }
 
 void rpw_stop(struct rpw_capture *c) {
 	if (!c)

@@ -326,7 +326,8 @@ func (s *pwSource) PipeStats() medialink.PipelineStats {
 	return medialink.PipelineStats{
 		Encoder: s.encName, OutFPS: outFPS, CapFPS: capFPS,
 		Dropped: drops, ZeroCopy: importOK,
-		AUBytes: auBytes, AUCount: auCount, AUBytesPerFrame: bpf,
+		RateCapped: uint64(C.rpw_grid_drops(s.h)), // PTS-grid pacing (source faster than the rate): deliberate
+		AUBytes:    auBytes, AUCount: auCount, AUBytesPerFrame: bpf,
 		DevPolicy:     s.encNode,
 		QueueDepth:    int(C.rpw_ring_depth(s.h)), // AUs buffered in the lock-free hand-off ring
 		QualityTarget: quality, BudgetKbps: kbps,
@@ -359,6 +360,7 @@ func (s *pwSource) encTelemetry() {
 				"dropped": st.Dropped, "bytesPerFrame": uint64(st.AUBytesPerFrame),
 				"ringDepth": int(C.rpw_ring_depth(s.h)), "ringHiwater": int(C.rpw_ring_hiwater(s.h)),
 				"ringOverflow": int64(C.rpw_ring_overflow(s.h)), "capDrops": int64(C.rpw_cap_drops(s.h)),
+				"gridDrops":  int64(C.rpw_grid_drops(s.h)),
 				"reconnects": int64(C.rpw_reconnects(s.h))})
 		}
 	}
@@ -369,9 +371,9 @@ func fmtf(v float64) string { return fmt.Sprintf("%.1f", v) }
 
 // ringStats exposes the AU hand-off ring telemetry (depth, high-water, overflow drops) to in-package
 // tests (cgo can't live in a _test.go file).
-func (s *pwSource) ringStats() (depth, hiwater int, overflow, capDrops int64) {
+func (s *pwSource) ringStats() (depth, hiwater int, overflow, capDrops, gridDrops int64) {
 	return int(C.rpw_ring_depth(s.h)), int(C.rpw_ring_hiwater(s.h)),
-		int64(C.rpw_ring_overflow(s.h)), int64(C.rpw_cap_drops(s.h))
+		int64(C.rpw_ring_overflow(s.h)), int64(C.rpw_cap_drops(s.h)), int64(C.rpw_grid_drops(s.h))
 }
 
 // qpNext is the cgo seam for the pure constant-quality ceiling controller (rva_qp_next): cgo cannot
