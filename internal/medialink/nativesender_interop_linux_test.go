@@ -13,7 +13,9 @@ package medialink
 
 import (
 	"encoding/binary"
+	"math/rand"
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,12 +31,16 @@ func sockaddrIn4(a *net.UDPAddr) []byte {
 	return b
 }
 
-// lossyPacketConn wraps a packetConn and drops the FIRST datagram matching dropMatch (a one-shot NIC
-// drop) so the NACK-driven retransmit can be observed recovering it.
+// lossyPacketConn wraps a packetConn and drops media datagrams to exercise NACK recovery: the FIRST
+// matching dropMatch (a one-shot targeted NIC drop) and/or a probabilistic lossRate on every media
+// datagram (random path loss). Control datagrams are never dropped.
 type lossyPacketConn struct {
 	packetConn
 	dropMatch func(dg []byte) bool
 	dropped   atomic.Bool
+	lossRate  float64 // 0 = off; else per-media-datagram drop probability
+	rng       *rand.Rand
+	rngMu     sync.Mutex
 }
 
 func (l *lossyPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
@@ -45,10 +51,39 @@ func (l *lossyPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 		}
 		if !l.dropped.Load() && l.dropMatch != nil && l.dropMatch(p[:n]) {
 			l.dropped.Store(true)
-			continue // drop this one; read the next
+			continue // one-shot targeted drop
+		}
+		if l.lossRate > 0 {
+			if h, _, e := parseDatagramHeader(p[:n]); e == nil && h.Typ == dgTypeMedia {
+				l.rngMu.Lock()
+				drop := l.rng.Float64() < l.lossRate
+				l.rngMu.Unlock()
+				if drop {
+					continue // random media-datagram loss
+				}
+			}
 		}
 		return n, addr, err
 	}
+}
+
+// realisticAU fills buf with a 4K60-shaped access unit: an IDR every 60 frames (400-900 kB, many
+// fragments), else a P-frame (80-150 kB). Returns the AU slice + keyframe flag.
+func realisticAU(idx int, buf []byte) ([]byte, bool) {
+	keyframe := idx%60 == 0
+	var n int
+	if keyframe {
+		n = 400_000 + (idx*5003)%500_001
+	} else {
+		n = 80_000 + (idx*4001)%70_001
+	}
+	if n > len(buf) {
+		n = len(buf)
+	}
+	for i := 0; i < n; i++ {
+		buf[i] = byte(i*131 + idx*17)
+	}
+	return buf[:n], keyframe
 }
 
 // realClock returns real wall-clock ns, so the udpConn's remote-rebind rate limit (compares now against
@@ -266,4 +301,91 @@ func TestNativeSenderInitialSeqRebindVsAdvancedWindow(t *testing.T) {
 			t.Fatalf("continued-seq sender did not rebind the remote off the handshake socket (rebinds=%d)", rb)
 		}
 	})
+}
+
+// TestNativeSenderRealistic4K60 drives the native sender at 4K60-realistic sizes (IDR 400-900 kB,
+// P-frames 80-150 kB, ~45 Mbps, multi-fragment every frame) into a REAL Go udpConn, under 0.1 %
+// datagram loss. Asserts: nearly every frame COMPLETES (the pacing + per-fragment clock-refresh fix -
+// the bare target bitrate starved multi-fragment keyframes), the dropped fragments are recovered via
+// NACK -> retransmit (receiver NacksSent > 0, sender retransmits > 0), and OWD stays sane (the PTS
+// rebase keeps frames in the receiver's clock domain, not classified permanently late).
+func TestNativeSenderRealistic4K60(t *testing.T) {
+	master := testKey()
+	salt := []byte("medialink-interop-4k60")
+	token := routeToken(master, salt)
+	sendKey, sendPre, recvKey, recvPre, err := deriveRouteKeysRaw(master, salt, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lossy := &lossyPacketConn{packetConn: raw, lossRate: 0.001, rng: rand.New(rand.NewSource(1))}
+	recv, err := newUDPConn(lossy, nil, udpConfig{
+		Token: token, Initiator: true, Master: master, Salt: salt, Encrypt: true,
+		Clock: NewMonotonicClock(), BodyMax: 1200,
+		Liveness: 3 * time.Second, StartupGrace: 15 * time.Second, Keepalive: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recv.Close()
+
+	// 45 Mbps budget, passed as the BARE target bytes/s (exactly what the live native path passes today,
+	// kbps*1000/8). Pre-fix the native pacer ran at this bare rate and starved keyframes; the sender now
+	// applies the Go gain+floor. A large PTS epoch base mimics the capture clock, exercising the rebase.
+	const bitrateKbps = 45000
+	rate := float64(bitrateKbps) * 1000 / 8
+	const ptsBase = int64(1_700_000_000_000_000_000) // ~a wall-epoch ns, far from the receiver's clock
+	ns, err := openCgoNativeSender(sockaddrIn4(raw.LocalAddr().(*net.UDPAddr)), token, true,
+		sendKey, sendPre, recvKey, recvPre, byte(CodecHEVC), 1, 1200, 100000, rate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ns.close()
+
+	var delivered int64
+	done := make(chan struct{})
+	go func() {
+		for {
+			f, e := recv.ReadFrame()
+			if e != nil {
+				close(done)
+				return
+			}
+			_ = f
+			atomic.AddInt64(&delivered, 1)
+		}
+	}()
+
+	const nFrames = 180 // ~3 s at 60 fps; 3 IDRs
+	buf := make([]byte, 1<<20)
+	for i := 0; i < nFrames; i++ {
+		au, kf := realisticAU(i, buf)
+		ns.submitAU(au, ptsBase+int64(i)*16_666_667, kf)
+		time.Sleep(16 * time.Millisecond)
+	}
+	// Drain: allow the last frames + any NACK recovery to land.
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	for time.Now().Before(deadline) && atomic.LoadInt64(&delivered) < nFrames {
+		time.Sleep(20 * time.Millisecond)
+	}
+	got := atomic.LoadInt64(&delivered)
+	if got < nFrames*95/100 {
+		t.Fatalf("multi-fragment frames did not complete: %d/%d (pacing starvation?)", got, nFrames)
+	}
+	rs := recv.Stats()
+	if rs.NacksSent == 0 {
+		t.Fatalf("no NACKs sent under 0.1%% loss (loss not exercised?)")
+	}
+	_, retx, _, _ := ns.stats()
+	if retx == 0 {
+		t.Fatalf("native sender retransmitted nothing despite %d NACKs sent", rs.NacksSent)
+	}
+	if ow := rs.OwdNs; ow < 0 || ow > int64(100*time.Millisecond) {
+		t.Fatalf("OWD insane (%d ns) - PTS not rebased into the receiver's clock domain", ow)
+	}
+	t.Logf("realistic 4K60: delivered=%d/%d nacksSent=%d retrans=%d owd=%dms lossPct=%.3f",
+		got, nFrames, rs.NacksSent, retx, rs.OwdNs/int64(time.Millisecond), rs.LossPct)
 }

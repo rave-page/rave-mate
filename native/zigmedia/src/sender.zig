@@ -31,6 +31,7 @@ pub const Config = struct {
     initial_seq: u64 = 0, // first datagram seq (continues the Go handshake conn's seq space)
     fps: i32 = 0, // nominal frame-rate rung (mirrors NativeTXParams.FPS); not used on the TX path yet
     startup_grace_ns: i64 = default_startup_grace_ns, // liveness grace before the route establishes
+    clock_offset_ns: i64 = 0, // mediaClock - this monotonic clock (Go-supplied); 0 = self-rebase to local mono
 };
 
 pub const Stats = struct {
@@ -52,6 +53,20 @@ const retx_dg_cap = 1500;
 const keepalive_ns: i64 = 100 * std.time.ns_per_ms;
 const liveness_ns: i64 = 2 * std.time.ns_per_s;
 pub const default_startup_grace_ns: i64 = 15 * std.time.ns_per_s;
+
+// Pacing mirrors the Go udpConn (pacingRateFor): spread a frame's datagrams at a MULTIPLE of the
+// target bitrate, NOT the bare rate. At the bare rate a 4K keyframe (hundreds of kB) stretches over
+// many frame intervals and is dropped at the receiver's reassembly deadline; the gain finishes each
+// frame well inside one interval. The high floor keeps a low — or wrong-unit — bitrate bursting fast
+// on a LAN (the field bug: the bare target starved every multi-fragment frame; the Go path never did
+// because of this floor). initial_rate_bytes_per_sec is thus the TARGET media bitrate, not the wire cap.
+const pacing_gain: f64 = 8;
+const pacer_min_rate_bytes: f64 = 32 << 20; // ≈256 Mbps floor (effectively unpaced on GbE)
+fn pacedRate(target_bps: f64) f64 {
+    if (target_bps <= 0) return pacer_min_rate_bytes; // unknown budget → floor (matches Go)
+    const r = target_bps * pacing_gain;
+    return if (r < pacer_min_rate_bytes) pacer_min_rate_bytes else r;
+}
 
 // ── Linux socket syscalls (this dev-Zig moved socket I/O out of std.posix) ────────────────────────
 pub fn udpSocket() !i32 {
@@ -101,6 +116,8 @@ pub const Sender = struct {
     last_keepalive_ns: i64 = 0,
     last_recv_ns: i64 = 0,
     established: bool = false,
+    pts_rebased: bool = false, // worker-owned: the one-time PTS rebase has been computed
+    pts_shift: i64 = 0, // added to every submitted PTS (media-clock domain)
 
     thread: ?std.Thread = null,
     stop: std.atomic.Value(bool) = .init(false),
@@ -128,7 +145,7 @@ pub const Sender = struct {
             .own_fd = own_fd,
             .queue = try auqueue.AuQueue.init(alloc, au_slots, au_slot_cap),
             .ring = try retxring.RetxRing.init(alloc, retx_slots, retx_dg_cap),
-            .pacer = Pacer.init(cfg.rate_bps, nowNs()),
+            .pacer = Pacer.init(pacedRate(cfg.rate_bps), nowNs()),
             .frame_buf = try alloc.alloc(u8, au_slot_cap + wire.frame_header_len),
             .dg_buf = try alloc.alloc(u8, wire.header_len + cfg.body_max + aead.tag_len + 64),
             .rx_buf = try alloc.alloc(u8, 2048),
@@ -164,7 +181,7 @@ pub const Sender = struct {
 
     pub fn setRate(s: *Sender, bps: f64) void {
         // Pacer is worker-owned; a benign racy write of the rate is fine (next reserve() picks it up).
-        s.pacer.setRate(bps);
+        s.pacer.setRate(pacedRate(bps));
     }
 
     pub fn snapshot(s: *Sender) Stats {
@@ -190,17 +207,17 @@ pub const Sender = struct {
                 s.s_dead.store(1, .monotonic);
                 // keep looping (drain/close handled by close()); stop sending media
             }
-            s.sendOneAu(now);
+            s.sendOneAu();
             s.keepalive(now);
             sleepNs(500 * std.time.ns_per_us); // 0.5ms poll; pacing is per-datagram
         }
     }
 
-    fn sendOneAu(s: *Sender, now: i64) void {
+    fn sendOneAu(s: *Sender) void {
         const idx = s.queue.pop() orelse return;
         defer s.queue.release(idx);
         const slot = s.queue.slot(idx);
-        const m = wire.FrameMeta{ .stream = s.cfg.stream, .kind = 1, .codec = s.cfg.codec, .flags = @truncate(slot.flags & 0x07), .seq = s.frame_seq, .pts = slot.pts };
+        const m = wire.FrameMeta{ .stream = s.cfg.stream, .kind = 1, .codec = s.cfg.codec, .flags = @truncate(slot.flags & 0x07), .seq = s.frame_seq, .pts = s.rebasePts(slot.pts) };
         const wlen = wire.marshalFrame(s.frame_buf, m, slot.buf[0..slot.len]);
         const frame_wire = s.frame_buf[0..wlen];
         const count: u16 = @intCast(wire.numFrags(wlen, s.cfg.body_max));
@@ -209,12 +226,30 @@ pub const Sender = struct {
             const lo = @as(usize, i) * s.cfg.body_max;
             const hi = @min(lo + s.cfg.body_max, wlen);
             const dglen = s.buildDatagram(wire.dg_type_media, s.cfg.stream, s.frame_seq, i, count, frame_wire[lo..hi]);
-            s.pace(dglen, now);
+            const fnow = nowNs(); // refresh per fragment: the pacer must accrue tokens ACROSS a big keyframe
+            s.pace(dglen, fnow);
             s.sendRaw(s.dg_buf[0..dglen]);
-            s.ring.add(s.dg_buf[0..dglen], s.cfg.stream, s.frame_seq, i);
+            s.ring.add(s.dg_buf[0..dglen], s.cfg.stream, s.frame_seq, i); // ring copies → dg_buf reusable now
+            // Answer a NACK mid-keyframe, not after it: bounds retransmit latency on a many-fragment 4K
+            // frame so recovery lands inside the receiver's reassembly deadline. ring.add already copied.
+            if ((i & 0x0f) == 0x0f) s.drainControl(fnow);
         }
         s.frame_seq +%= 1;
         _ = s.s_aus_sent.fetchAdd(1, .monotonic);
+    }
+
+    // rebasePts shifts a submitted (capture-clock) PTS into the media-clock domain, replicating the Go
+    // router's one-time rebase (runSend: ptsShift = mediaClock.Now() - firstPts, applied to every frame
+    // so inter-frame deltas survive). The first frame maps to the media-clock instant of its send; the
+    // shift uses the Go-supplied clock_offset (mediaClock - this monotonic clock, sampled on the same
+    // host at attach). Without it the receiver sees PTS in a foreign epoch → every frame "late" → the
+    // PTS-paced playout is bypassed (the field owd=3650ms / lateRate=1.0).
+    fn rebasePts(s: *Sender, pts: i64) i64 {
+        if (!s.pts_rebased) {
+            s.pts_shift = (nowNs() + s.cfg.clock_offset_ns) - pts;
+            s.pts_rebased = true;
+        }
+        return pts + s.pts_shift;
     }
 
     // buildDatagram writes header+sealed/clear body into dg_buf, advances seq, returns total length.
