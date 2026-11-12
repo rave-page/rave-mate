@@ -73,7 +73,11 @@ func TestQPControllerFarOverStepsFaster(t *testing.T) {
 	u1, u2 := 0, 0
 	mild := qpNext(target, target, subBits(budget, sub, fps, 1.2), sub, fps, budget, &u1)
 	far := qpNext(target, target, subBits(budget, sub, fps, 2.0), sub, fps, budget, &u2)
-	if !(mild == target+1 && far == target+2) {
-		t.Fatalf("step sizes wrong: mild=%d (want %d) far=%d (want %d)", mild, target+1, far, target+2)
+	// Proportional (+6 QP ~ half the bits, aim 0.95x): 1.2x -> +3, 2.0x -> +7 - one window converges.
+	if !(mild == target+3 && far == target+7) {
+		t.Fatalf("step sizes wrong: mild=%d (want %d) far=%d (want %d)", mild, target+3, far, target+7)
+	}
+	if huge := qpNext(target, target, subBits(budget, sub, fps, 10), sub, fps, budget, &u1); huge != target+8 {
+		t.Fatalf("step must cap at +8 per window, got +%d", huge-target)
 	}
 }

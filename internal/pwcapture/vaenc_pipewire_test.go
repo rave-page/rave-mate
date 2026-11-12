@@ -292,8 +292,22 @@ func TestNativeTXSend(t *testing.T) {
 		t.Logf("NATIVE-TX t=%ds submitted=%d sent=%d dropped=%d datagrams=%d bytes=%d qdepth=%d dead=%v",
 			i+1, st.AUsSubmitted, st.AUsSent, st.AUsDropped, st.DatagramsSent, st.BytesSent, st.QueueDepth, st.Dead)
 	}
+	// Native-path telemetry must be truthful (the Go pump that normally feeds it does not run).
+	ps := esrc.(medialink.PipelineReporter).PipeStats()
+	t.Logf("NATIVE-TX telemetry: outFps=%.1f capFps=%.1f bytes/frame=%.0f queue=%d dropped=%d keyframes=%d",
+		ps.OutFPS, ps.CapFPS, ps.AUBytesPerFrame, ps.QueueDepth, ps.Dropped, st.Keyframes)
+	t.Logf("NATIVE-TX stage enc: n=%d p50=%.0f p99=%.0f max=%.1f mean=%.2f >25/50/100=%d/%d/%d",
+		st.Enc.Count, st.Enc.P50Ms, st.Enc.P99Ms, st.Enc.MaxMs, st.Enc.MeanMs, st.Enc.Over25, st.Enc.Over50, st.Enc.Over100)
+	t.Logf("NATIVE-TX stage tx:  n=%d p50=%.0f p99=%.0f max=%.1f mean=%.2f >25/50/100=%d/%d/%d",
+		st.Tx.Count, st.Tx.P50Ms, st.Tx.P99Ms, st.Tx.MaxMs, st.Tx.MeanMs, st.Tx.Over25, st.Tx.Over50, st.Tx.Over100)
 	if st.AUsSubmitted < uint64(secs*40) {
 		t.Errorf("too few AUs submitted (%d) in %ds - native submit path not flowing", st.AUsSubmitted, secs)
+	}
+	if ps.OutFPS < 40 || ps.CapFPS < 40 {
+		t.Errorf("native route fps telemetry zero/low: out=%.1f cap=%.1f", ps.OutFPS, ps.CapFPS)
+	}
+	if st.Enc.Count < uint64(secs*40) || st.Tx.Count < uint64(secs*40) || st.Keyframes == 0 {
+		t.Errorf("native stages/keyframes not populated: enc=%d tx=%d kf=%d", st.Enc.Count, st.Tx.Count, st.Keyframes)
 	}
 	if st.Dead {
 		t.Error("native sender dead")
@@ -348,6 +362,17 @@ func TestDMABufEncodeHistogram(t *testing.T) {
 	// RPW_JITTER_MS>0 simulates a jittery downstream (packetize/pace/send): sleep a random 0..N ms
 	// after each AU. The ring must absorb jitter up to its depth with no drops/keyframe storms.
 	jitterMs, _ := strconv.Atoi(os.Getenv("RPW_JITTER_MS"))
+	// RPW_STALL_MS>0 simulates a downstream STALL (consumer blocked: receiver hiccup on TCP, native sender
+	// queue): one sleep of STALL_MS every RPW_STALL_EVERY_S seconds (default 60). Expect: no encoder
+	// stall, bounded ring, at most one forced IDR per stall, no keyframe storm.
+	stallMs, _ := strconv.Atoi(os.Getenv("RPW_STALL_MS"))
+	stallMax, _ := strconv.Atoi(os.Getenv("RPW_STALL_MAX_MS"))
+	stallEvery, _ := strconv.Atoi(os.Getenv("RPW_STALL_EVERY_S"))
+	if stallEvery <= 0 {
+		stallEvery = 60
+	}
+	var stalls int
+	var nextStall time.Time
 	warm := 60
 	var intervals []float64 // ms between successive AUs
 	var last, winStart time.Time
@@ -377,6 +402,20 @@ func TestDMABufEncodeHistogram(t *testing.T) {
 		}
 		if jitterMs > 0 && rand.Intn(3) == 0 { // spike on ~1/3 of frames (avg stays under the frame
 			time.Sleep(time.Duration(rand.Intn(jitterMs+1)) * time.Millisecond) // period: the ring absorbs it)
+		}
+		if stallMs > 0 && i >= warm {
+			if nextStall.IsZero() {
+				nextStall = now.Add(time.Duration(stallEvery) * time.Second / 2)
+			} else if now.After(nextStall) {
+				d := stallMs
+				if stallMax > stallMs { // RPW_STALL_MAX_MS: uniform in [STALL_MS, STALL_MAX_MS]
+					d += rand.Intn(stallMax - stallMs + 1)
+				}
+				time.Sleep(time.Duration(d) * time.Millisecond)
+				stalls++
+				nextStall = time.Now().Add(time.Duration(stallEvery) * time.Second)
+				last = time.Now() // the stall itself is not a delivery gap of the engine
+			}
 		}
 	}
 	sort.Float64s(intervals)
@@ -413,13 +452,126 @@ func TestDMABufEncodeHistogram(t *testing.T) {
 		sum/float64(max1(len(intervals))), pct(50), pct(90), pct(99), pct(100), over25, over50)
 	t.Logf("HIST engine: newest-wins drops(window)=%d capFps=%.2f outFps=%.2f zeroCopy=%v bytes/frame=%.0f",
 		drops, st.CapFPS, st.OutFPS, st.ZeroCopy, st.AUBytesPerFrame)
+	var forced int64
 	if ps, ok := esrc.(*pwSource); ok {
 		depth, hiwater, overflow, capDrops, gridDrops := ps.ringStats()
+		repeats, skips, holds, fidr := ps.robustStats()
+		forced = fidr
 		t.Logf("HIST ring: depth=%d hiwater=%d overflow(total)=%d capDrops(total)=%d gridDrops(total)=%d  keyframes(window)=%d jitterMs=%d",
 			depth, hiwater, overflow, capDrops, gridDrops, keyframes, jitterMs)
+		t.Logf("HIST robust: repeats=%d ringSkips=%d startHolds=%d forcedIDRs=%d stalls=%d stallMs=%d",
+			repeats, skips, holds, fidr, stalls, stallMs)
 	}
 	if len(intervals) < secs*20 {
 		t.Errorf("far too few frames (%d) in %ds - capture stalled", len(intervals), secs)
+	}
+	// Optional regression gates (rig runs): RPW_HIST_MAXMS = max delivery interval, RPW_HIST_MINFPS.
+	if v, err := strconv.ParseFloat(os.Getenv("RPW_HIST_MAXMS"), 64); err == nil && pct(100) > v {
+		t.Errorf("max interval %.1f ms > %.1f ms", pct(100), v)
+	}
+	if v, err := strconv.ParseFloat(os.Getenv("RPW_HIST_MINFPS"), 64); err == nil && fps < v {
+		t.Errorf("fps %.2f < %.2f", fps, v)
+	}
+	if stalls > 0 {
+		if forced > int64(stalls) {
+			t.Errorf("forced IDRs %d > stalls %d (keyframe storm)", forced, stalls)
+		}
+		gopIDRs := secs/2 + 2 // GOP = 2 s
+		if keyframes > gopIDRs+stalls {
+			t.Errorf("keyframes %d > GOP %d + stalls %d (keyframe storm)", keyframes, gopIDRs, stalls)
+		}
+	}
+}
+
+// TestStartupClean: route start-up must be clean - the consumer opens late (cold TCP / receiver decoder:
+// RPW_START_DELAY_MS, default 600), yet the first AU is an IDR, nothing is dropped (frames during the
+// hold are skipped pre-encode, not dropped), at most one IDR + GOP in the first 2 s, and once the
+// consumer runs the delivery is even (no stale burst). Set RPW_TEST_NODE + RPW_STARTUP.
+func TestStartupClean(t *testing.T) {
+	node := os.Getenv("RPW_TEST_NODE")
+	if node == "" || os.Getenv("RPW_STARTUP") == "" {
+		t.Skip("set RPW_TEST_NODE + RPW_STARTUP")
+	}
+	if !captureAvailable() || !VAEncodeAvailable() {
+		t.Skip("pwcapture/VA not available")
+	}
+	delay := 600
+	if v, err := strconv.Atoi(os.Getenv("RPW_START_DELAY_MS")); err == nil && v >= 0 {
+		delay = v
+	}
+	codec, encoder := medialink.CodecH264, medialink.EncoderVAAPINativeH264
+	if os.Getenv("RPW_ENC_CODEC") == "hevc" {
+		encoder, codec = medialink.EncoderVAAPINativeHEVC, medialink.CodecHEVC
+	}
+	t0 := time.Now()
+	src, err := openCapture(context.Background(), nil, node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = src.Close() }()
+	esrc, started, err := src.(medialink.DMABufEncodeSource).StartDMABufEncode(medialink.EncodeSpec{
+		Encoder: encoder, Codec: codec, FPS: 60, BitrateKbps: 25000, VAAPIRenderNode: "/dev/dri/renderD128"})
+	if err != nil || !started {
+		t.Fatalf("StartDMABufEncode started=%v err=%v", started, err)
+	}
+	time.Sleep(time.Duration(delay) * time.Millisecond) // cold consumer
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	var first time.Time
+	var ivs []float64
+	var last time.Time
+	keyframes := 0
+	for i := 0; ; i++ {
+		fr, err := esrc.Next(ctx)
+		if err != nil {
+			t.Fatalf("Next %d: %v", i, err)
+		}
+		now := time.Now()
+		if i == 0 {
+			first = now
+			if !fr.Keyframe() {
+				t.Error("first AU is not an IDR")
+			}
+		} else {
+			ivs = append(ivs, now.Sub(last).Seconds()*1000)
+		}
+		if fr.Keyframe() {
+			keyframes++
+		}
+		last = now
+		if now.Sub(first) >= 2*time.Second {
+			break
+		}
+	}
+	ps := esrc.(*pwSource)
+	_, skips, holds, fidr := ps.robustStats()
+	st := ps.PipeStats()
+	var over25, burst int
+	var maxIv float64
+	for i, v := range ivs {
+		if v > 25 {
+			over25++
+		}
+		if v > maxIv {
+			maxIv = v
+		}
+		if i >= 1 && v < 2 { // back-to-back AUs after the first two = a stale burst
+			burst++
+		}
+	}
+	t.Logf("STARTUP open->firstAU=%v (consumer delay %dms) AUs=%d keyframes=%d maxIv=%.1fms >25ms=%d burst=%d holds=%d skips=%d forcedIDR=%d dropped=%d",
+		first.Sub(t0).Round(time.Millisecond), delay, len(ivs)+1, keyframes, maxIv, over25, burst, holds, skips, fidr, st.Dropped)
+	if skips != 0 || st.Dropped != 0 || fidr != 0 {
+		t.Errorf("start-up dropped frames: skips=%d dropped=%d forcedIDR=%d", skips, st.Dropped, fidr)
+	}
+	if keyframes > 2 {
+		t.Errorf("keyframe storm at start-up: %d IDRs in 2 s", keyframes)
+	}
+	if burst > 3 {
+		t.Errorf("stale burst at start-up: %d back-to-back AUs", burst)
+	}
+	if len(ivs) < 100 {
+		t.Errorf("too few AUs in the first 2 s: %d", len(ivs)+1)
 	}
 }
 

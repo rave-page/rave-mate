@@ -55,6 +55,10 @@ type NativeTXStats struct {
 	QueueDepth    int
 	Dead          bool
 	NacksRecv     uint64 // authenticated NACK datagrams received (ABI v3)
+	// Source-side (encode thread) telemetry, computed natively and sampled with the counters: the Go
+	// pump that marks EncDone/TxQueue does not run on a native route.
+	Keyframes uint64
+	Enc, Tx   StageSnapshot
 }
 
 // NativeTX is a running native send path. The Go router supervises it (does not pump media): on Done()
