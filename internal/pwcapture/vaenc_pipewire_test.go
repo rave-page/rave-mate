@@ -53,8 +53,13 @@ func TestDMABufEncodeAPI(t *testing.T) {
 	if os.Getenv("RPW_ENC_CODEC") == "hevc" {
 		encoder, codec = medialink.EncoderVAAPINativeHEVC, medialink.CodecHEVC
 	}
+	// Adaptive budget: RPW_ENC_Q (1..100) engages constant-quality-with-ceiling (BitrateKbps = the
+	// ceiling). 0/unset = legacy rate-controlled. RPW_RATEHINT_Q applies a live quality change mid-run.
+	quality, _ := strconv.Atoi(os.Getenv("RPW_ENC_Q"))
+	hintQ, _ := strconv.Atoi(os.Getenv("RPW_RATEHINT_Q"))
 	spec := medialink.EncodeSpec{Encoder: encoder, Codec: codec,
-		Width: w, Height: h, FPS: 60, BitrateKbps: kbps, MaxHeight: maxh, VAAPIRenderNode: node4}
+		Width: w, Height: h, FPS: 60, BitrateKbps: kbps, MaxHeight: maxh, VAAPIRenderNode: node4,
+		QualityTarget: quality}
 	esrc, started, err := de.StartDMABufEncode(spec)
 	if err != nil || !started {
 		t.Fatalf("StartDMABufEncode started=%v err=%v", started, err)
@@ -79,6 +84,9 @@ func TestDMABufEncodeAPI(t *testing.T) {
 	var winBytes int
 	var winStart time.Time
 	var maxWinKbps, lastWinKbps float64
+	// Quality feedback sampling (adaptive budget): avg QP + the fraction of samples rate-limited.
+	var fbSamples, fbRateLimited int
+	var fbQPSum float64
 	// Optional mid-run SetRateHint (RPW_RATEHINT_KBPS): drop the budget at the midpoint; lastWinKbps
 	// then reflects the post-hint window to prove it took effect within ~1s.
 	hintKbps, _ := strconv.Atoi(os.Getenv("RPW_RATEHINT_KBPS"))
@@ -102,6 +110,23 @@ func TestDMABufEncodeAPI(t *testing.T) {
 		if hintKbps > 0 && i == hintAt {
 			if rc, ok := esrc.(medialink.RateControlSource); ok {
 				rc.SetRateHint(medialink.RateHint{MaxBitrateKbps: hintKbps})
+			}
+		}
+		if hintQ > 0 && i == hintAt { // live quality-level change (no reopen)
+			if rc, ok := esrc.(medialink.RateControlSource); ok {
+				rc.SetRateHint(medialink.RateHint{QualityTarget: hintQ})
+			}
+		}
+		if quality > 0 && i >= warm && (i-warm)%30 == 0 { // ~1s feedback sampling
+			if pr, ok := esrc.(medialink.PipelineReporter); ok {
+				fb := pr.PipeStats().Feedback
+				if fb.Present {
+					fbSamples++
+					fbQPSum += fb.AvgQP
+					if fb.RateLimited {
+						fbRateLimited++
+					}
+				}
 			}
 		}
 		if maxh2 > 0 {
@@ -162,6 +187,19 @@ func TestDMABufEncodeAPI(t *testing.T) {
 	t.Logf("PLI->IDR latency: %d frames", pliLatencyFrames)
 	t.Logf("PipeStats: engine=%s outFps=%.1f capFps=%.1f dropped=%d zeroCopy=%v bytes/frame=%.0f node=%s",
 		st.Encoder, st.OutFPS, st.CapFPS, st.Dropped, st.ZeroCopy, st.AUBytesPerFrame, st.DevPolicy)
+	if quality > 0 {
+		t.Logf("QUALITY q=%d targetQP=%d budget=%d  avgQP=%.1f  rateLimited=%d/%d (%.0f%%)  present=%v finalQP=%.1f finalRL=%v",
+			quality, medialink.QualityToQP(codec, quality), st.BudgetKbps,
+			fbQPSum/float64(max1(fbSamples)), fbRateLimited, fbSamples,
+			100*float64(fbRateLimited)/float64(max1(fbSamples)), st.Feedback.Present,
+			st.Feedback.AvgQP, st.Feedback.RateLimited)
+		if !st.Feedback.Present {
+			t.Error("quality mode but the encoder reported no feedback (Present=false)")
+		}
+		if st.QualityTarget != quality {
+			t.Errorf("PipeStats.QualityTarget = %d, want %d", st.QualityTarget, quality)
+		}
+	}
 	if !sawFirstKey {
 		t.Error("route did not open with a keyframe")
 	}

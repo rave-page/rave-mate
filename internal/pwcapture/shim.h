@@ -32,9 +32,11 @@ long rpw_dmabuf_skipped(struct rpw_capture *c);
 /* ---- vaapi-native encode mode (zero-copy dmabuf -> VA -> H.264/HEVC AU) ---- */
 
 /* rpw_set_encode switches the capture to fused in-process VA encode (codec 0=H.264, 1=HEVC), coded
- * height capped by max_h (0 = native). Call before consuming any AU. 1 = VA usable (use rpw_wait_au),
- * 0 = VA unavailable (fall back to rpw_wait_frame + ffmpeg). */
-int rpw_set_encode(struct rpw_capture *c, int codec, int kbps, int max_h, int fps, const char *node);
+ * height capped by max_h (0 = native). quality_qp selects rate control: 0 = legacy rate-controlled
+ * (CBR to kbps as a hard ceiling); >0 = constant-quality-with-ceiling (CQP at quality_qp, kbps the
+ * ceiling). Call before consuming any AU. 1 = VA usable (use rpw_wait_au), 0 = VA unavailable (fall
+ * back to rpw_wait_frame + ffmpeg). */
+int rpw_set_encode(struct rpw_capture *c, int codec, int kbps, int max_h, int fps, const char *node, int quality_qp);
 
 /* rpw_wait_au returns one Annex-B AU into dst (blocks up to timeout_ms), sets *keyframe, the CODED
  * dims in *w/*h, and the capture PTS (ns, 0 if the buffer carried none) in *pts. >0 bytes, 0 timeout,
@@ -44,8 +46,17 @@ int rpw_wait_au(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int 
 /* rpw_request_keyframe forces an IDR on the next encoded frame (PLI / route start / reconnect). */
 void rpw_request_keyframe(struct rpw_capture *c);
 
-/* rpw_set_bitrate sets the live target bitrate (kbps), applied on the next encoded frame. */
+/* rpw_set_bitrate sets the live target bitrate (kbps) - the CBR target or the CQP ceiling - applied on
+ * the next encoded frame. */
 void rpw_set_bitrate(struct rpw_capture *c, int kbps);
+
+/* rpw_set_quality sets the live constant-quality target QP (quality mode), applied on the next frame
+ * without a reopen. If the encoder is currently legacy-mode it is re-created in quality mode. */
+void rpw_set_quality(struct rpw_capture *c, int target_qp);
+
+/* rpw_enc_feedback reports the adaptive-budget quality signal: *present (1 in quality mode), *avg_qp
+ * (mean QP over ~1s), *rate_limited (ceiling forced QP above the quality target). */
+void rpw_enc_feedback(struct rpw_capture *c, int *present, double *avg_qp, int *rate_limited);
 
 /* rpw_set_cap_height applies a live CODED-height cap (0 = native); the encoder re-creates at the new
  * coded size on the next frame if changed. Nominal source geometry unchanged (receiver upscales). */

@@ -209,6 +209,52 @@ func TestAdaptiveBaseKbps(t *testing.T) {
 	}
 }
 
+func TestQualityToQP(t *testing.T) {
+	// QualityDefault (70) anchors at the visually-transparent QP per codec.
+	if qp := QualityToQP(CodecH264, QualityDefault); qp != 23 {
+		t.Fatalf("H.264 q70 QP = %d, want 23", qp)
+	}
+	if qp := QualityToQP(CodecHEVC, QualityDefault); qp != 25 {
+		t.Fatalf("HEVC q70 QP = %d, want 25", qp)
+	}
+	// 0 / absent => 0 (rate-controlled, no CQP) so an unset spec keeps legacy behaviour.
+	if qp := QualityToQP(CodecH264, 0); qp != 0 {
+		t.Fatalf("q0 must map to 0 (rate-controlled), got %d", qp)
+	}
+	// Higher quality => lower QP, strictly monotonic non-increasing across the band.
+	prev := QualityToQP(CodecH264, 1)
+	for q := 2; q <= 100; q++ {
+		cur := QualityToQP(CodecH264, q)
+		if cur > prev {
+			t.Fatalf("not monotonic: q%d=%d > q%d=%d", q, cur, q-1, prev)
+		}
+		prev = cur
+	}
+	// q100 (best) is well below q70 is below q1 (worst), for both codecs.
+	for _, c := range []Codec{CodecH264, CodecHEVC} {
+		if !(QualityToQP(c, 100) < QualityToQP(c, 70) && QualityToQP(c, 70) < QualityToQP(c, 1)) {
+			t.Fatalf("codec %v: q100<q70<q1 ordering broken: %d %d %d",
+				c, QualityToQP(c, 100), QualityToQP(c, 70), QualityToQP(c, 1))
+		}
+	}
+	// HEVC holds equal perceptual quality at a slightly higher QP number than H.264.
+	if QualityToQP(CodecHEVC, 70) < QualityToQP(CodecH264, 70) {
+		t.Fatal("HEVC QP should be >= H.264 QP at the same quality")
+	}
+	// Clamped to a useful CQP range (never 0 for a real quality, never above 51).
+	for q := 1; q <= 100; q++ {
+		for _, c := range []Codec{CodecH264, CodecHEVC} {
+			if qp := QualityToQP(c, q); qp < 10 || qp > 51 {
+				t.Fatalf("codec %v q%d QP %d out of sane range", c, q, qp)
+			}
+		}
+	}
+	// Out-of-range quality is clamped, not panicking.
+	if QualityToQP(CodecH264, 500) != QualityToQP(CodecH264, 100) {
+		t.Fatal("quality > 100 must clamp to 100")
+	}
+}
+
 func withUser(in BudgetInputs, k int) BudgetInputs  { in.UserCeilKbps = k; return in }
 func withLink(in BudgetInputs, k int) BudgetInputs  { in.LinkCeilKbps = k; return in }
 func withCoded(in BudgetInputs, h int) BudgetInputs { in.CodedH = h; return in }

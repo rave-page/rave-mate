@@ -1,6 +1,9 @@
 package medialink
 
-import "strings"
+import (
+	"math"
+	"strings"
+)
 
 // adaptbudget.go - the AUTO per-route bitrate budget (owner: "best quality value per system").
 // Replaces the flat config bitrate with a continuous target = min of: the quality-MODEL bitrate
@@ -115,6 +118,32 @@ func contentBppFactor(c ContentClass) float64 {
 	default:
 		return 1.0
 	}
+}
+
+// QualityToQP maps a constant-quality target (1..100, higher = better) to the constant-QP value a
+// CQP-capable native encoder holds. It is the sender-side realization of EncodeSpec.QualityTarget for
+// the engines that encode at a fixed quantizer (the Linux VA engine today): the encoder encodes at
+// this QP - constant quality, so simple content spends FEW bits and undershoots the ceiling - and only
+// RAISES QP above this when the bitrate ceiling binds (reported as EncoderFeedback.RateLimited).
+//
+// Anchored so QualityDefault (70) is visually ~transparent for stage visuals: H.264 QP 23, HEVC QP 25
+// (HEVC holds equal perceptual quality at a slightly higher QP number). Slope 0.2 QP per quality point
+// (q100 -> ~17/19, q50 -> ~27/29), clamped to each codec's useful CQP range. 0 / absent => 0, i.e. no
+// CQP: the caller keeps legacy rate-controlled behaviour. The q70 anchors were confirmed by the on-rig
+// PSNR/SSIM sweep (see .devnotes/PWCAPTURE.md). lower quality number = higher QP = lower quality.
+func QualityToQP(c Codec, quality int) int {
+	if quality <= 0 {
+		return 0
+	}
+	if quality > 100 {
+		quality = 100
+	}
+	anchor, lo, hi := 23.0, 12, 46 // H.264
+	if c == CodecHEVC {
+		anchor, lo, hi = 25.0, 14, 48
+	}
+	qp := int(math.Round(anchor + float64(70-quality)*0.2))
+	return clampInt(qp, lo, hi)
 }
 
 // CodecName maps a wire codec to the quality model's codec token.
