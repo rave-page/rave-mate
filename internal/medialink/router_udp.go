@@ -44,9 +44,9 @@ func transportName(udp *udpConn) string {
 // dialConn gives the sink side a route conn: a reachable UDP conn when the answer chose UDP and the
 // reachability handshake succeeds, else a TCP conn (default or fallback). Returns the frameConn and,
 // when UDP, the *udpConn (for telemetry + the blackout detector).
-func (rm *RouteManager) dialConn(ctx context.Context, peer string, ans Answer, encrypt bool) (frameConn, *udpConn, error) {
-	if ans.Transport == TransportUDP && rm.udp {
-		if u, ok := rm.dialUDP(ctx, peer, ans, encrypt); ok {
+func (rm *RouteManager) dialConn(ctx context.Context, peer string, ans Answer, salt []byte, encrypt bool) (frameConn, *udpConn, error) {
+	if ans.Transport == TransportUDP && rm.udp && salt != nil {
+		if u, ok := rm.dialUDP(ctx, peer, ans, salt, encrypt); ok {
 			return u, u, nil
 		}
 		rm.infof("udp unreachable - falling back to TCP", map[string]any{"session": ans.Session, "addr": ans.Addr})
@@ -61,7 +61,7 @@ func (rm *RouteManager) dialConn(ctx context.Context, peer string, ans Answer, e
 		_ = c.Close()
 		return nil, nil, err
 	}
-	conn, err := rm.mediaConn(c, peer, encrypt, true) // dialing end = initiator
+	conn, err := rm.mediaConn(c, peer, salt, encrypt, true) // dialing end = initiator
 	if err != nil {
 		_ = c.Close()
 		return nil, nil, err
@@ -71,7 +71,7 @@ func (rm *RouteManager) dialConn(ctx context.Context, peer string, ans Answer, e
 
 // dialUDP opens a UDP conn toward the answered addr and runs the reachability handshake (its
 // keepalive ping must draw a reply within udpReachTimeout). ok=false → the caller falls back to TCP.
-func (rm *RouteManager) dialUDP(ctx context.Context, peer string, ans Answer, encrypt bool) (*udpConn, bool) {
+func (rm *RouteManager) dialUDP(ctx context.Context, peer string, ans Answer, salt []byte, encrypt bool) (*udpConn, bool) {
 	sec, ok := rm.secrets.MediaSecret(peer)
 	if !ok {
 		return nil, false // no media secret → no token → no UDP
@@ -84,8 +84,8 @@ func (rm *RouteManager) dialUDP(ctx context.Context, peer string, ans Answer, en
 	if err != nil {
 		return nil, false
 	}
-	u, err := newUDPConn(pc, raddr, udpConfig{Token: routeToken(sec, ans.Session), Initiator: true,
-		Master: sec, Encrypt: encrypt, Clock: rm.clock, Keepalive: 100 * time.Millisecond,
+	u, err := newUDPConn(pc, raddr, udpConfig{Token: routeToken(sec, salt), Initiator: true,
+		Master: sec, Salt: salt, Encrypt: encrypt, Clock: rm.clock, Keepalive: 100 * time.Millisecond,
 		Log: rm.udpLog})
 	if err != nil {
 		_ = pc.Close()
@@ -105,13 +105,22 @@ func (rm *RouteManager) dialUDP(ctx context.Context, peer string, ans Answer, en
 }
 
 // serveUDPFirst is the mux's onFirst callback (answerer source side): the first datagram for a
-// pending UDP route arrived. Claim the pending answer (the TCP path may race for it), build the
-// route's udpConn over a fresh muxConn bound to the dialer's address, start the source pump, and
-// return the muxConn so the mux routes subsequent datagrams to it. nil = claim lost / not viable.
-func (rm *RouteManager) serveUDPFirst(token uint32, session string, remote *net.UDPAddr) *muxConn {
-	pa := rm.claimPendingAnswer(session)
+// pending UDP route arrived. It AUTHENTICATES the datagram with the route's keys/token BEFORE
+// claiming the pending answer or creating any state (finding 2); only on success does it atomically
+// claim (the TCP path may race), build the route's udpConn over a fresh muxConn, feed the
+// authenticated first datagram (so the udpConn binds its remote from that source + replies), and
+// start the source pump. nil = unauthenticated / claim lost / not viable → the mux creates no state.
+func (rm *RouteManager) serveUDPFirst(token uint32, session string, src *net.UDPAddr, dg []byte) *muxConn {
+	pa := rm.peekPendingAnswer(session) // peek, do NOT claim yet
 	if pa == nil {
-		return nil // already claimed by the TCP fallback, or expired
+		return nil
+	}
+	if !rm.authenticateFirstDatagram(pa, token, dg) {
+		return nil // forged / off-path: no claim, no state, pending survives for a real retry
+	}
+	pa = rm.claimPendingAnswer(session) // authenticated → now claim atomically (TCP fallback may win)
+	if pa == nil {
+		return nil
 	}
 	sec, ok := rm.secrets.MediaSecret(pa.peer)
 	if !ok {
@@ -123,17 +132,46 @@ func (rm *RouteManager) serveUDPFirst(token uint32, session string, remote *net.
 	if mux == nil {
 		return nil
 	}
-	mc := mux.newMuxConn(token, remote)
-	u, err := newUDPConn(mc, remote, udpConfig{Token: token, Initiator: false, Master: sec,
-		Encrypt: pa.encrypt, Clock: rm.clock, Log: rm.udpLog})
+	mc := mux.newMuxConn(token)
+	u, err := newUDPConn(mc, nil, udpConfig{Token: token, Initiator: false, Master: sec, Salt: pa.salt,
+		Encrypt: pa.encrypt, Clock: rm.clock, Log: rm.udpLog}) // remote nil → binds on the authenticated datagram
 	if err != nil {
 		_ = mc.Close()
 		return nil
 	}
+	mc.deliver(append([]byte(nil), dg...), src) // feed the authenticated first datagram (pong + bind)
 	go rm.guard("pumpSourceUDP", func() {
 		rm.pumpSource(rm.routeCtx(), session, pa, u, u)
 	})
 	return mc
+}
+
+// authenticateFirstDatagram verifies a would-be first datagram against the route's keys/token WITHOUT
+// creating any state: AEAD open (encrypted routes) or token + route-mode check (clear routes). The
+// token is re-derived from the route material and must match the datagram's. Returns whether it
+// authenticated - the gate that must pass before any pending answer is claimed or a remote bound.
+func (rm *RouteManager) authenticateFirstDatagram(pa *pendingAnswer, token uint32, dg []byte) bool {
+	sec, ok := rm.secrets.MediaSecret(pa.peer)
+	if !ok {
+		return false
+	}
+	if routeToken(sec, pa.salt) != token {
+		return false
+	}
+	var crypto *dgCrypto
+	if pa.encrypt {
+		c, err := newDgCrypto(sec, pa.salt, false) // responder
+		if err != nil {
+			return false
+		}
+		crypto = c
+	}
+	h, off, err := parseDatagramHeader(dg)
+	if err != nil {
+		return false
+	}
+	_, err = decodeBody(h, dg[off:], token, crypto, dg[:off])
+	return err == nil
 }
 
 // routeCtx returns the manager's run context (routes are torn down by it + their own cancel).

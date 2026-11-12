@@ -458,7 +458,7 @@ func TestP1OfferCompat(t *testing.T) {
 	if err := writePreamble(c, "p1sess"); err != nil {
 		t.Fatal(err)
 	}
-	conn, err := NewConn(c, secrets.key, true)
+	conn, err := NewConn(c, secrets.key, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}

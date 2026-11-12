@@ -61,7 +61,7 @@ func TestFrameRoundTrip(t *testing.T) {
 func TestTransportRoundTrip(t *testing.T) {
 	key := testKey()
 	var buf bytes.Buffer
-	wc, err := NewConn(memRW{w: &buf}, key, true)
+	wc, err := NewConn(memRW{w: &buf}, key, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestTransportRoundTrip(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	rc, err := NewConn(memRW{r: bytes.NewReader(buf.Bytes())}, key, false)
+	rc, err := NewConn(memRW{r: bytes.NewReader(buf.Bytes())}, key, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,13 +94,13 @@ func TestTransportRoundTrip(t *testing.T) {
 func TestTransportTamperRejected(t *testing.T) {
 	key := testKey()
 	var buf bytes.Buffer
-	wc, _ := NewConn(memRW{w: &buf}, key, true)
+	wc, _ := NewConn(memRW{w: &buf}, key, nil, true)
 	if err := wc.WriteFrame(&Frame{Stream: 1, Kind: KindAudio, Codec: CodecPCMS16, Seq: 1, Payload: []byte("secret")}); err != nil {
 		t.Fatal(err)
 	}
 	b := buf.Bytes()
 	b[len(b)-1] ^= 0xFF // corrupt the GCM tag
-	rc, _ := NewConn(memRW{r: bytes.NewReader(b)}, key, false)
+	rc, _ := NewConn(memRW{r: bytes.NewReader(b)}, key, nil, false)
 	if _, err := rc.ReadFrame(); err == nil {
 		t.Fatal("expected auth failure on tampered frame")
 	}
@@ -109,10 +109,10 @@ func TestTransportTamperRejected(t *testing.T) {
 func TestTransportWrongRoleFails(t *testing.T) {
 	key := testKey()
 	var buf bytes.Buffer
-	wc, _ := NewConn(memRW{w: &buf}, key, true)
+	wc, _ := NewConn(memRW{w: &buf}, key, nil, true)
 	_ = wc.WriteFrame(&Frame{Stream: 1, Seq: 1, Payload: []byte("x")})
 	// A reader that also claims initiator uses the same send-key for recv → wrong key → auth fail.
-	rc, _ := NewConn(memRW{r: bytes.NewReader(buf.Bytes())}, key, true)
+	rc, _ := NewConn(memRW{r: bytes.NewReader(buf.Bytes())}, key, nil, true)
 	if _, err := rc.ReadFrame(); err == nil {
 		t.Fatal("expected auth failure with mismatched roles")
 	}
@@ -127,7 +127,7 @@ func (s *sliceSink) Close() error         { return nil }
 func TestPumpEndToEnd(t *testing.T) {
 	key := testKey()
 	var buf bytes.Buffer
-	wc, _ := NewConn(memRW{w: &buf}, key, true)
+	wc, _ := NewConn(memRW{w: &buf}, key, nil, true)
 	want := []*Frame{
 		{Stream: 5, Kind: KindVideo, Codec: CodecBGRA, Flags: FlagKeyframe, Seq: 1, PTS: 0,
 			TC: Timecode{S: 1, F: 10, Rate: FPS30}, Payload: bytes.Repeat([]byte{7}, 2048)},
@@ -138,7 +138,7 @@ func TestPumpEndToEnd(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	rc, _ := NewConn(memRW{r: bytes.NewReader(buf.Bytes())}, key, false)
+	rc, _ := NewConn(memRW{r: bytes.NewReader(buf.Bytes())}, key, nil, false)
 	sink := &sliceSink{}
 	if err := Pump(context.Background(), rc, sink); err != nil {
 		t.Fatal(err)

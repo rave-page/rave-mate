@@ -84,6 +84,71 @@ Control datagram types (Type field): media=0, ping=1, pong=2, fragment-NACK=3.
   migrates to `off`. `off+off` on a routed path now encrypts (safety tightening of the legacy
   always-clear rule).
 
+## Key schedule + peer binding (security hardening, 2026-11-12)
+
+Two findings on the first cut, both fixed:
+
+**[HIGH] Per-route key schedule (was: AES-GCM key/nonce reuse across routes).** The UDP keys + nonce
+prefix (and the TCP keys) were HKDF(MediaSecret, label) only, and each route started its sequence at
+0. Two routes to the same peer in one peerlink session (video+audio+webcam), a route restart, a
+TCP-fallback-then-UDP, or any renegotiation therefore encrypted different plaintext under the SAME
+(key, nonce) - catastrophic for GCM. Fix:
+
+- **Per-ROUTE key salt.** Offer + Answer each carry a fresh 128-bit `RouteNonce` (`rn`, optional).
+  `routeKeySalt = offerNonce ‖ answerNonce ‖ session` is the HKDF salt for the keys, the 4 B nonce
+  prefix AND the token, so every route instance (and every restart - fresh nonces) derives distinct
+  material. BOTH sides contribute 128 bits, so neither alone can force a collision.
+- **Sequence is per-key, monotonic, never reset.** One `dgEncoder` per route/key; seq only
+  increments (encoder respawn / source swap keep the same udpConn → same monotonic seq; retransmits
+  re-send the ORIGINAL datagram bytes, never re-seal a seq). A reset means a NEW route (new nonce →
+  new key). A **hard stop** at `dgSeqHardStop = 2^32` datagrams per key makes encode error + control
+  stop (→ renegotiate for fresh keys) long before the 64-bit counter can approach wrap, aligned with
+  the §2.1 7-day/2^31 rekey budget + the NIST SP 800-38D GCM invocation margin.
+- **Token is per-route** (`routeToken(secret, routeKeySalt)`), so cleartext-mode tokens don't repeat
+  across routes either.
+
+**TCP-path audit verdict (pre-existing, WAS exploitable).** `transport.go` derived per-direction keys
+from `MediaSecret` with `salt=nil` and an implicit counter nonce starting at 0 per `Conn`. Since
+`MediaSecret` is per peerlink CONNECTION (shared by every media route to that peer in a session), two
+concurrent TCP media routes - or a single route that reconnects - reused one key with a
+counter-from-0 nonce on different plaintext: the same catastrophic GCM reuse, pre-existing and
+exploitable in any deployment with >1 route or a reconnect. Fix: `NewConn` now takes the per-route
+salt; **new↔new TCP routes get per-route keys** (safe). **Old peers can't negotiate it** (they send
+no `RouteNonce`): `routeKeySalt` returns nil → `mediaConn` falls back to the LEGACY session-less
+derivation AND logs a warning naming the key-reuse risk. Choice + rationale: refusing AEAD with a
+pre-fix peer has no safe substitute (cleartext is worse) and would break interop; the realistic
+deployment is new↔new (both the owner's updated rave-mate), which is fully fixed; an old peer can't be
+made safe without its cooperation. UDP is always new↔new (old peers never negotiate it), so UDP is
+always per-route-keyed.
+
+**[MEDIUM] Authenticate before binding/claiming (was: unauthenticated peer binding).** The mux claimed
+the pending answer + bound the remote from the FIRST datagram, pre-auth. Fix: `serveUDPFirst` peeks
+the pending answer, AUTHENTICATES the datagram with the route's keys/token (AEAD open on encrypted
+routes; token + route-mode on clear) and only THEN atomically claims + builds the udpConn. The send
+target binds (and later rebinds) ONLY from an authenticated datagram, rate-limited (`udpRebindMin`
+1 s). An unauthenticated datagram creates NO state and does not consume the pending answer (which
+survives for a legitimate retry); the pending table is populated only by our own `onOffer` (capped by
+`maxRoutes`, expired by the pending-answer TTL). An OFF-path attacker without the per-route token
+cannot reach `onFirst` at all; an on-path attacker in CLEARTEXT mode can still spoof - the documented
+cleartext trade-off. Rejected datagrams never refresh liveness.
+
+**Asymmetric-reachability edge: NOT removed** (honest answer). The answerer still claims on the first
+AUTHENTICATED datagram, not after confirmed BIDIRECTIONAL reachability, so the rare case (dialer→
+answerer UDP works but the return is blocked) can still claim UDP while the dialer falls back to TCP.
+A bidirectional-confirm handshake (claim only after an ack-reach datagram) would remove it; I chose
+not to add that protocol complexity for a case that stateful firewalls make rare, and it self-heals
+on the next offer cycle via the blackout fallback. Documented residual.
+
+**Wire changes:** `Offer.RouteNonce` + `Answer.RouteNonce` (`rn`, optional/omitempty). Internal
+signatures: `NewConn(rw, master, salt, initiator)`, `newDgCrypto(master, salt, initiator)`,
+`routeToken(secret, salt)`, `udpConfig.Salt`. `UDPStats.Rebinds` added (authenticated NAT rebinds).
+
+**Security tests:** `TestPerRouteKeyScheduleDiffers` (distinct keys/nonce-prefix/token; route-A
+datagram fails to open on route B), `TestRouteKeySaltFreshOnRestart`, `TestDatagramSeqMonotonicAndHardStop`,
+`TestDatagramNonceUniqueness` (~90k datagrams, all unique), `TestBindRemoteOnlyOnAuthRateLimited`,
+`TestMuxUnknownTokenNoState` (off-path/forged = no state, pending retained), `TestForgedFirstDatagramNoClaim`
+(cleartext-on-AEAD + wrong-key forgeries don't claim; real datagram does). Race clean; fuzzers clean.
+
 ## Measurements (loopback, AMD 5950X, `-bench BenchmarkTransport -benchmem`)
 
 Per-frame round-trip, 80 KB P-frame / 500 KB keyframe (4K60-class):

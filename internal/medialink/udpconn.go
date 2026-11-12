@@ -47,9 +47,10 @@ type packetConn interface {
 
 // udpConfig tunes a udpConn. Zero fields take the defaults below.
 type udpConfig struct {
-	Token         uint32        // per-route token (derived from MediaSecret; brief req 5)
+	Token         uint32        // per-route token (derived from MediaSecret + route salt; brief req 5)
 	Initiator     bool          // AEAD/role direction
 	Master        []byte        // peerlink media secret; required when Encrypt
+	Salt          []byte        // per-route key salt (routeKeySalt); makes keys/nonce-prefix per-route
 	Encrypt       bool          // true = per-datagram AEAD; false = cleartext (token-gated only)
 	Clock         ClockSource   // media clock for deadlines + timestamps (required)
 	BodyMax       int           // fragment body size (default dgDefaultPayload)
@@ -65,6 +66,7 @@ const (
 	udpDefKeepalive     = 500 * time.Millisecond
 	udpDefLiveness      = 2 * time.Second
 	udpMaintTick        = 5 * time.Millisecond // NACK-scan + sweep cadence
+	udpRebindMin        = time.Second          // min interval between authenticated remote rebinds
 	udpNackStale        = 3 * time.Millisecond // a frame incomplete this long is NACKed (≥ LAN RTT)
 	udpNackRetry        = 8 * time.Millisecond // min gap between re-NACKs of the same frame
 	udpRecvQueue        = 128                  // completed-frame handoff queue (newest-wins on overflow)
@@ -89,21 +91,23 @@ type UDPStats struct {
 	ReasmDrops    uint64  `json:"reasmDrops,omitempty"`    // frames dropped at reassembly (cap/deadline)
 	PacerDepth    int     `json:"pacerDepth,omitempty"`    // datagrams queued in the pacer
 	PacerDrops    uint64  `json:"pacerDrops,omitempty"`    // datagrams dropped on pacer overflow (keyframe-aware)
-	RejectedDgram uint64  `json:"rejectedDgram,omitempty"` // mode/token/open failures (never update liveness)
+	RejectedDgram uint64  `json:"rejectedDgram,omitempty"` // mode/token/open failures (never update liveness/bind)
 	DupDgram      uint64  `json:"dupDgram,omitempty"`      // replay-window duplicates
+	Rebinds       uint64  `json:"rebinds,omitempty"`       // authenticated remote rebinds (NAT); 0 in the steady state
 }
 
 // udpConn is one peer-to-peer UDP media route. Safe for concurrent WriteFrame callers (router runs
 // media + several meta writers); one recv goroutine owns the receive state.
 type udpConn struct {
-	pc       packetConn
-	remote   net.Addr
-	clock    ClockSource
-	cfg      udpConfig
-	crypto   *dgCrypto // nil = cleartext route
-	token    uint32
-	deadline time.Duration
-	logf     func(string, map[string]any)
+	pc         packetConn
+	remote     atomic.Value // net.Addr send target; bound/rebound ONLY from an authenticated datagram
+	lastRebind atomic.Int64 // media-clock ns of the last remote rebind (rate limit)
+	clock      ClockSource
+	cfg        udpConfig
+	crypto     *dgCrypto // nil = cleartext route
+	token      uint32
+	deadline   time.Duration
+	logf       func(string, map[string]any)
 
 	// send side (guarded by encMu: encoder seq + retransmit ring are per-direction state).
 	encMu sync.Mutex
@@ -152,9 +156,12 @@ type udpStatsMu struct {
 	reasmDrops                uint64
 	pacerDrops                uint64
 	rejected, dup             uint64
+	rebinds                   uint64
 }
 
-// newUDPConn builds + starts a UDP media connection over pc toward remote.
+// newUDPConn builds + starts a UDP media connection over pc toward remote. remote may be nil (the
+// answerer learns it from the first AUTHENTICATED datagram); a non-nil remote (the dialer) is still
+// only the send target until the first authenticated datagram confirms it.
 func newUDPConn(pc packetConn, remote net.Addr, cfg udpConfig) (*udpConn, error) {
 	if cfg.Clock == nil {
 		return nil, errors.New("medialink: udpConn needs a clock")
@@ -165,7 +172,7 @@ func newUDPConn(pc packetConn, remote net.Addr, cfg udpConfig) (*udpConn, error)
 	}
 	var crypto *dgCrypto
 	if cfg.Encrypt {
-		c, err := newDgCrypto(cfg.Master, cfg.Initiator)
+		c, err := newDgCrypto(cfg.Master, cfg.Salt, cfg.Initiator)
 		if err != nil {
 			return nil, err
 		}
@@ -173,7 +180,7 @@ func newUDPConn(pc packetConn, remote net.Addr, cfg udpConfig) (*udpConn, error)
 	}
 	now := func() time.Time { return time.Unix(0, cfg.Clock.Now()) }
 	u := &udpConn{
-		pc: pc, remote: remote, clock: cfg.Clock, cfg: cfg, crypto: crypto, token: cfg.Token,
+		pc: pc, clock: cfg.Clock, cfg: cfg, crypto: crypto, token: cfg.Token,
 		deadline: deadline, logf: cfg.Log,
 		enc:         newDgEncoder(cfg.Token, crypto, cfg.BodyMax),
 		ring:        newDgRing(udpRingFrames, udpRingBytes),
@@ -187,6 +194,9 @@ func newUDPConn(pc packetConn, remote net.Addr, cfg udpConfig) (*udpConn, error)
 		lastRTx:     map[uint16]int64{},
 		done:        make(chan struct{}),
 		reachableCh: make(chan struct{}),
+	}
+	if remote != nil {
+		u.remote.Store(remote) // dialer's tentative send target (confirmed on the first authenticated datagram)
 	}
 	u.lastRecvNs.Store(cfg.Clock.Now())
 	bestEffortUDPBuffers(pc)
@@ -313,7 +323,7 @@ func (u *udpConn) Stats() UDPStats {
 		NacksSent: u.st.nacksSent, NacksRecv: u.st.nacksRecv,
 		Retransmits: u.st.retransmits, RetransBytes: u.st.retransBytes,
 		ReasmDrops: u.st.reasmDrops, PacerDrops: u.st.pacerDrops,
-		RejectedDgram: u.st.rejected, DupDgram: u.st.dup,
+		RejectedDgram: u.st.rejected, DupDgram: u.st.dup, Rebinds: u.st.rebinds,
 	}
 	u.st.mu.Unlock()
 	s.Encrypted = u.crypto != nil
@@ -354,7 +364,19 @@ func (u *udpConn) paceWrite(b []byte) {
 		case <-t.C:
 		}
 	}
-	_, _ = u.pc.WriteTo(b, u.remote)
+	r := u.remoteAddr()
+	if r == nil {
+		return // no authenticated remote yet (answerer pre-handshake): never send to an unverified addr
+	}
+	_, _ = u.pc.WriteTo(b, r)
+}
+
+// remoteAddr loads the current authenticated send target (nil if not yet bound).
+func (u *udpConn) remoteAddr() net.Addr {
+	if v := u.remote.Load(); v != nil {
+		return v.(net.Addr)
+	}
+	return nil
 }
 
 // sendControl queues a control datagram (never dropped silently; bounded channel).
@@ -380,7 +402,7 @@ func (u *udpConn) recvLoop() {
 	defer u.wg.Done()
 	buf := make([]byte, dgMaxPayload+dgHeaderLen+64)
 	for {
-		n, _, err := u.pc.ReadFrom(buf)
+		n, src, err := u.pc.ReadFrom(buf)
 		if err != nil {
 			select {
 			case <-u.done:
@@ -391,11 +413,11 @@ func (u *udpConn) recvLoop() {
 			// permanent error surfaces via the liveness timeout instead of a hard kill here.
 			continue
 		}
-		u.handleDatagram(buf[:n])
+		u.handleDatagram(buf[:n], src)
 	}
 }
 
-func (u *udpConn) handleDatagram(dg []byte) {
+func (u *udpConn) handleDatagram(dg []byte, src net.Addr) {
 	h, off, err := parseDatagramHeader(dg)
 	if err != nil {
 		u.bump(&u.st.rejected)
@@ -403,10 +425,12 @@ func (u *udpConn) handleDatagram(dg []byte) {
 	}
 	chunk, err := decodeBody(h, dg[off:], u.token, u.crypto, dg[:off])
 	if err != nil {
-		u.bump(&u.st.rejected) // mode/token/open failure: NOT alive (flood-safe)
+		u.bump(&u.st.rejected) // mode/token/open failure: NOT alive, NOT a bind trigger (flood-safe)
 		return
 	}
-	// Authenticated (on AEAD routes) and token-valid (on clear routes): the route is alive.
+	// Authenticated (on AEAD routes) and token-valid (on clear routes): the route is alive, and ONLY
+	// now may the send target bind/rebind to this source (never from an unauthenticated datagram).
+	u.bindRemote(src)
 	u.lastRecvNs.Store(u.clock.Now())
 	u.reachOnce.Do(func() { close(u.reachableCh) }) // reachability handshake: first good datagram
 	switch u.seqTrk.accept(h.Seq) {
@@ -650,4 +674,29 @@ func bestEffortUDPBuffers(pc packetConn) {
 
 func dgKey(stream uint16, frameSeq uint32, fragIdx uint16) uint64 {
 	return uint64(stream)<<48 | uint64(frameSeq)<<16 | uint64(fragIdx)
+}
+
+// bindRemote sets/updates the send target from an AUTHENTICATED datagram's source. First bind is
+// immediate; a later change (NAT rebind) is accepted only rate-limited (udpRebindMin) so a burst of
+// authenticated-but-spoofed-source datagrams can't thrash the target. Only called after decodeBody
+// succeeds, so an off-path attacker (no token/key) can never move it.
+func (u *udpConn) bindRemote(src net.Addr) {
+	if src == nil {
+		return
+	}
+	cur := u.remoteAddr()
+	if cur == nil {
+		u.remote.Store(src)
+		return
+	}
+	if cur.String() == src.String() {
+		return
+	}
+	now := u.clock.Now()
+	if now-u.lastRebind.Load() < int64(udpRebindMin) {
+		return
+	}
+	u.lastRebind.Store(now)
+	u.remote.Store(src)
+	u.bump(&u.st.rebinds)
 }
