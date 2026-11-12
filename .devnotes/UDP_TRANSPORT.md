@@ -243,3 +243,33 @@ the lead must re-measure after deploy.
   confirms the VA-API VBR change.
 - daemon CPU < 5% during a route IF the 68.7% was the daemon (confirm the process first; the UDP
   transport added no daemon-side per-frame work).
+
+### Security + retransmit-amplification fixes (same unit, after review + more live data)
+
+- **[SEC] Replay could rebind the remote / refresh liveness.** The receive path ran `bindRemote(src)`
+  + liveness refresh + reach signal AFTER authentication but BEFORE the replay/sequence check, so a
+  captured authenticated datagram replayed from another address could redirect the send target
+  (hijack/DoS) - on AEAD routes too (AEAD does not prevent replay). Fix: the replay check runs FIRST;
+  a duplicate/too-old datagram changes nothing (no rebind, no liveness, no reach, not even delivered),
+  and ONLY a STRICTLY-NEWEST datagram (`stNew` - a replay can't forge one) may rebind (still
+  rate-limited) / refresh liveness / signal reach. A gap-filling retransmit (`stFill`, new but below
+  the highest) is delivered for recovery but grants none of that leverage. Cleartext on-path forgery
+  stays the documented trade-off, but pure replay now works in neither mode. Test:
+  `TestReplayDoesNotRebindOrRefreshLiveness` (replay from a new addr: no rebind, no liveness; a newer
+  datagram from a new addr: rebind, rate-limited).
+
+- **Retransmit amplification (live: ~72 retransmit datagrams per NACK at 0% loss; six-figure retrans
+  on a 4K source stall).** Two causes, both fixed: (1) the spurious NACKs (item 1) listed a whole
+  in-flight frame's not-yet-arrived fragments (~72 items) → the sender resent them all; the scanNack
+  fix stops NACKing in-flight frames. (2) the retransmit BUDGET (≤25% of send rate) was NOT enforced
+  when the sender was UNPACED (`retr` rate = PacingRate×0.25 = 0 → tryReserve always allowed); the
+  sender-pacing change (item 2) sets a real PacingRate, so the budget now caps retransmit bursts.
+  onNack already resends exactly the NACK'd (stream,frameSeq,fragIdx) datagrams one-for-one (never
+  whole frames/ranges). Stalled source: with no newer frame, scanNack no longer loops - it emits one
+  last-chance NACK near the deadline (rate-limited), then the sweep drops the frame. Tests:
+  `TestRetransmitBudgetEnforced`, `TestScanNackStalledSourceNoLoop`.
+  Expected post-deploy: sender `retrans` per NACK ≈ 1 (not ~72); retrans bounded by the 25% budget;
+  no retransmit storm on a stalled encode.
+
+Operational note: during live diagnosis a `ctl route-stop <peer> all` also stopped a separate user
+"Spout2PW (VRChat)" route (already starving, fps 2/0). Use a specific session id, not `all`.

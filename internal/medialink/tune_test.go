@@ -57,6 +57,58 @@ func TestScanNackDeadlineLastChance(t *testing.T) {
 	}
 }
 
+// TestRetransmitBudgetEnforced: when the sender is paced (retr rate > 0), onNack honours the ≤25%
+// retransmit budget - a NACK listing many fragments does NOT retransmit all of them (the live 72:1
+// amplification at 0% loss came from NACKing whole in-flight frames with an UNPACED, unbudgeted
+// sender). With no pacing rate the budget is intentionally open (legacy), so the fix is pacing the
+// sender (serveUDPFirst now sets PacingRate), which this asserts caps the burst.
+func TestRetransmitBudgetEnforced(t *testing.T) {
+	mk := func(pacingRate float64) uint64 {
+		u := &udpConn{ring: newDgRing(4096, 16<<20), ctrlCh: make(chan []byte, 512), done: make(chan struct{}), seqTrk: newReplayWin()}
+		u.retr = newSendPacer(pacingRate*udpRetransFrac, time.Now)
+		var items []nackItem
+		for i := 0; i < dgNackMax; i++ { // one frame's worth of "missing" fragments
+			u.ring.add(dgKey(1, 1, uint16(i)), make([]byte, 1200), 1<<62)
+			items = append(items, nackItem{Stream: 1, FrameSeq: 1, FragIdx: uint16(i)})
+		}
+		u.onNack(appendNackPayload(nil, items))
+		return u.Stats().Retransmits
+	}
+	paced := mk(20_000 * 1000 / 8) // 20 Mbps route → budgeted
+	if paced == 0 || paced >= dgNackMax {
+		t.Fatalf("paced retransmits not budget-capped: %d of %d", paced, dgNackMax)
+	}
+	if unpaced := mk(0); unpaced <= paced {
+		t.Fatalf("unpaced (rate 0) should be open budget: paced=%d unpaced=%d", paced, unpaced)
+	}
+}
+
+// TestScanNackStalledSourceNoLoop: a frame left incomplete by a STALLED source (no newer frame ever
+// arrives) is NACKed at most once near its deadline, then rate-limited - not looped every tick (the
+// live 4K-stall case ran retrans into six figures).
+func TestScanNackStalledSourceNoLoop(t *testing.T) {
+	mc := &manualClock{}
+	u := &udpConn{clock: mc, reasm: newReassembler(0, 0), deadline: 100 * time.Millisecond}
+	acceptFrag(u.reasm, 1, 9, 0, 3, 1_000_000) // frame 9 incomplete; source then stalls (no frame 10)
+
+	// Before the deadline: not overtaken (stalled) → no NACK across many ticks.
+	for now := int64(2_000_000); now < 1_000_000+int64(u.deadline)-int64(udpNackDeadlineLead)-1; now += int64(udpMaintTick) {
+		mc.ns.Store(now)
+		if items := u.scanNack(mc.Now()); len(items) != 0 {
+			t.Fatalf("looping NACK on a stalled source before the deadline at %d: %v", now, items)
+		}
+	}
+	// Near the deadline: one last-chance NACK, then rate-limited (no loop).
+	mc.ns.Store(1_000_000 + int64(u.deadline) - int64(udpNackDeadlineLead) + 1)
+	if items := u.scanNack(mc.Now()); len(items) == 0 {
+		t.Fatal("no last-chance NACK near the deadline")
+	}
+	mc.ns.Store(mc.Now() + int64(udpNackRetry) - 1) // within the retry gap
+	if items := u.scanNack(mc.Now()); len(items) != 0 {
+		t.Fatalf("re-NACKed within the rate-limit gap (loop): %v", items)
+	}
+}
+
 // TestOwdQueuingDelayOffsetFree (item 4): the published one-way-delay is queuing delay above a
 // windowed-min baseline - never the raw transit - so a large constant clock offset (the -39 ms
 // seen live) does NOT appear, and it is never negative.

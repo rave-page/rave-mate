@@ -436,18 +436,20 @@ func (u *udpConn) handleDatagram(dg []byte, src net.Addr) {
 		u.bump(&u.st.rejected) // mode/token/open failure: NOT alive, NOT a bind trigger (flood-safe)
 		return
 	}
-	// Authenticated (on AEAD routes) and token-valid (on clear routes): the route is alive, and ONLY
-	// now may the send target bind/rebind to this source (never from an unauthenticated datagram).
-	u.bindRemote(src)
-	u.lastRecvNs.Store(u.clock.Now())
-	u.reachOnce.Do(func() { close(u.reachableCh) }) // reachability handshake: first good datagram
+	// Replay/sequence check BEFORE any rebind or liveness refresh: a REPLAYED authenticated datagram
+	// (captured + re-sent from another address) must change nothing - otherwise it could redirect the
+	// send target (stream hijack) or keep a dead route alive, on AEAD routes too, since AEAD does not
+	// prevent replay. Only a STRICTLY-NEWEST datagram (stNew - a replay can't forge one) may rebind
+	// the remote, refresh liveness, and signal reachability. A gap-filling retransmit (stFill) is
+	// delivered for recovery but grants none of that leverage.
 	switch u.seqTrk.accept(h.Seq) {
-	case stDup:
+	case stDup, stTooOld:
 		u.bump(&u.st.dup)
-		return // a replay / duplicate retransmit: already handled
-	case stTooOld:
-		u.bump(&u.st.dup)
-		return
+		return // replay / duplicate / too-old: no rebind, no liveness, no reach, no processing
+	case stNew:
+		u.bindRemote(src)                               // rate-limited inside; authenticated + newest only
+		u.lastRecvNs.Store(u.clock.Now())               // liveness: a genuinely new datagram arrived
+		u.reachOnce.Do(func() { close(u.reachableCh) }) // reachability handshake
 	}
 	switch h.Typ {
 	case dgTypeMedia:
