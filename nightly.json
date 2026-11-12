@@ -1,13 +1,13 @@
 {
-  "version": "nightly-e777b4d",
-  "build": 415,
-  "commit": "e777b4d",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-415-20261112-e777b4d.exe",
-  "sha256": "755047022ec8c0820a696719b2f347ffe6d5b717402a60cac5b7ba558c2ae34b",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-415-20261112-e777b4d.exe",
-  "installer_sha256": "30deec8778f00e668bc1df47225680d9bbc263e3dd03a9022690ee7004542cb6",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-415-20261112-e777b4d",
-  "linux_sha256": "f00b3022153e2a27954a25ae0f41f2acfe3e56af2413ce6a0e7e7354fc05db52",
+  "version": "nightly-f776064",
+  "build": 416,
+  "commit": "f776064",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-416-20261112-f776064.exe",
+  "sha256": "5cce81284c2b319c021c817e6716852085aa17d84d4cccf38db65ea04e519407",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-416-20261112-f776064.exe",
+  "installer_sha256": "c074ffafa3d72c38dbdc91f9bad57ad4125297ace10f0608a160bdbafc11e0d2",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-416-20261112-f776064",
+  "linux_sha256": "7c3cd26abcdaa512471bc46147e2c1226e478d7d4f3264f080e06677ababd97b",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-11-12T02:10:34Z",
-  "notes": "Merge feat/udp-transport: per-route key schedule, authenticate-before-bind (security fixes)"
+  "released": "2026-11-12T02:52:53Z",
+  "notes": "Merge feat/pw-4k: zero-copy dmabuf->VA-API encoder (harness-level), PipeWire targeting fix notes"
 }
