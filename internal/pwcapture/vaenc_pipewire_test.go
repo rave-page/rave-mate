@@ -334,9 +334,9 @@ func TestDMABufEncodeHistogram(t *testing.T) {
 	t.Logf("HIST engine: newest-wins drops(window)=%d capFps=%.2f outFps=%.2f zeroCopy=%v bytes/frame=%.0f",
 		drops, st.CapFPS, st.OutFPS, st.ZeroCopy, st.AUBytesPerFrame)
 	if ps, ok := esrc.(*pwSource); ok {
-		depth, hiwater, overflow, capDrops := ps.ringStats()
-		t.Logf("HIST ring: depth=%d hiwater=%d overflow(total)=%d capDrops(total)=%d  keyframes(window)=%d jitterMs=%d",
-			depth, hiwater, overflow, capDrops, keyframes, jitterMs)
+		depth, hiwater, overflow, capDrops, gridDrops := ps.ringStats()
+		t.Logf("HIST ring: depth=%d hiwater=%d overflow(total)=%d capDrops(total)=%d gridDrops(total)=%d  keyframes(window)=%d jitterMs=%d",
+			depth, hiwater, overflow, capDrops, gridDrops, keyframes, jitterMs)
 	}
 	if len(intervals) < secs*20 {
 		t.Errorf("far too few frames (%d) in %ds - capture stalled", len(intervals), secs)
