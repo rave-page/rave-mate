@@ -74,6 +74,7 @@ int rpw_coded_h(struct rpw_capture *c);
 int rpw_ring_depth(struct rpw_capture *c);
 int rpw_ring_hiwater(struct rpw_capture *c);
 long rpw_ring_overflow(struct rpw_capture *c);
+long rpw_cap_drops(struct rpw_capture *c);
 
 /* rpw_stop disconnects + frees the capture. */
 void rpw_stop(struct rpw_capture *c);

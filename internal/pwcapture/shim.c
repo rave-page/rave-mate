@@ -20,9 +20,11 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/resource.h>
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
@@ -321,6 +323,27 @@ struct rpw_capture {
 	_Atomic long ring_bytes;    /* queued AU bytes (producer +=, consumer -=) */
 	int ring_hiwater;           /* max fill seen (producer-only) */
 	long ring_overflow;         /* AUs dropped because the consumer fell behind the ring (producer-only) */
+
+	/* B.2 dedicated encode thread: the PipeWire callback (on_process) only grabs the newest buffer +
+	 * hands it off here, so it never blocks on vaSyncSurface/vaMapBuffer (which was making the callback
+	 * run late under GPU load -> capture-side 60->58 slip). The thread does VPP+encode+sync+emit and
+	 * requeues the pw buffer (via pw_thread_loop_lock). Single pending slot = newest-wins at capture
+	 * (if the encoder is behind, the callback requeues the stale buffer and keeps the freshest). */
+	pthread_t enc_thread;
+	int enc_thread_on;             /* thread created */
+	int enc_stop;                  /* shutdown signal (set under enc_mu) */
+	pthread_mutex_t enc_mu;        /* guards the pending slot */
+	pthread_cond_t enc_cv;         /* wakes the encode thread */
+	struct pw_buffer *enc_pending; /* the held pw buffer handed to the thread; NULL = none */
+	long cap_drops;                /* buffers dropped at the capture hand-off (encoder behind) */
+	/* pending-frame metadata (captured from the buffer in the callback; the buffer stays valid while
+	 * held, but copying keeps the thread off the spa_buffer). */
+	int enc_p_np, enc_p_fds[RPW_MAX_PLANES];
+	unsigned enc_p_off[RPW_MAX_PLANES], enc_p_str[RPW_MAX_PLANES];
+	uint32_t enc_p_fourcc;
+	uint64_t enc_p_mod;
+	int enc_p_w, enc_p_h, enc_p_flip;
+	long long enc_p_pts;
 
 	/* EGL (dmabuf import) - display/context built in rpw_start (no current); made current lazily
 	 * on the loop thread in on_process. */
@@ -832,6 +855,150 @@ static void on_param_changed(void *data, uint32_t id, const struct spa_pod *para
 	request_buffers(c, c->is_dmabuf);
 }
 
+/* enc_ensure creates/recreates the VA encoder to match the current config (lazy create, live bitrate/
+ * quality, coded-size cap + legacy->quality recreate). Runs on the encode thread; moved out of the
+ * PipeWire callback. Returns the force-IDR flag consumed from the control state. */
+static int enc_ensure(struct rpw_capture *c) {
+	if (!c->enc && !c->enc_fail) {
+		const char *en = c->enc_node[0] ? c->enc_node : getenv("RPW_EGL_DEVICE");
+		if (!en || !*en)
+			en = "/dev/dri/renderD128";
+		int kbps = c->enc_kbps > 0 ? c->enc_kbps : 20000;
+		const char *kb = getenv("RPW_ENC_KBPS");
+		if (kb && c->enc_kbps <= 0)
+			kbps = atoi(kb);
+		int fps = c->enc_fps > 0 ? c->enc_fps : 60;
+		int ow = c->width, oh = c->height;
+		if (c->enc_maxh > 0 && oh > c->enc_maxh) {
+			ow = ow * c->enc_maxh / oh;
+			oh = c->enc_maxh;
+		}
+		ow &= ~1;
+		oh &= ~1;
+		c->enc = rva_enc_new(en, c->enc_codec, ow, oh, fps, kbps, c->enc_quality_qp);
+		if (!c->enc) {
+			c->enc_fail = 1;
+		} else {
+			c->coded_w = ow;
+			c->coded_h = oh;
+		}
+	}
+	if (!c->enc)
+		return 0;
+	pthread_mutex_lock(&c->mu);
+	int idr = c->force_idr; c->force_idr = 0;
+	int newkbps = c->pending_kbps; c->pending_kbps = 0;
+	int newmaxh = c->pending_maxh; c->pending_maxh = -1;
+	int newqual = c->pending_quality; c->pending_quality = 0;
+	pthread_mutex_unlock(&c->mu);
+	if (newkbps > 0)
+		rva_enc_set_bitrate(c->enc, newkbps);
+	int mode_switch = 0;
+	if (newqual > 0) {
+		if (c->enc_quality_qp > 0)
+			rva_enc_set_quality(c->enc, newqual);
+		else
+			mode_switch = 1;
+		c->enc_quality_qp = newqual;
+	}
+	if (newmaxh >= 0 || mode_switch) {
+		int want_maxh = newmaxh >= 0 ? newmaxh : c->enc_maxh;
+		int ow = c->width, oh = c->height;
+		if (want_maxh > 0 && oh > want_maxh) {
+			ow = ow * want_maxh / oh;
+			oh = want_maxh;
+		}
+		ow &= ~1;
+		oh &= ~1;
+		if (oh != c->coded_h || ow != c->coded_w || mode_switch) {
+			const char *en = c->enc_node[0] ? c->enc_node : "/dev/dri/renderD128";
+			struct rva_enc *ne = rva_enc_new(en, c->enc_codec, ow, oh,
+				c->enc_fps > 0 ? c->enc_fps : 60, c->enc_kbps > 0 ? c->enc_kbps : 20000,
+				c->enc_quality_qp);
+			if (ne) {
+				rva_enc_free(c->enc);
+				c->enc = ne;
+				c->coded_w = ow;
+				c->coded_h = oh;
+				c->enc_maxh = want_maxh;
+			}
+		}
+	}
+	return idr;
+}
+
+/* enc_thread_main: the dedicated encode thread. Blocks on the pending slot, encodes (VPP + VA submit +
+ * vaSyncSurface + map + emit - the blocking that used to stall the callback), pushes the AU to the
+ * ring, then requeues the pw buffer under the loop lock. */
+static void *enc_thread_main(void *arg) {
+	struct rpw_capture *c = arg;
+	/* best-effort elevated scheduling so the encode is not starved under load (both usually need
+	 * privilege as a desktop user; non-fatal if denied - the win is that the callback no longer blocks). */
+	struct sched_param sp;
+	memset(&sp, 0, sizeof(sp));
+	sp.sched_priority = 10;
+	if (pthread_setschedparam(pthread_self(), SCHED_RR, &sp) != 0)
+		setpriority(PRIO_PROCESS, 0, -5); /* fall back to a nice bump (also best-effort) */
+	for (;;) {
+		pthread_mutex_lock(&c->enc_mu);
+		while (!c->enc_pending && !c->enc_stop)
+			pthread_cond_wait(&c->enc_cv, &c->enc_mu);
+		struct pw_buffer *buf = c->enc_pending;
+		c->enc_pending = NULL;
+		int stop = c->enc_stop;
+		int np = c->enc_p_np, fds[RPW_MAX_PLANES];
+		unsigned off[RPW_MAX_PLANES], str[RPW_MAX_PLANES];
+		for (int p = 0; p < np; p++) {
+			fds[p] = c->enc_p_fds[p];
+			off[p] = c->enc_p_off[p];
+			str[p] = c->enc_p_str[p];
+		}
+		uint32_t fourcc = c->enc_p_fourcc;
+		uint64_t mod = c->enc_p_mod;
+		int w = c->enc_p_w, h = c->enc_p_h, flip = c->enc_p_flip;
+		long long pts = c->enc_p_pts;
+		pthread_mutex_unlock(&c->enc_mu);
+
+		if (stop)
+			break; /* shutting down: drop any held buffer - pw_stream_destroy frees the pool */
+		if (!buf)
+			continue;
+		int idr = enc_ensure(c);
+		if (c->enc) {
+			unsigned char *au = NULL;
+			int aulen = 0, kf = 0;
+			if (rva_enc_frame(c->enc, fourcc, mod, w, h, np, fds, off, str, flip, idr, &au, &aulen, &kf) == 0 && aulen > 0) {
+				c->import_ok = 1;
+				rva_enc_feedback(c->enc, &c->fb_present, &c->fb_avg_qp, &c->fb_rate_limited);
+				if (au_ring_push(c, au, aulen, kf, pts)) {
+					c->force_idr = 1;
+				} else {
+					pthread_mutex_lock(&c->mu);
+					pthread_cond_signal(&c->cv);
+					pthread_mutex_unlock(&c->mu);
+				}
+			} else {
+				c->dropped++;
+				c->enc_drops++;
+			}
+		}
+		/* requeue the held buffer from this thread (pw_stream is not thread-safe -> lock the loop). */
+		PW.tl_lock(c->loop);
+		PW.stream_queue(c->stream, buf);
+		PW.tl_unlock(c->loop);
+	}
+	return NULL;
+}
+
+/* enc_thread_start lazily creates the encode thread (once). */
+static void enc_thread_start(struct rpw_capture *c) {
+	if (c->enc_thread_on)
+		return;
+	c->enc_stop = 0;
+	if (pthread_create(&c->enc_thread, NULL, enc_thread_main, c) == 0)
+		c->enc_thread_on = 1;
+}
+
 static void on_process(void *data) {
 	struct rpw_capture *c = data;
 	struct pw_buffer *pb, *last = NULL;
@@ -873,105 +1040,36 @@ static void on_process(void *data) {
 			/* vaapi-native encode mode: fused dmabuf -> VA import -> VPP NV12 -> H.264/HEVC AU.
 			 * Set via rpw_set_encode (production) or RPW_VA_ENC (low-level harness). */
 			if (c->enc_mode || getenv("RPW_VA_ENC")) {
-				if (!c->enc && !c->enc_fail) {
-					const char *en = c->enc_node[0] ? c->enc_node : getenv("RPW_EGL_DEVICE");
-					if (!en || !*en)
-						en = "/dev/dri/renderD128";
-					int kbps = c->enc_kbps > 0 ? c->enc_kbps : 20000;
-					const char *kb = getenv("RPW_ENC_KBPS");
-					if (kb && c->enc_kbps <= 0)
-						kbps = atoi(kb);
-					int fps = c->enc_fps > 0 ? c->enc_fps : 60;
-					int ow = c->width, oh = c->height;
-					if (c->enc_maxh > 0 && oh > c->enc_maxh) { /* VPP downscale of the CODED size only */
-						ow = ow * c->enc_maxh / oh;
-						oh = c->enc_maxh;
-					}
-					ow &= ~1; oh &= ~1;
-					c->enc = rva_enc_new(en, c->enc_codec, ow, oh, fps, kbps, c->enc_quality_qp);
-					if (!c->enc) {
-						c->enc_fail = 1;
-					} else {
-						c->coded_w = ow;
-						c->coded_h = oh;
-					}
-				}
-				if (c->enc) {
-					pthread_mutex_lock(&c->mu);
-					int idr = c->force_idr; c->force_idr = 0;
-					int newkbps = c->pending_kbps; c->pending_kbps = 0;
-					int newmaxh = c->pending_maxh; c->pending_maxh = -1;
-					int newqual = c->pending_quality; c->pending_quality = 0;
-					pthread_mutex_unlock(&c->mu);
-					if (newkbps > 0)
-						rva_enc_set_bitrate(c->enc, newkbps);
-					/* mode_switch = a legacy(CBR) encoder asked to go constant-quality. The RC mode is
-					 * fixed at config creation, so that needs a recreate; a quality->quality QP change is
-					 * applied live by rva_enc_set_quality (no reopen). */
-					int mode_switch = 0;
-					if (newqual > 0) {
-						if (c->enc_quality_qp > 0)
-							rva_enc_set_quality(c->enc, newqual); /* already CQP: live QP change */
-						else
-							mode_switch = 1;                      /* legacy -> quality: recreate below */
-						c->enc_quality_qp = newqual;
-					}
-					/* recreate on a coded-size change OR a legacy->quality mode switch (both rare). */
-					if (newmaxh >= 0 || mode_switch) {
-						int want_maxh = newmaxh >= 0 ? newmaxh : c->enc_maxh;
-						int ow = c->width, oh = c->height;
-						if (want_maxh > 0 && oh > want_maxh) {
-							ow = ow * want_maxh / oh;
-							oh = want_maxh;
-						}
-						ow &= ~1; oh &= ~1;
-						if (oh != c->coded_h || ow != c->coded_w || mode_switch) {
-							const char *en = c->enc_node[0] ? c->enc_node : "/dev/dri/renderD128";
-							struct rva_enc *ne = rva_enc_new(en, c->enc_codec, ow, oh,
-								c->enc_fps > 0 ? c->enc_fps : 60, c->enc_kbps > 0 ? c->enc_kbps : 20000,
-								c->enc_quality_qp);
-							if (ne) { /* nominal source geometry unchanged; coded size shrinks, receiver upscales */
-								rva_enc_free(c->enc);
-								c->enc = ne;
-								c->coded_w = ow;
-								c->coded_h = oh;
-								c->enc_maxh = want_maxh;
-							}
-						}
-					}
-					c->cap_frames++;
+				enc_thread_start(c); /* B.2: lazy-create the dedicated encode thread */
+				if (c->enc_thread_on) {
+					/* Hand the NEWEST buffer to the encode thread and return - the callback never blocks
+					 * on VA (vaSyncSurface/vaMapBuffer run on the thread). Newest-wins at capture: if the
+					 * encoder is still busy with a pending buffer, requeue that stale one here (loop thread
+					 * -> safe) and keep the freshest. The thread requeues `last` after it has consumed the
+					 * dmabuf (implicit dmabuf sync makes the post-submit requeue safe, as before). */
 					int np = sb->n_datas < RPW_MAX_PLANES ? (int)sb->n_datas : RPW_MAX_PLANES;
-					int efds[RPW_MAX_PLANES];
-					unsigned eoff[RPW_MAX_PLANES], estr[RPW_MAX_PLANES];
-					for (int p = 0; p < np; p++) {
-						efds[p] = sb->datas[p].fd;
-						eoff[p] = sb->datas[p].chunk ? sb->datas[p].chunk->offset : 0;
-						estr[p] = sb->datas[p].chunk ? sb->datas[p].chunk->stride : 0;
-					}
-					unsigned char *au = NULL;
-					int aulen = 0, kf = 0;
-					int flip = want_flip(c, sb);
-					long long pts = buffer_pts(sb);
-					if (rva_enc_frame(c->enc, spa_to_drm_fourcc(c->fmt), c->modifier, c->width, c->height,
-						np, efds, eoff, estr, flip, idr, &au, &aulen, &kf) == 0 && aulen > 0) {
-						c->import_ok = 1;
-						/* snapshot the quality feedback on the loop thread (the getter reads these scalars,
-						 * never c->enc, so a recreate on another path cannot cause a use-after-free). */
-						rva_enc_feedback(c->enc, &c->fb_present, &c->fb_avg_qp, &c->fb_rate_limited);
-						/* lock-free hand-off to the Go consumer; the data path takes no mutex. */
-						if (au_ring_push(c, au, aulen, kf, pts)) {
-							c->force_idr = 1; /* overflow dropped a frame: resync with an IDR next */
-						} else {
-							/* wake a blocked consumer (bare signal, no data copy under the lock). */
-							pthread_mutex_lock(&c->mu);
-							pthread_cond_signal(&c->cv);
-							pthread_mutex_unlock(&c->mu);
-						}
-					} else {
+					c->cap_frames++; /* captured frames handed to the encoder stage (CapFPS) */
+					pthread_mutex_lock(&c->enc_mu);
+					if (c->enc_pending) {
+						PW.stream_queue(c->stream, c->enc_pending);
+						c->cap_drops++;
 						c->dropped++;
-						c->enc_drops++;
 					}
-					PW.stream_queue(c->stream, last);
+					c->enc_p_np = np;
+					for (int p = 0; p < np; p++) {
+						c->enc_p_fds[p] = sb->datas[p].fd;
+						c->enc_p_off[p] = sb->datas[p].chunk ? sb->datas[p].chunk->offset : 0;
+						c->enc_p_str[p] = sb->datas[p].chunk ? sb->datas[p].chunk->stride : 0;
+					}
+					c->enc_p_fourcc = spa_to_drm_fourcc(c->fmt);
+					c->enc_p_mod = c->modifier;
+					c->enc_p_w = c->width;
+					c->enc_p_h = c->height;
+					c->enc_p_flip = want_flip(c, sb);
+					c->enc_p_pts = buffer_pts(sb);
+					c->enc_pending = last; /* handed off; the thread requeues it */
+					pthread_cond_signal(&c->enc_cv);
+					pthread_mutex_unlock(&c->enc_mu);
 					return;
 				}
 			}
@@ -1035,6 +1133,8 @@ struct rpw_capture *rpw_start(const char *target_node) {
 		return NULL;
 	pthread_mutex_init(&c->mu, NULL);
 	pthread_cond_init(&c->cv, NULL);
+	pthread_mutex_init(&c->enc_mu, NULL);
+	pthread_cond_init(&c->enc_cv, NULL);
 	c->modifier = DRM_FORMAT_MOD_INVALID;
 	c->drm_fd = -1;
 	c->flip_default = getenv("RPW_FLIP_V") != NULL; /* default no-flip (Spout2PW/DX, PipeWire convention) */
@@ -1297,12 +1397,22 @@ int rpw_ring_depth(struct rpw_capture *c) {
 }
 int rpw_ring_hiwater(struct rpw_capture *c) { return c ? c->ring_hiwater : 0; }
 long rpw_ring_overflow(struct rpw_capture *c) { return c ? c->ring_overflow : 0; }
+/* capture-side drops: buffers dropped at the callback->encode-thread hand-off (encoder behind). */
+long rpw_cap_drops(struct rpw_capture *c) { return c ? c->cap_drops : 0; }
 
 void rpw_stop(struct rpw_capture *c) {
 	if (!c)
 		return;
 	if (c->loop)
-		PW.tl_stop(c->loop);
+		PW.tl_stop(c->loop); /* no more on_process callbacks after this */
+	if (c->enc_thread_on) {  /* stop + join the encode thread while the stream still exists */
+		pthread_mutex_lock(&c->enc_mu);
+		c->enc_stop = 1;
+		pthread_cond_signal(&c->enc_cv);
+		pthread_mutex_unlock(&c->enc_mu);
+		pthread_join(c->enc_thread, NULL);
+		c->enc_thread_on = 0;
+	}
 	if (c->stream) {
 		PW.stream_disconnect(c->stream);
 		PW.stream_destroy(c->stream);
@@ -1331,5 +1441,7 @@ void rpw_stop(struct rpw_capture *c) {
 	free(c->slot);
 	pthread_mutex_destroy(&c->mu);
 	pthread_cond_destroy(&c->cv);
+	pthread_mutex_destroy(&c->enc_mu);
+	pthread_cond_destroy(&c->enc_cv);
 	free(c);
 }
