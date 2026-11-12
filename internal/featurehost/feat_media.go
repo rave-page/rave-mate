@@ -143,11 +143,13 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 			c := liveCfg()
 			return c.PreferCodec, c.PinnedEncoder()
 		},
-		EncodeDevice:     encDevResolver,
-		Headroom:         func() (uint64, bool) { h := gpumem.ReadHeadroom(gpuSampler); return h.FreeMB, h.Present },
-		GovernorEnabled:  func() bool { return liveCfg().VramGovernorEnabled() },
-		GovernorFloorMB:  uint64(liveCfg().ResolvedVramReserveMB()),
-		GovernorBaseKbps: func() int { return liveCfg().Bitrate() },
+		EncodeDevice:       encDevResolver,
+		Headroom:           func() (uint64, bool) { h := gpumem.ReadHeadroom(gpuSampler); return h.FreeMB, h.Present },
+		GovernorEnabled:    func() bool { return liveCfg().VramGovernorEnabled() },
+		GovernorFloorMB:    uint64(liveCfg().ResolvedVramReserveMB()),
+		GovernorBaseKbps:   func() int { return liveCfg().Bitrate() },
+		BudgetMode:         func() string { return liveCfg().BitrateModeString() },
+		BudgetUserCeilKbps: func() int { return liveCfg().UserBitrateCeilKbps() },
 	})
 	if len(in.Encoders) > 0 || len(in.Decoders) > 0 {
 		f.router.SetCodecCaps(withVAAPINativeEncoders(in.Encoders), in.Decoders)

@@ -117,6 +117,52 @@ func contentBppFactor(c ContentClass) float64 {
 	}
 }
 
+// CodecName maps a wire codec to the quality model's codec token.
+func CodecName(c Codec) string {
+	switch c {
+	case CodecHEVC:
+		return "hevc"
+	case CodecAV1:
+		return "av1"
+	case CodecJPEG:
+		return "mjpeg"
+	default:
+		return "h264"
+	}
+}
+
+// AdaptiveBaseKbps is the per-route BASE bitrate ceiling the governors + the offer use: the fixed
+// value in fixed mode, else the quality-model target at the nominal geometry capped by the user
+// ceiling. Pure; the continuous link + VRAM adaptation happens BELOW this in the governors (congest
+// controller probes up to it; the VRAM ladder trims down from it).
+func AdaptiveBaseKbps(mode BitrateMode, userCeilKbps, fixedKbps int, codec Codec, w, h, fps int) int {
+	if NormalizeBitrateMode(string(mode)) == BitrateFixed {
+		return posOr(fixedKbps, defaultBudgetKbps)
+	}
+	var ab AdaptiveBudget
+	return ab.Step(BudgetInputs{Mode: BitrateAuto, Codec: CodecName(codec),
+		NominalW: w, NominalH: h, FPS: fps, UserCeilKbps: userCeilKbps}).TargetKbps
+}
+
+// adaptiveBase is the governor's per-route base ceiling: fixed value in fixed mode, else the quality
+// model at the route geometry capped by the user ceiling. The congest controller probes up to this
+// and the VRAM ladder trims from it (so a resolution cap lowers the effective bitrate too).
+func (rm *RouteManager) adaptiveBase(codec Codec, w, h, fps int) int {
+	mode := ""
+	if rm.budgetMode != nil {
+		mode = rm.budgetMode()
+	}
+	fixed := defaultBudgetKbps
+	if rm.govBaseKbps != nil {
+		fixed = rm.govBaseKbps()
+	}
+	user := 0
+	if rm.budgetUserK != nil {
+		user = rm.budgetUserK()
+	}
+	return AdaptiveBaseKbps(BitrateMode(mode), user, fixed, codec, w, h, fps)
+}
+
 // AdaptiveBudget holds one route's QP-bump hysteresis state (not concurrency-safe: one per route,
 // stepped by that route's governor goroutine).
 type AdaptiveBudget struct {

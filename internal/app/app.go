@@ -748,13 +748,15 @@ func run(parent context.Context, serviceMode bool) error {
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,
 		Encoder: encFac, Decoder: decFac, UDP: true, // §2.5 UDP datagram profile (reachability-gated, TCP fallback)
-		EncodeMaxHeight:  cfg.Features.MediaLink.MaxHeight,
-		EncodePolicy:     mediaEncodePolicy(mediaLinkCfg),
-		EncodeDevice:     featurehost.NewEncodeDeviceResolver(mediaLinkCfg, vramBudget.Budget, nil, log),
-		Headroom:         func() (uint64, bool) { h := gpumem.ReadHeadroom(gpuGovSampler); return h.FreeMB, h.Present },
-		GovernorEnabled:  func() bool { return mediaLinkCfg().VramGovernorEnabled() },
-		GovernorFloorMB:  uint64(mediaLinkCfg().ResolvedVramReserveMB()),
-		GovernorBaseKbps: func() int { return mediaLinkCfg().Bitrate() },
+		EncodeMaxHeight:    cfg.Features.MediaLink.MaxHeight,
+		EncodePolicy:       mediaEncodePolicy(mediaLinkCfg),
+		EncodeDevice:       featurehost.NewEncodeDeviceResolver(mediaLinkCfg, vramBudget.Budget, nil, log),
+		Headroom:           func() (uint64, bool) { h := gpumem.ReadHeadroom(gpuGovSampler); return h.FreeMB, h.Present },
+		GovernorEnabled:    func() bool { return mediaLinkCfg().VramGovernorEnabled() },
+		GovernorFloorMB:    uint64(mediaLinkCfg().ResolvedVramReserveMB()),
+		GovernorBaseKbps:   func() int { return mediaLinkCfg().Bitrate() },
+		BudgetMode:         func() string { return mediaLinkCfg().BitrateModeString() },
+		BudgetUserCeilKbps: func() int { return mediaLinkCfg().UserBitrateCeilKbps() },
 	})
 	// #44: the media plane (medialink+mediaroute+webcam) runs isolated in a memory-capped featurehost
 	// child by DEFAULT (MediaLink.Subprocess tri-state; explicit false = legacy in-proc). TCPlane +

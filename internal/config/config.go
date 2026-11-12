@@ -384,9 +384,14 @@ type MediaLinkFeature struct {
 	ShareVideo  bool   `json:"shareVideo,omitempty"`  // advertise local Spout senders to paired instances
 	PreferCodec string `json:"preferCodec,omitempty"` // "hevc"|"h264"|"mjpeg"; "" = auto (§3.2 matrix)
 	BitrateKbps int    `json:"bitrateKbps,omitempty"` // per-route video budget; 0 = 20000
-	SWOnly      bool   `json:"swOnly,omitempty"`      // advertise software encoders only (diagnostic; tier 4 + CPU warning)
-	MaxFPS      int    `json:"maxFps,omitempty"`      // sender-side video fps cap; 0 = 60, -1 = uncapped
-	MaxHeight   int    `json:"maxHeight,omitempty"`   // encode downscale policy: 0 = auto (native on hw, 1080p on sw x264), >0 = cap, -1 = never
+	// BitrateMode selects how the per-route bitrate is chosen: "auto" (default; the adaptive budget
+	// picks the best-quality bitrate the systems + link sustain, with BitrateKbps as a CEILING) or
+	// "fixed" (exactly the old behaviour: BitrateKbps is the target). Empty = auto. Migration: an
+	// existing config with only bitrateKbps set becomes auto with that value as the ceiling.
+	BitrateMode string `json:"bitrateMode,omitempty"`
+	SWOnly      bool   `json:"swOnly,omitempty"`    // advertise software encoders only (diagnostic; tier 4 + CPU warning)
+	MaxFPS      int    `json:"maxFps,omitempty"`    // sender-side video fps cap; 0 = 60, -1 = uncapped
+	MaxHeight   int    `json:"maxHeight,omitempty"` // encode downscale policy: 0 = auto (native on hw, 1080p on sw x264), >0 = cap, -1 = never
 	// Encode-device preference (SENDER side). DevicePolicy "" = auto: no device flags, the encoder
 	// picks (adapter 0) - byte-identical to pre-WP-3 behaviour. "pin" = always EncoderDevice.
 	// "avoid-busiest" = the least video-encode-loaded adapter, skipping ones OBS/Parsec hold.
@@ -631,12 +636,25 @@ func (m MediaLinkFeature) DevicePref() (policy, adapter string) {
 // PinnedEncoder returns the user-pinned encoder name ("" = negotiate per the §3.2 matrix).
 func (m MediaLinkFeature) PinnedEncoder() string { return strings.TrimSpace(m.Encoder) }
 
-// Bitrate returns the effective per-route budget (default 20 Mbps).
+// Bitrate returns the effective per-route budget for FIXED mode (default 20 Mbps).
 func (f MediaLinkFeature) Bitrate() int {
 	if f.BitrateKbps <= 0 {
 		return 20_000
 	}
 	return f.BitrateKbps
+}
+
+// BitrateModeString returns the raw bitrate-budget mode ("" => auto, normalized at the medialink layer).
+func (f MediaLinkFeature) BitrateModeString() string { return f.BitrateMode }
+
+// UserBitrateCeilKbps is the user's bitrate CEILING in auto mode (0 = none). Same bitrateKbps the user
+// set: in auto it caps the adaptive target (50000 keeps meaning "never above 50 Mbps"); in fixed it is
+// the exact target (via Bitrate).
+func (f MediaLinkFeature) UserBitrateCeilKbps() int {
+	if f.BitrateKbps > 0 {
+		return f.BitrateKbps
+	}
+	return 0
 }
 
 // FPSCap returns the sender-side video frame-rate cap (0 = uncapped). VJ sources can run

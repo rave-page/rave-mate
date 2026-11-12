@@ -176,6 +176,39 @@ func TestSplitLinkCeiling(t *testing.T) {
 	}
 }
 
+func TestNormalizeBitrateModeMigration(t *testing.T) {
+	// Empty (existing configs with only bitrateKbps) => auto; explicit fixed preserved.
+	if NormalizeBitrateMode("") != BitrateAuto {
+		t.Fatal("empty mode must migrate to auto")
+	}
+	if NormalizeBitrateMode("fixed") != BitrateFixed {
+		t.Fatal("fixed must be preserved")
+	}
+	if NormalizeBitrateMode("auto") != BitrateAuto || NormalizeBitrateMode("junk") != BitrateAuto {
+		t.Fatal("auto/unknown must be auto")
+	}
+}
+
+func TestAdaptiveBaseKbps(t *testing.T) {
+	// Fixed mode: exactly the configured value (old behaviour).
+	if got := AdaptiveBaseKbps(BitrateFixed, 0, 50000, CodecH264, 3840, 2160, 60); got != 50000 {
+		t.Fatalf("fixed base = %d, want 50000", got)
+	}
+	// Auto, no user ceiling: the pure model target (~35 Mbps H.264 4K60).
+	if got := AdaptiveBaseKbps(BitrateAuto, 0, 20000, CodecH264, 3840, 2160, 60); !approx(got, 35000, 10) {
+		t.Fatalf("auto base = %d, want ~35000", got)
+	}
+	// Migration: old config (bitrateKbps 50000, mode "") => auto with 50000 as CEILING. The 4K H.264
+	// model (~35k) is below it, so the target is the model, not the ceiling.
+	if got := AdaptiveBaseKbps(NormalizeBitrateMode(""), 50000, 50000, CodecH264, 3840, 2160, 60); got >= 50000 {
+		t.Fatalf("migrated auto must use the model below the 50000 ceiling, got %d", got)
+	}
+	// User ceiling binds a low cap.
+	if got := AdaptiveBaseKbps(BitrateAuto, 10000, 20000, CodecH264, 3840, 2160, 60); got != 10000 {
+		t.Fatalf("user ceiling must bind: %d", got)
+	}
+}
+
 func withUser(in BudgetInputs, k int) BudgetInputs  { in.UserCeilKbps = k; return in }
 func withLink(in BudgetInputs, k int) BudgetInputs  { in.LinkCeilKbps = k; return in }
 func withCoded(in BudgetInputs, h int) BudgetInputs { in.CodedH = h; return in }
