@@ -486,7 +486,10 @@ func (rm *RouteManager) Encoders() []string {
 
 // Start binds the media listener, subscribes to the negotiation topics, and advertises.
 func (rm *RouteManager) Start(ctx context.Context) error {
-	ln, err := listenRange(rm.bindHost, rm.ports)
+	// §2.5: the TCP listener + the shared answerer UDP socket share ONE port (brief req 4). For an
+	// EPHEMERAL request (Ports [0], tests) the bind retries until a port is free for BOTH, so a running
+	// daemon holding UDP ports (incl. 0.0.0.0 ephemeral) can't flake a loopback test.
+	ln, upc, err := listenMediaSocket(rm.bindHost, rm.ports, rm.udp)
 	if err != nil {
 		return err
 	}
@@ -497,20 +500,11 @@ func (rm *RouteManager) Start(ctx context.Context) error {
 	// Advertise the bound port with the configured/auto host (ephemeral port for tests).
 	_, portStr, _ := net.SplitHostPort(ln.Addr().String())
 	rm.addr = net.JoinHostPort(rm.host, portStr)
-	// §2.5 UDP profile: bind the shared answerer UDP socket on the SAME port the TCP listener took
-	// (brief req 4) + start the token demux. Best-effort: a UDP bind failure leaves udp off (routes
-	// use TCP), never blocks the plane.
-	if rm.udp {
-		if tcpAddr, ok := ln.Addr().(*net.TCPAddr); ok {
-			if upc, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP(rm.bindHost), Port: tcpAddr.Port}); err == nil {
-				rm.mux = newUDPMux(upc, rm.serveUDPFirst)
-			} else {
-				rm.udp = false
-				rm.warnf("udp media socket bind failed - routes will use TCP", map[string]any{"error": err.Error()})
-			}
-		} else {
-			rm.udp = false
-		}
+	if upc != nil {
+		rm.mux = newUDPMux(upc, rm.serveUDPFirst)
+	} else if rm.udp {
+		rm.udp = false
+		rm.warnf("udp media socket bind failed - routes will use TCP", nil)
 	}
 	rm.unsub = []func(){
 		rm.bus.Subscribe(TopicOffer, rm.onOffer),
@@ -1815,6 +1809,51 @@ func setNoDelay(c net.Conn) {
 	if tcp, ok := c.(*net.TCPConn); ok {
 		_ = tcp.SetNoDelay(true) // §2.5: latency-bound the send path
 	}
+}
+
+// listenMediaSocket binds the TCP listener and (when udp) the shared answerer UDP socket on the SAME
+// port. FIXED ports (production): a UDP-bind failure keeps the TCP listener with udp off (upc nil) -
+// the plane runs over TCP, prior behaviour. EPHEMERAL (Ports contains 0, tests): retry fresh ephemeral
+// ports until one is free for BOTH TCP and UDP, so a running daemon's UDP sockets never flake the gate.
+func listenMediaSocket(host string, ports []int, udp bool) (net.Listener, *net.UDPConn, error) {
+	ephemeral := false
+	for _, p := range ports {
+		if p == 0 {
+			ephemeral = true
+		}
+	}
+	tries := 1
+	if ephemeral {
+		tries = 16
+	}
+	var lastErr error
+	for i := 0; i < tries; i++ {
+		ln, err := listenRange(host, ports)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if !udp {
+			return ln, nil, nil
+		}
+		tcpAddr, ok := ln.Addr().(*net.TCPAddr)
+		if !ok {
+			return ln, nil, nil // non-TCP listener: udp off
+		}
+		upc, uerr := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP(host), Port: tcpAddr.Port})
+		if uerr == nil {
+			return ln, upc, nil
+		}
+		if !ephemeral {
+			return ln, nil, nil // fixed port, UDP taken: keep TCP (graceful), don't race a re-bind
+		}
+		_ = ln.Close() // ephemeral: this port's UDP is held elsewhere - free the TCP + try another
+		lastErr = uerr
+	}
+	if lastErr == nil {
+		lastErr = errors.New("medialink: no media socket")
+	}
+	return nil, nil, lastErr
 }
 
 func listenRange(host string, ports []int) (net.Listener, error) {
