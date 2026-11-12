@@ -17,8 +17,15 @@ type EncodeSpec struct {
 	Width       int
 	Height      int
 	FPS         float64
-	BitrateKbps int // requester budget (Offer.Bitrate); 0 = encoder default
+	BitrateKbps int // requester budget (Offer.Bitrate); in auto mode this is the CEILING, not a target
 	MaxHeight   int // downscale ceiling (px): input taller than this is scaled down; 0 = native
+	// QualityTarget enables constant-quality-with-ceiling rate control (adaptive budget): the encoder
+	// targets this visual quality (1..100, higher = better; QualityDefault is a good default) and uses
+	// BitrateKbps as the MAX, so simple content undershoots and complex content spends up to the
+	// ceiling. 0 = disabled (legacy CBR/VBR to BitrateKbps) - unset specs behave exactly as before.
+	// OS-neutral: MF (QVBR/quality mode), ffmpeg (-rc/-cq/QVBR per family) and the Linux VA engine map
+	// it to their own rate-control params.
+	QualityTarget int
 	// Encode device (WP-3): which GPU to encode on. DeviceLUID is the DXGI adapter LUID key
 	// ("0xHIGH_0xLOW"), DeviceIndex its DXGI ordinal (the number ffmpeg's d3d11va/-gpu/-qsv_device
 	// flags take). Zero value ("" / 0) is NOT a device: engines treat DeviceIndex < 0 OR an empty
@@ -92,6 +99,19 @@ type DMABufEncodeSource interface {
 // stay valid until Close.
 type ZeroCopySink interface {
 	SharedTexture() (handle uint64, dxgiFormat uint32, w, h int, name string, ok bool)
+}
+
+// QualityDefault is the default constant-quality target (1..100) the adaptive budget requests: a good
+// visual quality the encoder spends up to BitrateKbps to hold.
+const QualityDefault = 70
+
+// EncoderFeedback is the adaptive budget's quality signal from a live encoder (OS-neutral; the Linux
+// VA engine, the MF/Zig child and ffmpeg fill it where the codec exposes it). Present=false => no
+// signal (the controller falls back to the model target).
+type EncoderFeedback struct {
+	Present     bool    // the encoder reports a quality signal
+	AvgQP       float64 // mean quantizer over the last second (higher = more compressed / lower quality)
+	RateLimited bool    // the bitrate CEILING forced QP above the quality target (content wants more)
 }
 
 // PipelineStats is an encode/decode child's live telemetry (§7 route stats).
@@ -187,6 +207,9 @@ type PipelineStats struct {
 	// sink that drops nothing and publishes nothing reports the same zero.
 	PubFrames uint64
 	PubBytes  uint64
+	// Feedback is the adaptive budget's encoder quality signal (avg QP + rate-limited). Present=false
+	// on encoders that expose no quality signal; the controller then uses the model target alone.
+	Feedback EncoderFeedback
 	// PubStalledMs/PubChanges/PubHash are the receive side's CONTENT oracle: how long the
 	// published PICTURE has been identical, and how many times it actually changed. Every counter
 	// above is rate- or volume-shaped, and that is not enough - a 4K route republished ONE
