@@ -8,7 +8,125 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"rave.page/mate/internal/medialink"
 )
+
+// TestDMABufEncodeAPI drives the PRODUCTION source API (not the RPW_VA_ENC env hook): openCapture ->
+// StartDMABufEncode(h264_vaapi_native) -> Next returns Annex-B AUs. Asserts the route opens with a
+// keyframe, a mid-run RequestKeyframe (PLI) produces another, writes the AUs to RPW_H264_OUT for the
+// driver's decode+corner check, and logs PipeStats (engine, fps, dropped, bytes/frame). Set
+// RPW_TEST_NODE (+ RPW_VA_ENC gate kept off: this path does not use it).
+func TestDMABufEncodeAPI(t *testing.T) {
+	node := os.Getenv("RPW_TEST_NODE")
+	out := os.Getenv("RPW_H264_OUT")
+	if node == "" || os.Getenv("RPW_ENC_API") == "" {
+		t.Skip("set RPW_TEST_NODE + RPW_ENC_API")
+	}
+	if !captureAvailable() || !VAEncodeAvailable() {
+		t.Skip("pwcapture/VA not available")
+	}
+	n := 300
+	if v := os.Getenv("RPW_H264_FRAMES"); v != "" {
+		if x, err := strconv.Atoi(v); err == nil {
+			n = x
+		}
+	}
+	src, err := openCapture(context.Background(), nil, node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = src.Close() }()
+	de, ok := src.(medialink.DMABufEncodeSource)
+	if !ok {
+		t.Fatal("source is not a DMABufEncodeSource")
+	}
+	node4 := os.Getenv("RPW_EGL_DEVICE")
+	if node4 == "" {
+		node4 = "/dev/dri/renderD128"
+	}
+	w, _ := strconv.Atoi(os.Getenv("RPW_ENC_W"))
+	h, _ := strconv.Atoi(os.Getenv("RPW_ENC_H"))
+	kbps, _ := strconv.Atoi(os.Getenv("RPW_ENC_KBPS"))
+	maxh, _ := strconv.Atoi(os.Getenv("RPW_ENC_MAXH"))
+	spec := medialink.EncodeSpec{Encoder: medialink.EncoderVAAPINativeH264, Codec: medialink.CodecH264,
+		Width: w, Height: h, FPS: 60, BitrateKbps: kbps, MaxHeight: maxh, VAAPIRenderNode: node4}
+	esrc, started, err := de.StartDMABufEncode(spec)
+	if err != nil || !started {
+		t.Fatalf("StartDMABufEncode started=%v err=%v", started, err)
+	}
+	var f *os.File
+	if out != "" {
+		if f, err = os.Create(out); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = f.Close() }()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(n/30+30)*time.Second)
+	defer cancel()
+	var frames, keyframes, bytes int
+	var sawFirstKey bool
+	var start time.Time
+	warm := 30
+	pliAt := warm + n/2 // request a keyframe mid-run (scales with frame count)
+	var pliKeyframeAfter bool
+	for i := 0; i < warm+n; i++ {
+		fr, err := esrc.Next(ctx)
+		if err != nil {
+			t.Fatalf("Next after %d: %v", i, err)
+		}
+		if i == 0 && fr.Keyframe() {
+			sawFirstKey = true
+		}
+		if i == warm {
+			start = time.Now()
+		}
+		if i == pliAt {
+			if ks, ok := esrc.(medialink.KeyframeSource); ok {
+				ks.RequestKeyframe()
+			}
+		}
+		if i > pliAt && i <= pliAt+15 && fr.Keyframe() {
+			pliKeyframeAfter = true
+		}
+		if f != nil {
+			_, _ = f.Write(fr.Payload)
+		}
+		if i >= warm {
+			frames++
+			bytes += len(fr.Payload)
+			if fr.Keyframe() {
+				keyframes++
+			}
+		}
+	}
+	dur := time.Since(start)
+	fps := float64(frames) / dur.Seconds()
+	var st medialink.PipelineStats
+	if pr, ok := esrc.(medialink.PipelineReporter); ok {
+		st = pr.PipeStats()
+	}
+	t.Logf("DMABUF-ENC %d AUs in %v (~%.1f fps), %d bytes (avg %d), keyframes=%d firstKey=%v pliKey=%v",
+		frames, dur.Round(time.Millisecond), fps, bytes, bytes/max1(frames), keyframes, sawFirstKey, pliKeyframeAfter)
+	t.Logf("PipeStats: engine=%s outFps=%.1f capFps=%.1f dropped=%d zeroCopy=%v bytes/frame=%.0f node=%s",
+		st.Encoder, st.OutFPS, st.CapFPS, st.Dropped, st.ZeroCopy, st.AUBytesPerFrame, st.DevPolicy)
+	if !sawFirstKey {
+		t.Error("route did not open with a keyframe")
+	}
+	if !pliKeyframeAfter {
+		t.Error("RequestKeyframe (PLI) did not produce a keyframe")
+	}
+	if fps < 30 {
+		t.Errorf("encode fps too low: %.1f", fps)
+	}
+}
+
+func max1(n int) int {
+	if n < 1 {
+		return 1
+	}
+	return n
+}
 
 // TestVAEncodeDump drives the zero-copy VA capture+encode path (set RPW_VA_ENC=1): PipeWire dmabuf
 // -> VA import -> VPP NV12 -> H.264 EncSlice, writing the Annex-B AUs to RPW_H264_OUT. The driver

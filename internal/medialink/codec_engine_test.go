@@ -42,6 +42,45 @@ func TestNegotiatePipeFreePreemption(t *testing.T) {
 	}
 }
 
+// The Linux zero-copy VA engine must win the negotiation whenever advertised and the peer decodes its
+// codec - HEVC-native first (better compression at the budget), then H.264-native - because the
+// ffmpeg *_vaapi alternative needs a host readback and cannot import a 4K multi-plane tiled dmabuf at
+// all. HEVC-native is preferred over H.264-native; both beat the plain ffmpeg tiers and MFNative.
+func TestNegotiateVAAPINativePreemption(t *testing.T) {
+	allDec := []string{DecodeAV1, DecodeHEVC, DecodeH264, DecodeJPEG}
+	px4k60 := float64(3840 * 2160 * 60)
+
+	// H.264-native advertised (HEVC-native not yet) → beats ffmpeg hevc_vaapi/av1 even for an HEVC peer.
+	enc := []string{"av1_vaapi", "hevc_vaapi", "h264_vaapi", EncoderVAAPINativeH264}
+	got, ok := NegotiateCodecFor(enc, allDec, px4k60)
+	if !ok || got.Encoder != EncoderVAAPINativeH264 || got.Codec != CodecH264 || got.Tier != 3 || got.Software {
+		t.Fatalf("va-native h264 rig: got %+v ok=%v, want %s h264 tier3 hw", got, ok, EncoderVAAPINativeH264)
+	}
+	// Both native names advertised → HEVC-native wins (preferred for compression).
+	enc2 := []string{"hevc_vaapi", "h264_vaapi", EncoderVAAPINativeH264, EncoderVAAPINativeHEVC}
+	got, ok = NegotiateCodecFor(enc2, allDec, px4k60)
+	if !ok || got.Encoder != EncoderVAAPINativeHEVC || got.Codec != CodecHEVC || got.Tier != 2 {
+		t.Fatalf("va-native hevc rig: got %+v ok=%v, want %s hevc tier2", got, ok, EncoderVAAPINativeHEVC)
+	}
+	// HEVC-native advertised but peer only decodes H.264 → falls to H.264-native.
+	got, ok = NegotiateCodecFor(enc2, []string{DecodeH264, DecodeJPEG}, px4k60)
+	if !ok || got.Encoder != EncoderVAAPINativeH264 {
+		t.Fatalf("h264-only peer: got %+v ok=%v, want %s", got, ok, EncoderVAAPINativeH264)
+	}
+	// Without the native engine → classic tier walk (hevc_vaapi for an HEVC peer).
+	got, ok = NegotiateCodecFor([]string{"hevc_vaapi", "h264_vaapi"}, allDec, px4k60)
+	if !ok || got.Encoder != "hevc_vaapi" || got.Tier != 2 {
+		t.Fatalf("no-native rig: got %+v ok=%v, want hevc_vaapi tier2", got, ok)
+	}
+	// EncoderTier must resolve both native names (the receiver derives its stats from them).
+	if tier, sw, ok := EncoderTier(EncoderVAAPINativeH264); !ok || tier != 3 || sw {
+		t.Fatalf("EncoderTier(%s) = %d,%v,%v; want 3,false,true", EncoderVAAPINativeH264, tier, sw, ok)
+	}
+	if tier, sw, ok := EncoderTier(EncoderVAAPINativeHEVC); !ok || tier != 2 || sw {
+		t.Fatalf("EncoderTier(%s) = %d,%v,%v; want 2,false,true", EncoderVAAPINativeHEVC, tier, sw, ok)
+	}
+}
+
 // The SENDER's own codec preference (MediaLink.PreferCodec mirrored onto the send side) outranks both
 // the tier order and the pipe-free preemption, but only when it is satisfiable.
 func TestNegotiateSenderPreference(t *testing.T) {
