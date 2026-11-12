@@ -254,6 +254,9 @@ struct rpw_capture {
 	int fatal;
 	int need_reconnect; /* stream hit ERROR (producer restart) - re-arm the connection */
 	int va_probed;      /* RPW_VA_PROBE: VA import probe already run (once) */
+	int slot_len;       /* bytes valid in slot: 0 = w*h*4 (RGBA); >0 = encoded AU length */
+	struct rva_enc *enc; /* RPW_VA_ENC test path: combined VA capture+encode -> H.264 in slot */
+	int enc_fail;
 	long dropped;
 	long dmabuf_skipped;
 	long reconnects;
@@ -689,6 +692,56 @@ static void on_process(void *data) {
 					r, np, (unsigned long long)c->modifier, c->width, c->height,
 					cn[0], cn[1], cn[2], cn[3], cn[4], cn[5], cn[6], cn[7], cn[8], cn[9], cn[10], cn[11]);
 			}
+			if (getenv("RPW_VA_ENC")) { /* test path: zero-copy VA capture+encode -> H.264 slot */
+				if (!c->enc && !c->enc_fail) {
+					const char *en = getenv("RPW_EGL_DEVICE");
+					if (!en || !*en)
+						en = "/dev/dri/renderD128";
+					int kbps = 20000;
+					const char *kb = getenv("RPW_ENC_KBPS");
+					if (kb)
+						kbps = atoi(kb);
+					c->enc = rva_enc_new(en, 0, c->width, c->height, 60, kbps);
+					if (!c->enc)
+						c->enc_fail = 1;
+				}
+				if (c->enc) {
+					int np = sb->n_datas < RPW_MAX_PLANES ? (int)sb->n_datas : RPW_MAX_PLANES;
+					int efds[RPW_MAX_PLANES];
+					unsigned eoff[RPW_MAX_PLANES], estr[RPW_MAX_PLANES];
+					for (int p = 0; p < np; p++) {
+						efds[p] = sb->datas[p].fd;
+						eoff[p] = sb->datas[p].chunk ? sb->datas[p].chunk->offset : 0;
+						estr[p] = sb->datas[p].chunk ? sb->datas[p].chunk->stride : 0;
+					}
+					unsigned char *au = NULL;
+					int aulen = 0, kf = 0;
+					if (rva_enc_frame(c->enc, spa_to_drm_fourcc(c->fmt), c->modifier, c->width, c->height,
+						np, efds, eoff, estr, 0, &au, &aulen, &kf) == 0 && aulen > 0) {
+						pthread_mutex_lock(&c->mu);
+						if (aulen > c->slot_cap) {
+							unsigned char *n = realloc(c->slot, aulen);
+							if (n) {
+								c->slot = n;
+								c->slot_cap = aulen;
+							}
+						}
+						if (aulen <= c->slot_cap) {
+							memcpy(c->slot, au, aulen);
+							c->slot_len = aulen;
+							if (c->has_frame)
+								c->dropped++;
+							c->has_frame = 1;
+							pthread_cond_signal(&c->cv);
+						}
+						pthread_mutex_unlock(&c->mu);
+					} else {
+						c->dropped++;
+					}
+					PW.stream_queue(c->stream, last);
+					return;
+				}
+			}
 			if (!egl_import_frame(c, sb)) {
 				c->dmabuf_skipped++;
 				c->dropped++;
@@ -828,7 +881,7 @@ int rpw_wait_frame(struct rpw_capture *c, unsigned char *dst, int cap, int *w, i
 		pthread_mutex_unlock(&c->mu);
 		return 0;
 	}
-	int need = c->width * c->height * 4;
+	int need = c->slot_len > 0 ? c->slot_len : c->width * c->height * 4; /* encoded AU vs RGBA */
 	*w = c->width;
 	*h = c->height;
 	if (need > cap) {
@@ -859,6 +912,8 @@ void rpw_stop(struct rpw_capture *c) {
 		PW.ctx_destroy(c->context);
 	if (c->loop)
 		PW.tl_destroy(c->loop);
+	if (c->enc) /* loop stopped: no more on_process, safe to tear down the VA encode session */
+		rva_enc_free(c->enc);
 	/* EGL teardown: the context was made current on the loop thread, now stopped. Best-effort. */
 	if (c->egl_ready) {
 		if (c->egl_ctx)

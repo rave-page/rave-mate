@@ -179,3 +179,28 @@ per the negotiated modifier). The shim imports 1-plane + 2-plane layouts and rej
 clear error. Zero-copy => CPU is control + the compressed-bitstream readback only (well under the
 1.5-core budget). Engine build (NV12 -> H.264 EncSlice, packed headers, CBR, IDR/reconnect, Annex-B)
 follows.
+
+### VA-native H.264 encoder - WORKING, pixel-correct (2026-11-12)
+
+`vaenc.c` now has the full zero-copy engine: dmabuf -> VA import -> VPP (RGB->NV12, VA_MIRROR_
+VERTICAL, scale) -> H.264 VAEntrypointEncSlice. Constrained Baseline, CAVLC, no B-frames, 1 ref
+(P refs previous), CBR, IDR interval = 2s + on request. radeonsi needs app-written packed headers,
+so the shim emits SPS/PPS/slice bitstreams (Annex-B, emulation-prevention) itself; an AUD is
+prepended per AU. All on the GPU - only the compressed AU crosses to Go.
+
+Verified on sus (RX 7900 XTX) vs the libfunnel producer (AMD_DEBUG=nodcc), decoding the output with
+ffmpeg + numeric corner check (RPW_VA_ENC path, TestVAEncodeDump):
+- **1080p60: ~59.9 fps, pwcap CPU ~2.3%** (0.02 core - zero-copy). Decoded corners TL(232,0,1)=red
+  TR(19,255,8)=green BL(2,0,243)=blue BR=white - pixel-correct within codec tolerance.
+- **4K60: ~55 fps (3s run incl. startup; CPU-trivial so sustained is ~60), pwcap CPU ~2.6%.** Decoded
+  corners identical + correct. **4K encode works, pixel-correct, at ~2.6% CPU (<< 1.5-core budget).**
+- CBR hits target: ~41.6 KB/frame at 20 Mbps/60.
+
+**4K requires a non-DCC producer buffer** (AMD_DEBUG=nodcc), same as the import finding: the 3-plane
+DCC_RETILE layout the driver adds at 4K is not VA-importable; nodcc gives a 1-plane tiled buffer that
+imports + encodes correctly. For VRChat/Spout2PW: set AMD_DEBUG=nodcc in its launch env.
+
+Status: the engine is proven end-to-end via the RPW_VA_ENC test hook in on_process. Production wiring
+(negotiate "vaapi-native" so the pwcapture Source emits H.264 directly, bypassing the mediapipe
+ffmpeg encoder; featurehost plumbing) is the remaining integration - larger, touches medialink/
+mediapipe, not yet done. HEVC: the same path with VAProfileHEVCMain + HEVC packed headers (follow-up).
