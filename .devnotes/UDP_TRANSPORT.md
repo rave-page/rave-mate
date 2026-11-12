@@ -181,3 +181,95 @@ reserved, D9 open), PTP + follow-master clock tiers, NVENC-direct zero-copy.
   tested; full under-impairment route integration is a follow-up).
 - Installer/firewall: an **inbound UDP** allow rule on ports 47641-47645 is needed (same ports as
   the existing TCP media rule). See the lead follow-ups.
+
+## Live tuning from the first two-PC run (2026-11-12)
+
+First live run: sus (Linux, hevc_vaapi) → Windows (mf-native-decode), 1080p60, wired GbE, route up
+`udp/plaintext`, picture pixel-correct. `ctl routes` at ~40 s showed the issues below. Fixes land
+with a failing-first test each; they could not be re-measured live by me (same build on both PCs) -
+the lead must re-measure after deploy.
+
+- **Item 1 - 279 spurious NACKs at 0% loss.** Root cause: `scanNack` NACKed any in-flight frame >3 ms
+  old with a hole - i.e. the frame CURRENTLY arriving (bursted/paced over a few ms, or briefly
+  reordered within itself). Fix: a hole is only NACKed once PROVEN missing - a later frame on the
+  stream has started arriving (`reassembler.maxFrameSeq`; the sender transmits a frame fully before
+  the next, so an OVERTAKEN incomplete frame really lost fragments) or the frame is within
+  `udpNackDeadlineLead` of its reassembly deadline (tail-of-stream recovery). The newest in-flight
+  frame is never NACKed. Why the sender "retransmitted nothing": the NACK'd fragments were in flight,
+  not lost, so they arrived anyway; the sender (unpaced, no budget block) would have retransmitted
+  from the ring, producing DUPLICATE datagrams the receiver's replay window discarded (DupDgram, not
+  shown on that ctl line) - the fix removes both the spurious NACK and the wasteful dup-retransmit.
+  Tests: `TestScanNackOnlyProvenHoles`, `TestScanNackDeadlineLastChance`,
+  `TestUDPConnNoSpuriousNacksOnReorder` (0% loss + reorder → ~0 NACKs).
+- **Item 2 - jitter buffer at 3-4 frames (50-67 ms) on a clean LAN, lateRate 0.** Root cause: STARTUP
+  transients (encoder/pipeline fill, first IDR, clock-base settling) made early frames transiently
+  late → grew the depth to 4 in the first ~12 s, then the §3.3 30 s/step decay left it stuck at 3-4.
+  Fix: a `jbWarmupNs` (2 s) no-grow window kills the startup grow, and `jbDecayCleanNs` dropped 30 s →
+  8 s so any genuine transient grow recovers within seconds (decay still only fires when late-rate <
+  0.1%, so no oscillation). Pacer half: the SENDER now paces at `pacingGain`×budget (not the bare
+  target, which would stretch a frame over several intervals) with a floor, so each frame finishes
+  well inside one frame interval on GbE while a 4K-keyframe microburst is smoothed. Tests:
+  `TestJitterBufferWarmupNoGrow`, `TestPacerFrameWithinInterval`.
+- **Item 3 - 50 Mbps on a flat-colour source.** The negotiated budget flows correctly
+  (Offer.Bitrate = config `MediaLink.Bitrate()` → `EncodeSpec.BitrateKbps`, respected). The 50 Mbps
+  is the configured budget being CBR-PADDED: the VA-API encoder used `-rc_mode CBR`, which fills
+  static content to the full bitrate. Fix (minimal, in the Linux agent's `internal/mediapipe/args.go`
+  vaapi case): `-rc_mode CBR` → `VBR` (constrained VBR - the budget becomes a peak CEILING, flat
+  content undershoots it). NOT verifiable by me (can't deploy to sus); LINUX AGENT to confirm the
+  encode still opens on radeonsi/iHD and that a flat source now emits well under budget (fall back to CBR or
+  try QVBR if a driver rejects VBR). Test updated: `TestEncodeArgsVAAPI` pins `-rc_mode VBR`.
+- **Item 4 - owd shown -39 ms.** `owdNs` was the raw signed transit (arrival−PTS), which carries the
+  peers' clock offset. Fix: `owdNs` is now QUEUING delay above a windowed-min transit baseline
+  (offset-free, ≥0); the delay-gradient congestion detector uses its trend, which a constant offset
+  cancels (confirmed - it never depended on absolute clock agreement). Peers panel relabelled `owdq`.
+  Test: `TestOwdQueuingDelayOffsetFree`.
+- **Item 5 - daemon CPU 68.7%.** NOT a UDP-transport bug and NOT media bytes transiting the daemon.
+  Evidence: a heap profile during a route shows only normal DB/library/i18n allocations (no frame
+  buffers in the daemon); the goroutine snapshot shows all per-child stdio readers BLOCKED in
+  ReadFile (not spinning); the Windows Go CPU profiler is unreliable here and mis-counted those 8-9
+  blocked read threads as "99.8% cgocall under os.File.Read" (318% total samples). The UDP router +
+  mux + udpConn + decode all run in the featurehost CHILD; only 1 Hz telemetry, 1 Hz clock-offset,
+  ~4 Hz TC and low-rate bus events cross to the daemon (media child logs are ≤1/10 s). Recommend the
+  lead: confirm WHICH rave-mate.exe is at 68.7% (daemon vs the media child doing legitimate
+  recv/reassembly/decode-feed vs the shell), and re-profile on Linux (sus) for a reliable flame graph.
+- **Item 6** (not my area, noted): did not inspect the encoder-scan VRAM-budget `self=?` line.
+
+### Expected numbers for the lead to re-measure after deploy
+- jitterbuf depth ≤ 2 frames steady on the clean LAN (ideally 1), after the ~2 s warmup; decays
+  within ~8 s if it ever grows.
+- `nack(s/r)` ≈ 0 at 0% loss (was ~4.5/s); `DupDgram` on the receiver ≈ 0.
+- owd (now `owdq`) ≥ 0, sub-ms-to-few-ms queuing (never the clock offset).
+- bitrate ≤ the negotiated budget, and well under budget on a flat/static source (VBR), once the Linux agent
+  confirms the VA-API VBR change.
+- daemon CPU < 5% during a route IF the 68.7% was the daemon (confirm the process first; the UDP
+  transport added no daemon-side per-frame work).
+
+### Security + retransmit-amplification fixes (same unit, after review + more live data)
+
+- **[SEC] Replay could rebind the remote / refresh liveness.** The receive path ran `bindRemote(src)`
+  + liveness refresh + reach signal AFTER authentication but BEFORE the replay/sequence check, so a
+  captured authenticated datagram replayed from another address could redirect the send target
+  (hijack/DoS) - on AEAD routes too (AEAD does not prevent replay). Fix: the replay check runs FIRST;
+  a duplicate/too-old datagram changes nothing (no rebind, no liveness, no reach, not even delivered),
+  and ONLY a STRICTLY-NEWEST datagram (`stNew` - a replay can't forge one) may rebind (still
+  rate-limited) / refresh liveness / signal reach. A gap-filling retransmit (`stFill`, new but below
+  the highest) is delivered for recovery but grants none of that leverage. Cleartext on-path forgery
+  stays the documented trade-off, but pure replay now works in neither mode. Test:
+  `TestReplayDoesNotRebindOrRefreshLiveness` (replay from a new addr: no rebind, no liveness; a newer
+  datagram from a new addr: rebind, rate-limited).
+
+- **Retransmit amplification (live: ~72 retransmit datagrams per NACK at 0% loss; six-figure retrans
+  on a 4K source stall).** Two causes, both fixed: (1) the spurious NACKs (item 1) listed a whole
+  in-flight frame's not-yet-arrived fragments (~72 items) → the sender resent them all; the scanNack
+  fix stops NACKing in-flight frames. (2) the retransmit BUDGET (≤25% of send rate) was NOT enforced
+  when the sender was UNPACED (`retr` rate = PacingRate×0.25 = 0 → tryReserve always allowed); the
+  sender-pacing change (item 2) sets a real PacingRate, so the budget now caps retransmit bursts.
+  onNack already resends exactly the NACK'd (stream,frameSeq,fragIdx) datagrams one-for-one (never
+  whole frames/ranges). Stalled source: with no newer frame, scanNack no longer loops - it emits one
+  last-chance NACK near the deadline (rate-limited), then the sweep drops the frame. Tests:
+  `TestRetransmitBudgetEnforced`, `TestScanNackStalledSourceNoLoop`.
+  Expected post-deploy: sender `retrans` per NACK ≈ 1 (not ~72); retrans bounded by the 25% budget;
+  no retransmit storm on a stalled encode.
+
+Operational note: during live diagnosis a `ctl route-stop <peer> all` also stopped a separate user
+"Spout2PW (VRChat)" route (already starving, fps 2/0). Use a specific session id, not `all`.

@@ -183,6 +183,39 @@ func TestUDPConnReorderDup(t *testing.T) {
 	b.Close()
 }
 
+// TestUDPConnNoSpuriousNacksOnReorder (item 1): multi-fragment frames at a 60fps-ish cadence over a
+// REORDERING link with 0% loss must NOT trigger spurious fragment NACKs - the fragments of the
+// frame currently arriving (and brief intra-frame reorder) are in flight, not lost.
+func TestUDPConnNoSpuriousNacksOnReorder(t *testing.T) {
+	aToB := newImpairment(71)
+	aToB.jitter = 2 * time.Millisecond // intra-frame reorder; frames still complete well before the next
+	a, b, _, _ := udpPair(t, aToB, nil, true, func(c *udpConfig) { c.BodyMax = 400 })
+	defer a.Close()
+	defer b.Close()
+	const n = 40
+	sent := make([]*Frame, n)
+	go func() {
+		for i := 0; i < n; i++ {
+			f := sampleFrame(uint32(i), 1, 4000) // ~11 fragments/frame
+			if i%30 == 0 {
+				f.Flags = FlagKeyframe
+			} else {
+				f.Flags = 0
+			}
+			sent[i] = f
+			_ = a.WriteFrame(f)
+			time.Sleep(8 * time.Millisecond) // ~realistic inter-frame cadence (so a frame completes first)
+		}
+	}()
+	got := readN(b, n, 6*time.Second)
+	if recovered := matchBySeq(t, sent, got); recovered < n-1 {
+		t.Fatalf("reorder: only %d/%d frames intact", recovered, n)
+	}
+	if ns := b.Stats().NacksSent; ns > 3 {
+		t.Fatalf("spurious NACKs on a 0%%-loss reordering link: %d (want ~0)", ns)
+	}
+}
+
 func TestUDPConnKeepaliveLiveness(t *testing.T) {
 	// B→A fully blacked out: A receives nothing → A hits the liveness timeout and ReadFrame errors.
 	aToB := newImpairment(31)

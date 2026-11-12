@@ -8,7 +8,8 @@ import (
 )
 
 // VA-API encode argv: global -vaapi_device render node, CPU->NV12->GPU upload filter, low-latency
-// knobs (CBR, async_depth 1, no B-frames), and the Annex-B framing the AU splitter expects
+// knobs (constrained VBR - budget as ceiling, no CBR padding of flat content - async_depth 1, no
+// B-frames), and the Annex-B framing the AU splitter expects
 // (dump_extra + {codec}_metadata=aud). The device flag is global, before -i.
 func TestEncodeArgsVAAPI(t *testing.T) {
 	base := medialink.EncodeSpec{
@@ -21,7 +22,7 @@ func TestEncodeArgsVAAPI(t *testing.T) {
 		"-vaapi_device /dev/dri/renderD128",
 		"-vf format=nv12,hwupload",
 		"-c:v h264_vaapi",
-		"-rc_mode CBR",
+		"-rc_mode VBR",
 		"-async_depth 1",
 		"-bf 0",
 		"-bsf:v dump_extra=freq=keyframe,h264_metadata=aud=insert",

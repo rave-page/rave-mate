@@ -347,6 +347,11 @@ type reassembler struct {
 	done      map[uint64]struct{}
 	doneOrder []uint64
 	dropped   uint64 // frames dropped at reassembly (cap breach or expiry) - telemetry
+	// maxFrameSeq is the highest frameSeq that has received ANY fragment, per stream (wrap-aware). A
+	// frame is "overtaken" - its holes proven missing, not merely in-flight - once a LATER frame has
+	// started arriving (the sender transmits a frame fully before the next), which is the NACK trigger
+	// (see udpConn.scanNack) that stops NACKing the frame currently still arriving.
+	maxFrameSeq map[uint16]uint32
 }
 
 // doneRingMax bounds the recently-finished frame-key set (drop-oldest).
@@ -360,7 +365,7 @@ func newReassembler(maxFrames, maxBytes int) *reassembler {
 		maxBytes = 32 << 20
 	}
 	return &reassembler{entries: map[uint64]*reasmEntry{}, maxFrames: maxFrames, maxBytes: maxBytes,
-		done: map[uint64]struct{}{}}
+		done: map[uint64]struct{}{}, maxFrameSeq: map[uint16]uint32{}}
 }
 
 // accept folds one media fragment in. Returns a completed frame's full wire bytes (header||payload)
@@ -370,6 +375,9 @@ func (r *reassembler) accept(h dgHeader, chunk []byte, nowNs int64) ([]byte, boo
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := reasmKey(h.Stream, h.FrameSeq)
+	if cur, ok := r.maxFrameSeq[h.Stream]; !ok || int32(h.FrameSeq-cur) > 0 {
+		r.maxFrameSeq[h.Stream] = h.FrameSeq // high-water of frames that have started arriving
+	}
 	if _, ok := r.done[key]; ok {
 		return nil, false // this frame already completed / was dropped - ignore its stragglers
 	}

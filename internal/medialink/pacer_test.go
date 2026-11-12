@@ -62,6 +62,40 @@ func TestPacerRateApprox(t *testing.T) {
 	}
 }
 
+// TestPacerFrameWithinInterval (item 2): at the derived pacing rate (a MULTIPLE of the budget), a
+// keyframe-sized burst finishes well inside one 60fps frame interval - not stretched over several as
+// pacing at the bare target bitrate would.
+func TestPacerFrameWithinInterval(t *testing.T) {
+	const interval = 16_666_667 // ns, 60 fps
+	const keyframe = 150 << 10  // a ~20 Mbps keyframe
+	clk := &fakeClock{t: time.Unix(0, 0)}
+	p := newSendPacer(pacingRateFor(20000), clk.now) // multiple of 20 Mbps
+	var total time.Duration
+	for sent := 0; sent < keyframe; sent += 1200 {
+		w := p.reserve(1200)
+		clk.add(w)
+		total += w
+	}
+	if total > time.Duration(interval) {
+		t.Fatalf("keyframe paced over %v > one 60fps interval", total)
+	}
+	// The bare target would NOT fit (proves the gain matters): 150 KB at 20 Mbps ≈ 60 ms.
+	clk2 := &fakeClock{t: time.Unix(0, 0)}
+	bare := newSendPacer(20000*1000/8, clk2.now)
+	var bareTotal time.Duration
+	for sent := 0; sent < keyframe; sent += 1200 {
+		w := bare.reserve(1200)
+		clk2.add(w)
+		bareTotal += w
+	}
+	if bareTotal <= time.Duration(interval) {
+		t.Fatal("bare-target pacing unexpectedly fit in one interval - test is not proving the gain")
+	}
+	if pacingRateFor(0) < pacerMinRateBytes {
+		t.Fatal("unknown-budget pacing rate below the floor")
+	}
+}
+
 func TestPacerRetransmitBudget(t *testing.T) {
 	clk := &fakeClock{t: time.Unix(0, 0)}
 	p := newSendPacer(1<<20, clk.now) // 1 MB/s budget bucket

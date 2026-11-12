@@ -11,18 +11,25 @@ import "sync"
 // buffer drops to the next keyframe and requests one over the control plane (PLI, §2.5).
 
 const (
-	jbMinDepth       = 1
-	jbMaxDepth       = 4              // §3.3 cap: 4 frames video
-	jbGrowWindowNs   = 2_000_000_000  // late-rate sliding window (grow)
-	jbDecayCleanNs   = 30_000_000_000 // sustained-clean time before decay
-	jbGrowLateRate   = 0.02           // §3.3: late-rate > 2% → grow
-	jbDecayLateRate  = 0.001          // §3.3: late-rate < 0.1% for 30 s → decay
-	jbMinSamples     = 20             // never grow off a handful of frames
-	jbPLIMinGapNs    = 250_000_000    // PLI rate limit
-	jbBaseBuckets    = 4              // min-transit window = 4 × 2 s buckets
-	jbBaseBucketNs   = 2_000_000_000  // one transit-min bucket
-	jbStaleGraceIntv = 2              // head is "stale" past deadline + this many intervals
-	jbDefaultFPS     = 60.0           // frame interval fallback when the advert carried none
+	jbMinDepth     = 1
+	jbMaxDepth     = 4             // §3.3 cap: 4 frames video
+	jbGrowWindowNs = 2_000_000_000 // late-rate sliding window (grow)
+	jbDecayCleanNs = 8_000_000_000 // sustained-clean time before a decay step (fast enough that a
+	//                                   transient grow recovers to 1 frame within ~seconds on a clean
+	//                                   LAN; only ever fires when late-rate < jbDecayLateRate, so no
+	//                                   oscillation under genuine jitter - that resets cleanSince)
+	jbWarmupNs = 2_000_000_000 // §startup: never GROW in the first 2 s - the encoder/pipeline
+	//                                 fill + the first IDR + clock-base settling make early frames
+	//                                 transiently "late"; growing on that pinned depth at 3-4 frames
+	//                                 (50-67 ms) for the whole route on a clean LAN (item 2).
+	jbGrowLateRate   = 0.02          // §3.3: late-rate > 2% → grow
+	jbDecayLateRate  = 0.001         // §3.3: late-rate < 0.1% for the decay window → decay
+	jbMinSamples     = 20            // never grow off a handful of frames
+	jbPLIMinGapNs    = 250_000_000   // PLI rate limit
+	jbBaseBuckets    = 4             // min-transit window = 4 × 2 s buckets
+	jbBaseBucketNs   = 2_000_000_000 // one transit-min bucket
+	jbStaleGraceIntv = 2             // head is "stale" past deadline + this many intervals
+	jbDefaultFPS     = 60.0          // frame interval fallback when the advert carried none
 
 	// Memory guards (pending-frame caps). INTRA streams (raw RGBA / MJPEG) have no decode
 	// dependency, so deep buffering buys nothing - a couple of frames is plenty and keeps the
@@ -61,10 +68,12 @@ type jitterBuffer struct {
 	interval  int64 // frame interval ns
 	intra     bool  // every frame independently decodable (raw pixels / MJPEG)
 	depth     int
-	capFrames int // pending-frame hard cap (intra: tiny; inter: larger)
-	capBytes  int // pending-payload hard cap
+	capFrames int   // pending-frame hard cap (intra: tiny; inter: larger)
+	capBytes  int   // pending-payload hard cap
+	warmupNs  int64 // no-grow window after the first frame (default jbWarmupNs; 0 in unit tests)
 
 	started      bool
+	startAt      int64 // first-frame arrival (warmup gate)
 	nextSeq      uint32
 	pending      []*Frame // seq-ascending
 	pendingBytes int
@@ -108,6 +117,7 @@ func newJitterBuffer(fps float64, intra bool) *jitterBuffer {
 		depth:     jbMinDepth,
 		capFrames: capFrames,
 		capBytes:  capBytes,
+		warmupNs:  jbWarmupNs,
 		notify:    make(chan struct{}, 1),
 	}
 }
@@ -141,6 +151,7 @@ func (b *jitterBuffer) push(f *Frame, arrival int64) {
 	b.mu.Lock()
 	if !b.started {
 		b.started = true
+		b.startAt = arrival
 		b.nextSeq = f.Seq
 		b.cleanSince = arrival
 	}
@@ -221,6 +232,12 @@ func (b *jitterBuffer) accountLateness(f *Frame, arrival int64) {
 	}
 	if rate >= jbDecayLateRate {
 		b.cleanSince = arrival
+	}
+	// Warmup: never grow in the first jbWarmupNs. Startup transients (encoder/pipeline fill, the
+	// first IDR, clock-base settling) make early frames look late; growing on them pins the depth
+	// high for the whole route on an otherwise clean LAN (item 2). Base + late-rate still accrue.
+	if arrival-b.startAt < b.warmupNs {
+		return
 	}
 	// Grow fast: late-rate over threshold, or any frame late by more than one interval.
 	if b.depth < jbMaxDepth &&

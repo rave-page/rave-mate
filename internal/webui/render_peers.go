@@ -1335,11 +1335,13 @@ func fmtRouteStat(s medialink.RouteStat, resolve func(string) string) (title, de
 	if s.Transport == medialink.TransportUDP { // §2.5 UDP datagram profile (else the default TCP)
 		title += " [udp]"
 	}
-	// UDP transport telemetry (loss/owd/NACK/retransmit/pacer/reassembly) - a technical diagnostic
-	// suffix (no translation); the TCP path has no datagram-level counters.
+	// UDP transport telemetry (loss/queuing-delay/NACK/retransmit/pacer/reassembly) - a technical
+	// diagnostic suffix (no translation); the TCP path has no datagram-level counters. "owdq" is the
+	// one-way QUEUING delay above the link baseline (offset-free, >=0), not an absolute clock-domain
+	// delay - so it never shows the peers' clock offset as a bogus negative.
 	udpDetail := ""
 	if u := s.UDP; u != nil {
-		udpDetail = fmt.Sprintf(" · udp loss %.1f%% owd %s rtt %s nack %d/%d retx %s pacerQ %d/%d reasmDrop %d",
+		udpDetail = fmt.Sprintf(" · udp loss %.1f%% owdq %s rtt %s nack %d/%d retx %s pacerQ %d/%d reasmDrop %d",
 			u.LossPct, fmtMsNs(float64(u.OwdNs)), fmtMsNs(float64(u.RTTns)), u.NacksSent, u.NacksRecv,
 			humanBytes(u.RetransBytes), u.PacerDepth, u.PacerDrops, u.ReasmDrops)
 	}

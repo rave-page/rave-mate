@@ -219,6 +219,52 @@ func TestMuxUnknownTokenNoState(t *testing.T) {
 	}
 }
 
+// TestReplayDoesNotRebindOrRefreshLiveness: a REPLAYED authenticated datagram (captured + re-sent
+// from another address) must not redirect the send target or refresh liveness; only a strictly-newer
+// datagram may rebind (rate-limited). Guards the receive-path hijack/DoS via replay.
+func TestReplayDoesNotRebindOrRefreshLiveness(t *testing.T) {
+	mc := &manualClock{}
+	const tok = 0x1234
+	u := &udpConn{clock: mc, token: tok, seqTrk: newReplayWin(), reasm: newReassembler(0, 0),
+		deadline: 200 * time.Millisecond, reachableCh: make(chan struct{}), lastRTx: map[uint16]int64{},
+		recvCh: make(chan *Frame, 16)}
+	enc := newDgEncoder(tok, nil, 1200)                         // clear route (crypto nil)
+	dg0, _, _, _ := enc.encodeFrame(nil, sampleFrame(0, 1, 50)) // datagram seq 0
+	dg1, _, _, _ := enc.encodeFrame(nil, sampleFrame(1, 1, 50)) // datagram seq 1
+	srcA := &net.UDPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 1}
+	srcB := &net.UDPAddr{IP: net.IPv4(10, 0, 0, 2), Port: 2}
+
+	mc.ns.Store(1000)
+	u.handleDatagram(dg0[0], srcA) // strictly-newest, first → binds srcA, liveness=1000
+	if u.remoteAddr().String() != srcA.String() {
+		t.Fatalf("first datagram did not bind srcA: %v", u.remoteAddr())
+	}
+	if u.lastRecvNs.Load() != 1000 {
+		t.Fatalf("liveness not set on first datagram")
+	}
+
+	mc.ns.Store(5000)
+	u.handleDatagram(dg0[0], srcB) // REPLAY of seq 0 from srcB → must change nothing
+	if u.remoteAddr().String() != srcA.String() {
+		t.Fatalf("replay rebound the send target to %v (hijack)", u.remoteAddr())
+	}
+	if u.lastRecvNs.Load() != 1000 {
+		t.Fatalf("replay refreshed liveness (was %d)", u.lastRecvNs.Load())
+	}
+
+	mc.ns.Store(1000 + int64(udpRebindMin) + 1) // past the rebind interval
+	u.handleDatagram(dg1[0], srcB)              // strictly-newer (seq 1) from srcB → legit rebind
+	if u.remoteAddr().String() != srcB.String() {
+		t.Fatalf("a genuinely newer datagram did not rebind to srcB: %v", u.remoteAddr())
+	}
+	if u.lastRecvNs.Load() != mc.Now() {
+		t.Fatalf("newer datagram did not refresh liveness")
+	}
+	if u.Stats().DupDgram == 0 {
+		t.Fatal("replayed datagram not counted as a duplicate")
+	}
+}
+
 // TestForgedFirstDatagramNoClaim: a forged first datagram (wrong mode / wrong key) must NOT claim the
 // pending answer or bind a remote; a correctly-sealed datagram does (finding 2).
 func TestForgedFirstDatagramNoClaim(t *testing.T) {

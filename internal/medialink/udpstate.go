@@ -17,9 +17,12 @@ const replayWindowBits = 4096 // datagrams of reorder tolerance (× 1200 B ≈ 4
 type acceptStatus int
 
 const (
-	stNew    acceptStatus = iota // first time this seq is seen (in order, or a gap-filling retransmit)
-	stDup                        // already received (replay / duplicate retransmit) - drop
-	stTooOld                     // below the window - drop
+	stNew acceptStatus = iota // STRICTLY NEWEST seq (advanced the highest) - the ONLY kind allowed
+	//                              to rebind the remote / refresh liveness / signal reach (a replayed
+	//                              capture can never forge one, so it cannot hijack the send target)
+	stFill   // new-but-not-newest (gap-filling retransmit): deliver it, but it must NOT rebind
+	stDup    // already received (replay / duplicate retransmit) - drop, change nothing
+	stTooOld // below the window - drop, change nothing
 )
 
 // replayWin is a fixed sliding window of seen datagram seqs. Safe for the single recvLoop caller;
@@ -93,9 +96,9 @@ func (w *replayWin) accept(seq uint64) acceptStatus {
 	case w.getBit(seq):
 		return stDup
 	default:
-		w.setBit(seq) // late / retransmit filling a gap
+		w.setBit(seq) // late / retransmit filling a gap (new, but NOT the newest - must not rebind)
 		w.recv++
-		return stNew
+		return stFill
 	}
 }
 
