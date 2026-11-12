@@ -44,16 +44,34 @@ Byte-exact with `internal/medialink`. Goldens are generated from Go
   `rm_tx_close` (bye + stop). Compiles under gcc; the lib links. **The Linux agent can integrate the
   shim's encode thread against this header now.**
 
+## Status — increment 2b (UDP sender runtime) DONE, Linux, Zig-interop verified
+
+`rm_tx_*` implemented for UDP (sender.zig + auqueue.zig + retxring.zig + pacer.zig). ONE worker thread
+(SCHED_RR best-effort) owns the socket, retransmit ring, pacer and seq counters; the encode thread only
+calls `submit()`. **Allocation-free in steady state** — all pools (AU queue 6×4 MiB, retx ring
+2048×1500 B, frame/dg/rx scratch) are sized at open; submit/send/worker never allocate. The bounded AU
+queue drops the oldest NON-keyframe and fires `on_need_idr` — this replaces the single-slot hand-off
+that dropped (the owner's finding). Worker loop: drain control (NACK→retransmit from the ring,
+ping→pong, bye/pong→liveness), send paced media (packetize→fragment→seal→send→ring), keepalive (100 ms),
+start-up-grace liveness.
+
+Verified on Linux (built with Windows zig `-Dtarget=x86_64-linux-gnu`, run in WSL Debian) — 16 Zig
+tests pass incl. native-sender→receiver loopback (the receiver uses the goldens-pinned wire core, so it
+is equivalent to the Go receiver): AEAD media decodes IN ORDER, large AU fragments + reassembles, CLEAR
+(plaintext) media, receiver-NACK→sender-retransmit. Windows host build runs the 12 non-socket tests
+(interop is Linux-only). Socket I/O uses `std.os.linux` raw syscalls (this dev-Zig moved it out of
+`std.posix`); Windows sockets are increment 4. ABI unchanged (no version bump).
+
 ## Next increments
 
-- **2b — sender runtime (the owner's pain).** Implement `rm_tx_*`: a dedicated TX thread (elevated
-  priority), the bounded SPSC AU queue (drop-oldest-non-keyframe → `on_need_idr`), packetize→pacer
-  (deadline-based)→`sendmmsg`/batched send, the retransmit ring + UDP control-RX thread
-  (NACK/ping/keepalive/bye), and the TCP length-prefixed framing. All allocation-free in steady state,
-  fixed pools sized at open. Replaces the single-slot AU hand-off that drops today.
+- **2b-cont — TCP path** (length-prefixed, implicit-counter GCM, wirecrypto.Sealer labels) behind the
+  same ABI (`rm_tx_open` transport=TCP currently returns RM_ERR_UNIMPL). **Go-receiver cgo interop**
+  (link `libravemedia.a` into a Go test, native sender → a real `udpConn`) + the impairment shim, and
+  the **4K60 10-minute soak** with the STEP-0 stage histograms on the Go receiver (acceptance: no
+  receive-stage interval > 2 frame periods; zero steady-state allocations — assert via the histograms +
+  a failing-allocator guard). Elevated-priority tuning (MMCSS/SCHED_FIFO) pass.
 - **3 — Windows receiver** (socket→reassembly→jitter→decoder inside the native child).
-- **4 — Windows sender** (MF encode child TX). **5 — soak** with the STEP-0 histograms as acceptance
-  (no receive-stage interval > 2 frame periods; zero steady-state allocations).
+- **4 — Windows sender** (MF encode child TX; Windows socket layer).
 
 ## Selection / fallback (STEP 3)
 
