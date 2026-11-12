@@ -240,7 +240,22 @@ func (st *routeStat) setNativeStats(s NativeTXStats) {
 	st.retransmits = s.Retransmits
 	st.sentHighest = uint32(s.Seq)
 	st.sentAny = true
-	st.lastCount = st.now()
+	now := st.now()
+	st.lastCount = now
+	// count() is not called on a native route (the Go pump is idle), so drive the sliding rate window
+	// (RateBps/WireFPS) directly from the native cumulative counters - else the panel reads fps=0 on a
+	// live native send route (field defect). Same ring-append + slide as count(), absolute counters.
+	if k := len(st.rate); k == 0 || now.Sub(st.rate[k-1].t) >= rateSampleEvery {
+		if len(st.rate) == rateSlots {
+			copy(st.rate, st.rate[1:])
+			st.rate = st.rate[:rateSlots-1]
+		}
+		st.rate = append(st.rate, rateSample{t: now, bytes: st.bytes, frames: st.frames})
+	}
+	for len(st.rate) > 1 && now.Sub(st.rate[1].t) >= rateSpan {
+		copy(st.rate, st.rate[1:])
+		st.rate = st.rate[:len(st.rate)-1]
+	}
 	st.mu.Unlock()
 }
 
