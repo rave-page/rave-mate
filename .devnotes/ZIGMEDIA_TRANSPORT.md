@@ -132,7 +132,7 @@ path (unchanged, wire-compatible, so native↔Go interoperate). Route telemetry 
 ## Resilience (2026-11-13, feat/zigmedia-resilience)
 - Playout (`playout.zig`, legacy mirror `internal/medialink/jitterbuf.go`): margin from measured lateness;
   miss -> grow to observed x factor (cap = preset max); decay <= interval/4 per step toward
-  quantile / worst-recent-stall target; presets low-latency 60 ms | balanced 150 ms (start at max,
+  quantile / worst-recent-stall target; presets low-latency 60 ms | balanced 170 ms (start at max,
   hold one 5-min window) | smooth 250 ms; anti-burst interval/2; base-shift re-anchor (clock / PTS
   step, not a stall); arrival + release on RAW monotonic clock (never the disciplined media clock).
 - Gap policy: hold for the retransmit up to max margin (+250 ms while the reassembler holds a partial
@@ -143,5 +143,6 @@ path (unchanged, wire-compatible, so native↔Go interoperate). Route telemetry 
   capped by net.core.rmem_max - burst after a stall overflows it (NACK recovers).
 - Evidence: `chaos_test.zig` (10-min traces: this-rig 6 seeds zero >1.5-frame intervals; wifi-ish; congested),
   `e2e_test.zig` (real stack through a chaos relay, both OSes).
-- Known gap: MetaRate (receiver rate hints) is ignored by the native sender; the Go supervisor does not read
-  meta on native routes -> rate adaptation inactive on native routes.
+- Native routes (ABI v4): the native sender parses receiver meta - MetaRate -> rm_tx_rate_hint (Go polls 10 Hz ->
+  RateControlSource.SetRateHint), MetaSync -> SyncPong, PLI -> on_need_idr. Sender reports (MetaReport) are not
+  emitted natively: the receiver's congestion inputs (datagram-seq loss, PTS OWD, ping RTT) do not use them.

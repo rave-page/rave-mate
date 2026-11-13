@@ -38,6 +38,7 @@ const poll_ns: i64 = 2 * std.time.ns_per_ms; // max idle before re-polling the s
 const nack_interval_ns: i64 = 6 * std.time.ns_per_ms; // re-NACK a frame no faster than ~1 LAN RTT
 const pli_min_gap_ns: i64 = 250 * std.time.ns_per_ms;
 const nack_max = 85;
+const rx_batch = 64; // datagrams per drain before releases/NACKs get a turn
 
 /// Stats is the published snapshot (Go samples it at 1 Hz, off the realtime thread).
 pub const Stats = struct {
@@ -160,7 +161,7 @@ pub const Receiver = struct {
         var last_stats: i64 = 0;
         while (!r.stop.load(.acquire)) {
             const now = hrtimer.nowMono();
-            r.drainSocket();
+            const more = r.drainSocket();
             r.scanAndNack(now);
             r.drainPlayout();
             r.keepalive(now);
@@ -168,6 +169,7 @@ pub const Receiver = struct {
                 last_stats = now;
                 r.publishStats(now);
             }
+            if (more) continue; // backlog (post-stall burst): keep draining, releases interleaved
             var wake = now + poll_ns;
             wake = @min(wake, r.playout.nextWake());
             wake = @min(wake, r.last_ping + keepalive_ns);
@@ -191,10 +193,13 @@ pub const Receiver = struct {
         r.stats_mu.unlock();
     }
 
-    fn drainSocket(r: *Receiver) void {
-        while (true) {
+    // drainSocket reads up to rx_batch datagrams; true = more may be pending. Bounded so a post-stall
+    // burst (thousands of datagrams) never delays a due release by its whole decrypt time.
+    fn drainSocket(r: *Receiver) bool {
+        var k: usize = 0;
+        while (k < rx_batch) : (k += 1) {
             var src: sock.Addr4 = .{};
-            const n = sock.recvFrom(r.fd, r.rx_buf, &src) catch return;
+            const n = sock.recvFrom(r.fd, r.rx_buf, &src) catch return false;
             const t = hrtimer.nowMono(); // first bytes of this datagram off the socket
             _ = r.net_marks.fetchAdd(1, .monotonic);
             if (!r.have_peer) {
@@ -203,6 +208,7 @@ pub const Receiver = struct {
             }
             r.handleDatagram(r.rx_buf[0..n], t);
         }
+        return true;
     }
 
     fn handleDatagram(r: *Receiver, dg: []const u8, now: i64) void {
@@ -224,6 +230,7 @@ pub const Receiver = struct {
                     r.drop_frame = -1; // simulated single NIC drop; the NACK-driven retransmit passes
                     return;
                 }
+                r.reasm.now_hint = now;
                 const whole = r.reasm.accept(h.stream, h.frame_seq, h.frag_idx, h.frag_count, body) orelse return;
                 const f = wire.parseFrameForTest(whole) catch return;
                 if (f.kind != 1) return; // video only

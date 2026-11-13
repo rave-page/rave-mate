@@ -98,8 +98,8 @@ func (realClock) Quality() ClockQuality { return ClockQuality{Tier: TierMonotoni
 // The receiver binds to the native socket on the first datagram, media flows, a dropped fragment is
 // recovered via NACK->retransmit, and rm_tx_close's bye ends the route with errUDPEnded (not a blackout).
 func TestNativeSenderToGoReceiverInterop(t *testing.T) {
-	if v := nativeABIVersion(); v != 3 {
-		t.Fatalf("linked libravemedia ABI = %d, want 3 (stale lib?)", v)
+	if v := nativeABIVersion(); v != 4 {
+		t.Fatalf("linked libravemedia ABI = %d, want 4 (stale lib?)", v)
 	}
 	if rc := nativeWireSelftest(); rc != 0 {
 		t.Fatalf("rm_wire_selftest = %d (wire core mismatch)", rc)
@@ -529,5 +529,106 @@ func TestNativeSender4K60TenSeconds(t *testing.T) {
 	}
 	if js.PolicyDrops != 0 || js.Late > 10 || js.PlayoutMs > 50 {
 		t.Fatalf("receiver playout unhealthy: %+v", js)
+	}
+}
+
+// TestNativeSenderMetaRateAndSync (ABI v4): the REAL Go receiver's control-plane meta reaches the
+// native sender on a native route: a MetaRate (governor trim) becomes the polled rate hint within
+// ~1 s, and a MetaSync ping is answered with a SyncPong in the media-clock domain (pairwise clock
+// estimate + RTT on the receiver). Media keeps flowing meanwhile.
+func TestNativeSenderMetaRateAndSync(t *testing.T) {
+	master := testKey()
+	salt := []byte("medialink-interop-meta-v4")
+	token := routeToken(master, salt)
+	sendKey, sendPre, recvKey, recvPre, err := deriveRouteKeysRaw(master, salt, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clk := NewMonotonicClock()
+	recv, err := newUDPConn(raw, nil, udpConfig{Token: token, Initiator: true, Master: master, Salt: salt,
+		Encrypt: true, Clock: clk, BodyMax: 1200, Liveness: 3 * time.Second, StartupGrace: 15 * time.Second,
+		Keepalive: 100 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recv.Close()
+	ns, err := openCgoNativeSenderClock(sockaddrIn4(raw.LocalAddr().(*net.UDPAddr)), token, true,
+		sendKey, sendPre, recvKey, recvPre, byte(CodecHEVC), 1, 1200, 100000, 0, clk.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ns.close()
+
+	pongs := make(chan SyncPong, 4)
+	go func() {
+		for {
+			f, e := recv.ReadFrame()
+			if e != nil {
+				return
+			}
+			if p, err := DecodeSyncPong(f); err == nil {
+				pongs <- p
+			}
+		}
+	}()
+	au := make([]byte, 3000)
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() { // media flowing so the receiver binds the native socket
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			ns.submitAU(au, int64(i)*16_666_667, i == 0)
+			time.Sleep(16 * time.Millisecond)
+		}
+	}()
+	time.Sleep(300 * time.Millisecond)
+
+	send := func(payload any, seq uint32) {
+		f, err := MetaFrame(payload, clk.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.Seq = seq
+		if err := recv.WriteFrame(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := RateHint{Type: MetaRate, MaxBitrateKbps: 18000, MaxFPS: 30, MaxHeight: 1080, QualityTarget: 70}
+	t0 := time.Now()
+	send(want, 1)
+	var got RateHint
+	var gen uint64
+	for time.Since(t0) < time.Second {
+		if got, gen = ns.rateHint(); gen > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if gen == 0 || got != want {
+		t.Fatalf("rate hint not surfaced within 1 s: gen=%d got=%+v want %+v", gen, got, want)
+	}
+	t.Logf("rate hint surfaced after %v", time.Since(t0))
+
+	t1 := clk.Now()
+	send(SyncPing{Type: MetaSync, ID: 7, T1: t1}, 2)
+	select {
+	case p := <-pongs:
+		t4 := clk.Now()
+		rtt := (t4 - p.T1) - (p.T3 - p.T2)
+		off := ((p.T2 - p.T1) + (p.T3 - t4)) / 2
+		if p.ID != 7 || p.T1 != t1 || rtt < 0 || rtt > int64(50*time.Millisecond) || off < -int64(5*time.Millisecond) || off > int64(5*time.Millisecond) {
+			t.Fatalf("sync pong insane: %+v rtt=%d off=%d", p, rtt, off)
+		}
+		t.Logf("sync pong: rtt=%dus offset=%dus", rtt/1000, off/1000)
+	case <-time.After(time.Second):
+		t.Fatal("no SyncPong from the native sender")
 	}
 }

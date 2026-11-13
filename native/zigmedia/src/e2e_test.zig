@@ -242,12 +242,11 @@ test "e2e chaos: 4K60 sizes, 10 s, 0.1% loss + 2 arrival stalls (60/130 ms): eve
     try testing.expectEqual(@as(u32, 0), r.sink.bad.load(.monotonic));
     try testing.expectEqual(@as(u64, 0), r.tx.aus_dropped);
     try testing.expectEqual(@as(u64, 0), r.rx.plis_sent);
-    // The 130 ms stall is placed on an IDR (frame 420, 500 kB) that also loses a fragment: stall +
-    // IDR serialization + one NACK round trip lands ~15 ms past the 150 ms budget = one miss (a few
-    // repeated frames), never a skip / PLI. Linux caps SO_RCVBUF at net.core.rmem_max (~200 KB by
+    // The 130 ms stall lands on an IDR (frame 420, 500 kB) that also loses a fragment: stall + IDR
+    // serialization + one NACK round trip ~165 ms - inside the 170 ms balanced bound. Linux caps SO_RCVBUF at net.core.rmem_max (~200 KB by
     // default): the flushed stall burst overflows it, NACK recovers every datagram but may cost one
     // more miss there; the Windows receiver honours the 16 MiB buffer.
-    try testing.expect(r.rx.playout.misses <= 2);
+    try testing.expect(r.rx.playout.misses <= if (@import("builtin").os.tag == .windows) 0 else 2);
     try testing.expectEqual(@as(u64, 0), r.rx.playout.gap_drops);
-    try testing.expect(p.over25 <= 8);
+    try testing.expect(p.over25 <= 2); // 0 measured; slack for a shared dev PC's scheduler
 }

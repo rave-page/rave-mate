@@ -17,6 +17,7 @@ const Entry = struct {
     last_len: usize = 0,
     order: u64 = 0,
     last_nack: i64 = 0, // rate-limit NACKs for this frame
+    last_rx: i64 = 0, // last fragment arrival (tail-loss proof)
     buf: []u8, // backing (max frame bytes)
     present: []u64, // fragment-present bitmap (max_frags bits)
 };
@@ -30,6 +31,7 @@ const StreamMax = struct { id: u16 = 0, max: u32 = 0, used: bool = false };
 // Ghost: a frame of which NO datagram arrived although a later frame did (a burst loss / overflow
 // took the whole frame, so there is no entry to prove a hole in). NACKed as fragment 0: the
 // retransmit carries frag_count, then the ordinary overtaken proof NACKs the rest.
+const tail_proof_ns: i64 = 4_000_000;
 const max_ghosts = 16;
 const ghost_ttl_ns: i64 = 1_000_000_000;
 const ghost_max_nacks = 20; // the sender's retransmit ring no longer has it after this: stop asking
@@ -91,6 +93,7 @@ pub const Reassembler = struct {
             if (chunk.len > r.body_max or off + chunk.len > e.buf.len) return null;
         }
         @memcpy(e.buf[off..][0..chunk.len], chunk);
+        e.last_rx = r.now_hint;
         bitSet(e.present, frag_idx);
         e.have += 1;
         if (frag_idx > e.max_frag) e.max_frag = frag_idx;
@@ -229,7 +232,9 @@ pub const Reassembler = struct {
             const stream: u16 = @intCast(e.key >> 32);
             const fseq: u32 = @truncate(e.key);
             const mx = r.streamMax(stream) orelse fseq;
-            const overtaken = seqGreater(mx, fseq);
+            // TAIL proof: the sender paces a frame's fragments back to back; silence on this frame for
+            // tail_proof_ns means its missing tail is lost (no need to wait for the next frame, ~1 frame).
+            const overtaken = seqGreater(mx, fseq) or (e.last_rx != 0 and now - e.last_rx >= tail_proof_ns);
             // Proven-lost ceiling: the whole frame if overtaken, else only fragments BELOW the highest
             // index seen for this frame (a later fragment of the same frame proves the gap under it).
             const limit: u16 = if (overtaken) e.count else (if (e.max_frag > 0) @intCast(e.max_frag) else 0);

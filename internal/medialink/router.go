@@ -1141,7 +1141,7 @@ func (rm *RouteManager) pumpSource(ctx context.Context, session string, pa *pend
 		if udp != nil {
 			udp.Close() // stop the Go answerer conn's media role; the native sender is the sole sender
 		}
-		rm.superviseNativeTX(rctx, cancel, tx, rio)
+		rm.superviseNativeTX(rctx, cancel, tx, rio, src)
 		_ = src.Close()
 		rm.endRoute(session, conn, tx.Err(), "send")
 		return
@@ -1204,11 +1204,17 @@ func (rm *RouteManager) tryAttachNativeTX(pa *pendingAnswer, udp *udpConn, src S
 	return tx, true
 }
 
-// superviseNativeTX supervises a native sender: 1 Hz stats into RouteStat, Done()/ctx → route end.
-func (rm *RouteManager) superviseNativeTX(ctx context.Context, cancel context.CancelFunc, tx NativeTX, rio *routeIO) {
+// superviseNativeTX supervises a native sender: 1 Hz stats into RouteStat, receiver rate hints
+// (polled at 10 Hz) into the source's encoder, Done()/ctx → route end.
+func (rm *RouteManager) superviseNativeTX(ctx context.Context, cancel context.CancelFunc, tx NativeTX, rio *routeIO, src Source) {
 	defer cancel()
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
+	poller, _ := tx.(NativeRateHintPoller)
+	rc, _ := src.(RateControlSource)
+	hint := time.NewTicker(100 * time.Millisecond)
+	defer hint.Stop()
+	var lastGen uint64
 	for {
 		select {
 		case <-ctx.Done():
@@ -1219,6 +1225,14 @@ func (rm *RouteManager) superviseNativeTX(ctx context.Context, cancel context.Ca
 			return
 		case <-t.C:
 			rio.st.setNativeStats(tx.Stats())
+		case <-hint.C:
+			if poller == nil || rc == nil {
+				continue
+			}
+			if h, gen := poller.PollRateHint(); gen != lastGen {
+				lastGen = gen
+				rc.SetRateHint(h) // same application as the Go pump's MetaRate path (sendControl)
+			}
 		}
 	}
 }

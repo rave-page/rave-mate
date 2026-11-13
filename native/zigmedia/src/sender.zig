@@ -37,6 +37,62 @@ pub const Config = struct {
     clock_offset_ns: i64 = 0, // mediaClock - this monotonic clock (Go-supplied); 0 = self-rebase to local mono
 };
 
+/// RateHint mirrors medialink.RateHint (MetaRate) + a generation counter (0 = none received).
+pub const RateHint = struct { gen: u64 = 0, max_bitrate_kbps: i32 = 0, max_fps: i32 = 0, max_height: i32 = 0, quality: i32 = 0 };
+
+// MetaMsg: the receiver meta JSON fields the native sender acts on (unknown fields ignored).
+const MetaMsg = struct { t: []const u8 = "", pli: bool = false, br: i32 = 0, fps: i32 = 0, maxh: i32 = 0, q: i32 = 0, id: u32 = 0, t1: i64 = 0 };
+
+// parseMeta extracts MetaMsg from the flat Go-marshaled meta JSON (no nesting, no escapes in these
+// keys/values). Hand-rolled: std.json pulls f128 compiler-rt symbols the shim's link lacks.
+fn parseMeta(js: []const u8) MetaMsg {
+    var m = MetaMsg{};
+    m.t = jsonStr(js, "t") orelse "";
+    m.pli = std.mem.indexOf(u8, js, "\"pli\":true") != null;
+    m.br = @truncate(jsonInt(js, "br") orelse 0);
+    m.fps = @truncate(jsonInt(js, "fps") orelse 0);
+    m.maxh = @truncate(jsonInt(js, "maxh") orelse 0);
+    m.q = @truncate(jsonInt(js, "q") orelse 0);
+    m.id = @truncate(@as(u64, @bitCast(jsonInt(js, "id") orelse 0)));
+    m.t1 = jsonInt(js, "t1") orelse 0;
+    return m;
+}
+
+fn jsonValue(js: []const u8, key: []const u8) ?[]const u8 {
+    var i: usize = 0;
+    while (std.mem.indexOfPos(u8, js, i, key)) |p| : (i = p + 1) {
+        if (p == 0 or js[p - 1] != '"' or p + key.len >= js.len or js[p + key.len] != '"') continue;
+        var v = p + key.len + 1;
+        while (v < js.len and (js[v] == ' ' or js[v] == ':')) v += 1;
+        return js[v..];
+    }
+    return null;
+}
+
+fn jsonInt(js: []const u8, key: []const u8) ?i64 {
+    const v = jsonValue(js, key) orelse return null;
+    var e: usize = 0;
+    while (e < v.len and (v[e] == '-' or (v[e] >= '0' and v[e] <= '9'))) e += 1;
+    return std.fmt.parseInt(i64, v[0..e], 10) catch null;
+}
+
+fn jsonStr(js: []const u8, key: []const u8) ?[]const u8 {
+    const v = jsonValue(js, key) orelse return null;
+    if (v.len == 0 or v[0] != '"') return null;
+    const end = std.mem.indexOfScalarPos(u8, v, 1, '"') orelse return null;
+    return v[1..end];
+}
+
+test "parseMeta reads Go meta JSON" {
+    const r = parseMeta("{\"t\":\"rate\",\"stream\":0,\"br\":18000,\"fps\":30,\"maxh\":1080,\"q\":70}");
+    try std.testing.expectEqualStrings("rate", r.t);
+    try std.testing.expect(r.br == 18000 and r.fps == 30 and r.maxh == 1080 and r.q == 70);
+    const s = parseMeta("{\"t\":\"sync\",\"id\":7,\"t1\":-123456789012}");
+    try std.testing.expect(s.id == 7 and s.t1 == -123456789012);
+    const n = parseMeta("{\"t\":\"nack\",\"stream\":1,\"from\":1,\"to\":0,\"pli\":true}");
+    try std.testing.expect(n.pli and std.mem.eql(u8, n.t, "nack"));
+}
+
 pub const Stats = struct {
     aus_submitted: u64 = 0,
     aus_sent: u64 = 0,
@@ -127,6 +183,12 @@ pub const Sender = struct {
     s_dead: std.atomic.Value(i32) = .init(0),
     s_nacks: std.atomic.Value(u64) = .init(0),
     s_plis: std.atomic.Value(u64) = .init(0), // receiver keyframe requests honoured
+    hint_gen: std.atomic.Value(u64) = .init(0),
+    hint_br: std.atomic.Value(i32) = .init(0),
+    hint_fps: std.atomic.Value(i32) = .init(0),
+    hint_maxh: std.atomic.Value(i32) = .init(0),
+    hint_q: std.atomic.Value(i32) = .init(0),
+    meta_seq: u32 = 0, // worker-owned: stream-0 meta frame seq
     last_pli_ns: i64 = 0,
 
     on_idr: ?*const fn (?*anyopaque) callconv(.c) void = null,
@@ -333,19 +395,54 @@ pub const Sender = struct {
         }
     }
 
-    // handleMeta answers a receiver PLI (stream-0 meta NACK with pli=true, single fragment) by asking
-    // the encoder for an IDR via on_need_idr, rate-limited. Other meta (reports, rate hints) is
-    // ignored here (see ZIGMEDIA_TRANSPORT.md: rate hints on native routes are a known gap).
+    // handleMeta handles the receiver's stream-0 meta frames on a native route (the Go supervisor does
+    // not read meta there): PLI (NACK pli=true) -> on_need_idr (rate-limited); MetaRate -> the polled
+    // rate hint (Go applies it to the encoder, rm_tx_rate_hint); MetaSync -> SyncPong in the media-
+    // clock domain (pairwise clock estimate + RTT on the receiver). Reports are ignored.
     fn handleMeta(s: *Sender, h: wire.Header, body: []const u8, now: i64) void {
         if (h.stream != 0 or h.frag_count != 1) return;
         const f = wire.parseFrameForTest(body) catch return;
-        if (f.kind != 0 or std.mem.indexOf(u8, f.payload, "\"pli\":true") == null) return;
-        if (s.last_pli_ns != 0 and now - s.last_pli_ns < 250 * std.time.ns_per_ms) return;
-        s.last_pli_ns = now;
-        _ = s.s_plis.fetchAdd(1, .monotonic);
-        if (s.on_idr) |cb| cb(s.idr_user);
+        if (f.kind != 0) return;
+        const m = parseMeta(f.payload);
+        if (std.mem.eql(u8, m.t, "nack")) {
+            if (!m.pli) return;
+            if (s.last_pli_ns != 0 and now - s.last_pli_ns < 250 * std.time.ns_per_ms) return;
+            s.last_pli_ns = now;
+            _ = s.s_plis.fetchAdd(1, .monotonic);
+            if (s.on_idr) |cb| cb(s.idr_user);
+        } else if (std.mem.eql(u8, m.t, "rate")) {
+            s.hint_br.store(m.br, .monotonic);
+            s.hint_fps.store(m.fps, .monotonic);
+            s.hint_maxh.store(m.maxh, .monotonic);
+            s.hint_q.store(m.q, .monotonic);
+            _ = s.hint_gen.fetchAdd(1, .release); // publish after the fields
+        } else if (std.mem.eql(u8, m.t, "sync")) {
+            const t2 = now + s.cfg.clock_offset_ns;
+            var js: [160]u8 = undefined;
+            const t3 = nowNs() + s.cfg.clock_offset_ns;
+            const json = std.fmt.bufPrint(&js, "{{\"t\":\"syncr\",\"id\":{d},\"t1\":{d},\"t2\":{d},\"t3\":{d}}}", .{ m.id, m.t1, t2, t3 }) catch return;
+            s.sendMeta(json, t3);
+        }
     }
 
+    // sendMeta sends one single-fragment stream-0 meta frame (own seq space, not the media frame_seq).
+    fn sendMeta(s: *Sender, json: []const u8, pts: i64) void {
+        var fr: [wire.frame_header_len + 192]u8 = undefined;
+        if (json.len > 192) return;
+        const n = wire.marshalFrame(&fr, .{ .stream = 0, .kind = 0, .codec = 0, .flags = 0, .seq = s.meta_seq, .pts = pts }, json);
+        const dglen = s.buildDatagram(wire.dg_type_media, 0, s.meta_seq, 0, 1, fr[0..n]);
+        s.sendRaw(s.dg_buf[0..dglen]);
+        s.meta_seq +%= 1;
+    }
+
+    /// rateHint returns the last receiver rate hint (gen 0 = none yet). Lock-free; any thread.
+    pub fn rateHint(s: *Sender) RateHint {
+        while (true) {
+            const g = s.hint_gen.load(.acquire);
+            const r = RateHint{ .gen = g, .max_bitrate_kbps = s.hint_br.load(.monotonic), .max_fps = s.hint_fps.load(.monotonic), .max_height = s.hint_maxh.load(.monotonic), .quality = s.hint_q.load(.monotonic) };
+            if (s.hint_gen.load(.acquire) == g) return r;
+        }
+    }
     fn handleNack(s: *Sender, body: []const u8) void {
         _ = s.s_nacks.fetchAdd(1, .monotonic);
         if (body.len < 2) return;

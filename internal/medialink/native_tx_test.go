@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -104,7 +105,7 @@ func TestSuperviseNativeTXClosesOnDone(t *testing.T) {
 	ftx := &fakeNativeTX{done: make(chan struct{})}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { rm.superviseNativeTX(ctx, cancel, ftx, rio); close(done) }()
+	go func() { rm.superviseNativeTX(ctx, cancel, ftx, rio, &sliceSource{}); close(done) }()
 	close(ftx.done) // native ended on its own
 	select {
 	case <-done:
@@ -113,6 +114,59 @@ func TestSuperviseNativeTXClosesOnDone(t *testing.T) {
 	}
 	if !ftx.closed {
 		t.Fatal("tx not closed on native end")
+	}
+}
+
+// hintTX is a native sender that received receiver rate hints (NativeRateHintPoller).
+type hintTX struct {
+	fakeNativeTX
+	mu  sync.Mutex
+	h   RateHint
+	gen uint64
+}
+
+func (h *hintTX) PollRateHint() (RateHint, uint64) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.h, h.gen
+}
+func (h *hintTX) set(r RateHint) { h.mu.Lock(); h.h = r; h.gen++; h.mu.Unlock() }
+
+type rateSrc struct {
+	sliceSource
+	mu  sync.Mutex
+	got []RateHint
+}
+
+func (r *rateSrc) SetRateHint(h RateHint) { r.mu.Lock(); r.got = append(r.got, h); r.mu.Unlock() }
+func (r *rateSrc) hints() []RateHint {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]RateHint(nil), r.got...)
+}
+
+// TestSuperviseNativeTXAppliesRateHints: a MetaRate the native sender received (governor trim: bitrate,
+// then fps, then height) reaches the source's encoder within ~1 s, once per new hint.
+func TestSuperviseNativeTXAppliesRateHints(t *testing.T) {
+	rm := nativeTestRM()
+	rio := &routeIO{st: newRouteStat("s", "B", 3, "send")}
+	tx := &hintTX{fakeNativeTX: fakeNativeTX{done: make(chan struct{})}}
+	src := &rateSrc{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { rm.superviseNativeTX(ctx, cancel, tx, rio, src); close(done) }()
+	defer func() { cancel(); <-done }()
+	want := RateHint{Type: MetaRate, MaxBitrateKbps: 18000, MaxFPS: 30, MaxHeight: 1080}
+	t0 := time.Now()
+	tx.set(want)
+	waitFor(t, time.Second, func() bool { return len(src.hints()) == 1 })
+	if got := src.hints()[0]; got != want {
+		t.Fatalf("hint %+v, want %+v", got, want)
+	}
+	t.Logf("hint applied after %v", time.Since(t0))
+	time.Sleep(300 * time.Millisecond) // no new gen: not re-applied
+	if n := len(src.hints()); n != 1 {
+		t.Fatalf("re-applied unchanged hint: %d", n)
 	}
 }
 

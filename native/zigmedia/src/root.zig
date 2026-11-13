@@ -14,7 +14,7 @@ const wire = @import("wire.zig");
 const snd = @import("sender.zig");
 const sock = @import("sock.zig");
 
-pub const abi_version: u32 = 3;
+pub const abi_version: u32 = 4;
 
 const alloc = std.heap.c_allocator;
 
@@ -181,6 +181,15 @@ export fn rm_tx_stats_get(s: ?*snd.Sender, out: ?*RmTxStats) void {
         .nacks_recv = st.nacks_recv,
     };
 }
+const RmRateHint = extern struct { gen: u64, max_bitrate_kbps: i32, max_fps: i32, max_height: i32, quality: i32 };
+
+export fn rm_tx_rate_hint(s: ?*snd.Sender, out: ?*RmRateHint) void {
+    const sender = s orelse return;
+    const o = out orelse return;
+    const h = sender.rateHint();
+    o.* = .{ .gen = h.gen, .max_bitrate_kbps = h.max_bitrate_kbps, .max_fps = h.max_fps, .max_height = h.max_height, .quality = h.quality };
+}
+
 export fn rm_tx_close(s: ?*snd.Sender) void {
     if (s) |sender| sender.close();
 }
