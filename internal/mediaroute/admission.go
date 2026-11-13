@@ -22,6 +22,7 @@ type Admission struct {
 	FreeMB     uint64
 	NeedMB     uint64
 	RequiredMB uint64
+	Mode       string // receive decision: "hw" | "cpu" (light path: CPU decode into the destination) | ""
 }
 
 // Hold is the visible HELD state of one receive that cannot open (ctl routes / encoder-scan / Peers).

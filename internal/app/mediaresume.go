@@ -3,11 +3,14 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/debuglog"
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/mediaroute"
 	"rave.page/mate/internal/webcam"
@@ -170,8 +173,19 @@ func (r *rememberingReceives) reconcile() {
 		}
 	}
 	avail := map[string]bool{}
+	geomChanged := false
 	for _, s := range r.ReceiveControl.RemoteVideoSources() {
 		avail[s.Peer+"\x00"+s.Desc.ID] = true
+		// Persist the nominal geometry of remembered sources so the destination can be claimed at the
+		// next start before any advert arrives (1a). Advert size = nominal; coded size never shows here.
+		r.mu.Lock()
+		if r.cfg.Features.MediaLink.SetRememberedGeometry(s.Peer, s.Desc.ID, s.Desc.Name, s.Desc.Width, s.Desc.Height, int(s.Desc.FPS)) {
+			geomChanged = true
+		}
+		r.mu.Unlock()
+	}
+	if geomChanged {
+		r.save()
 	}
 	for _, w := range wanted {
 		key := w.Peer + "\x00" + w.SourceID
@@ -322,4 +336,13 @@ func runWebcamSettingsPersist(ctx context.Context, cam webcam.CamControl, cfg *c
 			}
 		}
 	}
+}
+
+// gpuCSVPath is gpumem.csv in the fixed log dir ("" = none resolvable: CSV off).
+func gpuCSVPath() string {
+	d := debuglog.LogDir()
+	if d == "" || os.MkdirAll(d, 0o700) != nil {
+		return ""
+	}
+	return filepath.Join(d, "gpumem.csv")
 }

@@ -503,6 +503,29 @@ type MediaLinkFeature struct {
 	VramPolicy string `json:"vramPolicy,omitempty"`
 	// VramMarginMB raises the non-strict margin floor (0 = default 64 MB; margin = max(this, 25% need)).
 	VramMarginMB int `json:"vramMarginMB,omitempty"`
+	// VramSystemHeadroomMB is the free VRAM a FULL allocation (HW decode, new sender) must leave for
+	// OTHER apps (Parsec/OBS NVENC, Resolume) - incident 2026-11-13. 0 = policy default (balanced 700,
+	// permissive 400; strict uses its reserve). Also the floor under which a running HW decoder yields.
+	VramSystemHeadroomMB int `json:"vramSystemHeadroomMB,omitempty"`
+	// VramHardFloorMB: even the lightest path (CPU decode into the destination) never leaves less free
+	// VRAM than this (0 = 256); below it the receive is HELD.
+	VramHardFloorMB int `json:"vramHardFloorMB,omitempty"`
+	// CPUDecodeFallback (owner directive 2026-11-13): when the VRAM budget refuses or cannot keep a HW
+	// decode pipeline, decode in SOFTWARE inside the decode child into the SAME destination (no DXVA
+	// pool, no new sender, sender asked for a lower coded height) and return to HW once free VRAM >= HW
+	// need + HWPromoteBufferMB for HWPromoteDwellSec. Tri-state, DEFAULT ON; explicit false = hold.
+	CPUDecodeFallback *bool `json:"cpuDecodeFallback,omitempty"`
+	// CPUDecodeThreads bounds the software decoder's worker threads (0 = 4; never above half the CPUs).
+	CPUDecodeThreads int `json:"cpuDecodeThreads,omitempty"`
+	// HWPromoteBufferMB is the extra free VRAM required before returning to HW (0 = max(512, 2x need)).
+	HWPromoteBufferMB int `json:"hwPromoteBufferMB,omitempty"`
+	// HWPromoteDwellSec is how long that headroom must hold before the switch back (0 = 45 s).
+	HWPromoteDwellSec int `json:"hwPromoteDwellSec,omitempty"`
+	// SenderKeeper hosts GPU receive destinations in rave-mate-keeper.exe (pure D3D11 Spout sender, no
+	// GL/interop in our processes) so they survive daemon/media-child restarts and self-updates
+	// (VRAM_FULL_CARD_POLICY 1b). Tri-state, DEFAULT OFF until rig-verified; env
+	// RAVE_MATE_SENDER_KEEPER=1|0 overrides.
+	SenderKeeper *bool `json:"senderKeeper,omitempty"`
 	// SenderMaxHeight pins the immortal Spout sender texture height so its shared handle never
 	// changes across a source-resolution change (decode scales into it). 0 = auto (first-observed
 	// source height, capped 2160); >0 = explicit cap.
@@ -518,7 +541,33 @@ type MediaLinkFeature struct {
 type RememberedReceive struct {
 	Peer     string `json:"peer"`           // remote node id (stable)
 	SourceID string `json:"sourceId"`       // stable source id ("spout:<name>")
-	Name     string `json:"name,omitempty"` // display only
+	Name     string `json:"name,omitempty"` // display only; also names the republish sender ("rave-mate link <Name>")
+	// Nominal geometry of the source (the advert's real size, NOT the coded size): lets the receiver
+	// claim its destination at start, before the first advert (VRAM_FULL_CARD_POLICY 1a). 0 = unknown.
+	W   int `json:"w,omitempty"`
+	H   int `json:"h,omitempty"`
+	FPS int `json:"fps,omitempty"`
+}
+
+// SetRememberedGeometry records the nominal geometry (and display name) of a remembered receive.
+// Returns true if anything changed (caller persists). A geometry change is a NOMINAL change only when
+// the advert's real size changed - the coded size never reaches here.
+func (m *MediaLinkFeature) SetRememberedGeometry(peer, sourceID, name string, w, h, fps int) bool {
+	for i := range m.RememberedReceives {
+		r := &m.RememberedReceives[i]
+		if r.Peer != peer || r.SourceID != sourceID {
+			continue
+		}
+		if w <= 0 || h <= 0 || (r.W == w && r.H == h && r.FPS == fps && (name == "" || r.Name == name)) {
+			return false
+		}
+		r.W, r.H, r.FPS = w, h, fps
+		if name != "" {
+			r.Name = name
+		}
+		return true
+	}
+	return false
 }
 
 // ZeroCopyCapture reports whether zero-copy Spout→encoder capture is enabled. Env
@@ -604,6 +653,29 @@ func (m MediaLinkFeature) VramPolicyName() string {
 		return v
 	}
 	return m.VramPolicy
+}
+
+// CPUDecodeFallbackEnabled reports whether the adaptive HW/CPU decode fallback is on (env
+// RAVE_MATE_CPU_DECODE_FALLBACK=1|0 wins; default ON).
+func (m MediaLinkFeature) CPUDecodeFallbackEnabled() bool {
+	switch os.Getenv("RAVE_MATE_CPU_DECODE_FALLBACK") {
+	case "1", "true":
+		return true
+	case "0", "false":
+		return false
+	}
+	return m.CPUDecodeFallback == nil || *m.CPUDecodeFallback
+}
+
+// SenderKeeperEnabled reports whether receive destinations are hosted by rave-mate-keeper (default OFF).
+func (m MediaLinkFeature) SenderKeeperEnabled() bool {
+	switch os.Getenv("RAVE_MATE_SENDER_KEEPER") {
+	case "1", "true":
+		return true
+	case "0", "false":
+		return false
+	}
+	return m.SenderKeeper != nil && *m.SenderKeeper
 }
 
 // ResolvedVramMarginMB returns the configured non-strict margin floor (0 = default; negatives => 0).

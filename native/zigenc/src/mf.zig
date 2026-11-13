@@ -280,6 +280,21 @@ pub const IMFDXGIDeviceManager = extern struct {
     },
 };
 
+/// swdec: the handful of private MF/D3D symbols the decode child's SOFTWARE mode (dec.zig, VRAM-light
+/// CPU decode, .devnotes/VRAM_FULL_CARD_POLICY.md 1e) needs. Aliases only - no new definitions.
+pub const VOP_ = VOP;
+
+pub const swdec = struct {
+    pub const IID_CodecAPI = IID_ICodecAPI;
+    pub const IID_2DBuffer = IID_IMF2DBuffer;
+    pub const Variant = VARIANT;
+    pub const vt_ui4 = VT_UI4;
+    pub const fmt_nv12 = DXGI_FORMAT_NV12;
+    pub const bind_srv = D3D11_BIND_SHADER_RESOURCE;
+    // CODECAPI_AVDecNumWorkerThreads {9561C3E8-EA9E-4435-9B1E-A93E691894D8}
+    pub const AVDecNumWorkerThreads = g(0x9561c3e8, 0xea9e, 0x4435, .{ 0x9b, 0x1e, 0xa9, 0x3e, 0x69, 0x18, 0x94, 0xd8 });
+};
+
 pub const ICodecAPI = extern struct {
     v: *const extern struct {
         _iunk: [3]VOP,

@@ -33,6 +33,9 @@ type Options struct {
 	ProcessInterval time.Duration // process sweep cadence (default 5m)
 	WarnFreeMB      uint64        // warn threshold; 0 => auto = max(1024, 8% of budget)
 	NotifyEnabled   bool          // gate the toast (log lines always emit)
+	// CSVPath, when set, appends one row per adapter sample AND a per-process sweep every sample (1/min)
+	// - the persistent VRAM history (gpumem.csv beside the log, bounded + rotated).
+	CSVPath string
 
 	now func() time.Time // test clock hook; nil => time.Now
 }
@@ -66,12 +69,13 @@ type Monitor struct {
 	lastAt      time.Time
 	lastProcs   []AdapterProcs
 	lastProcsAt time.Time
+	csv         *csvLog
 }
 
 // New builds a Monitor. Cheap; no syscalls until Run.
 func New(opt Options) *Monitor {
 	opt.applyDefaults()
-	return &Monitor{opt: opt, states: map[string]*watchState{}}
+	return &Monitor{opt: opt, states: map[string]*watchState{}, csv: newCSVLog(opt.CSVPath)}
 }
 
 // Run drives the sampler until ctx is cancelled. Adapter sample every SampleInterval;
@@ -108,6 +112,12 @@ func (m *Monitor) sampleAdapters() {
 	m.last = append([]AdapterUsage(nil), ads...)
 	m.lastAt = now
 	m.mu.Unlock()
+	if m.csv != nil {
+		m.csv.write(adapterRows(now, ads))
+		if aps, err := m.opt.Sampler.SampleProcesses(sweepTopN); err == nil {
+			m.csv.write(processRows(now, aps))
+		}
+	}
 	for _, a := range ads {
 		m.opt.Log.Info("gpumem", "vram", map[string]any{
 			"adapter": a.Name, "usedMB": a.UsedMB, "freeMB": a.FreeMB, "budgetMB": a.BudgetMB,

@@ -17,6 +17,7 @@ import (
 	"rave.page/mate/internal/mediaroute"
 	"rave.page/mate/internal/mfenc"
 	"rave.page/mate/internal/pwcapture"
+	"rave.page/mate/internal/senderkeeper"
 	"rave.page/mate/internal/webcam"
 )
 
@@ -144,7 +145,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 			return c.PreferCodec, c.PinnedEncoder()
 		},
 		EncodeDevice:       encDevResolver,
-		Headroom:           func() (uint64, bool) { h := gpumem.ReadHeadroom(gpuSampler); return h.FreeMB, h.Present },
+		Headroom:           SmoothedFree(gpuSampler), // 10 s mean: raw free swings 100s of MB/s (incident 2026-11-13)
 		GovernorEnabled:    func() bool { return liveCfg().VramGovernorEnabled() },
 		GovernorFloorMB:    f.vram.GovernorFloorMB, // policy-derived: a full card is normal; trimming frees no VRAM
 		GovernorBaseKbps:   func() int { return liveCfg().Bitrate() },
@@ -171,6 +172,9 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 		},
 		AdmitSender:  f.vram.AdmitSender, // unified budget gate (static-floor fallback stays via Headroom)
 		AdmitReceive: f.vram.AdmitReceive,
+		// 1b: adopt keeper-hosted destinations (config mediaLink.senderKeeper, default off). ADOPT-ONLY
+		// here: this child sits in the daemon's kill-on-close job, so it must never be the keeper's parent.
+		Keeper: senderkeeper.NewSupervisor(senderkeeper.Options{Dial: senderkeeper.DialPipe}),
 	})
 
 	// Throughput micro-benchmark: lazy + idle-gated, skips while any route is live. Feeds the

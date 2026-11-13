@@ -146,6 +146,10 @@ func (m *mfDecoder) PipeStats() medialink.PipelineStats {
 	if !m.dec.IsHardware() {
 		accel = "d3d11-dxva" // the MS D3D11-aware decoder MFT, still GPU-resident
 	}
+	degrade := ""
+	if st.Mode == "cpu" { // adaptive VRAM fallback: software decode into the same destination
+		accel, degrade = "software (cpu mode)", "VRAM: "+st.ModeText
+	}
 	// Published volume: on THIS path the child writes the destination texture, so DecFrames is the
 	// delivered count (the inner sink's Write is never called for this codec). Bytes are the
 	// destination geometry - the frames never exist as host bytes, which is the whole point.
@@ -162,5 +166,13 @@ func (m *mfDecoder) PipeStats() medialink.PipelineStats {
 		ZeroDecode: st.DecFlags&1 != 0, DecFPS: st.DecFPS, DecBusyMs: st.DecBusyMs,
 		InDropped: st.InDropped, DecDropped: st.DecDropped, DecErrors: st.DecErrors,
 		DecStaleMs: st.DecStaleMs, DecMtxTimeo: st.MtxTimeouts, Downgrades: st.Downgrades,
+		DegradeReason: degrade,
 	}
 }
+
+// CodedCapHeight implements medialink.CodedCapper: THIS route's CPU-decode-mode coded-height cap.
+func (m *mfDecoder) CodedCapHeight() int { return m.dec.CodedCapHeight() }
+
+// SetKeyframeRequester implements medialink.KeyframeRequestable: a decode-mode switch asks the
+// route's sender for an IDR at once.
+func (m *mfDecoder) SetKeyframeRequester(f func()) { m.dec.SetKeyframeRequester(f) }

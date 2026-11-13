@@ -87,7 +87,7 @@ func (b *Budget) marginText() string {
 	if pct <= 0 {
 		pct = DefaultMarginPct
 	}
-	return fmt.Sprintf("margin=max(%dMB,%.0f%% need) collapseFloor=%dMB", minMB, pct*100, CollapseFloorMB)
+	return fmt.Sprintf("systemFloor=%dMB hardFloor=%dMB margin=max(%dMB,%.0f%% need)", SystemFloorMB(b.pol), HardFloorMB(b.pol), minMB, pct*100)
 }
 
 // GovernorFloorMB is the free-VRAM floor the receive-side rate ladder protects under this policy. strict
@@ -123,8 +123,18 @@ func (b *Budget) AdmitSender(w, h int) Decision {
 // destination sender and its receiver follow cost. A parked/kept destination (newSender=false) is
 // already paid for and triggers nothing new in Resolume.
 func (b *Budget) AdmitReceive(w, h, fps int, codec string, newSender bool) Decision {
+	return b.AdmitReceiveDecode(w, h, fps, codec, newSender, 0)
+}
+
+// AdmitReceiveDecode is AdmitReceive with the decode cost overridden (decodeMB > 0: e.g. the SOFTWARE
+// decode mode's small upload cost, so a receive the HW pipeline cannot afford is still admitted in
+// CPU mode instead of held).
+func (b *Budget) AdmitReceiveDecode(w, h, fps int, codec string, newSender bool, decodeMB float64) Decision {
 	gd := Geom{W: w, H: h, FPS: fps, Codec: codec}
 	cost := b.cost(OpDecode, gd)
+	if decodeMB > 0 {
+		cost = Cost{MB: decodeMB, Source: "estimate"}
+	}
 	follow := 0.0
 	if newSender {
 		gs := Geom{W: w, H: h, Codec: "nrgba"}
@@ -135,6 +145,55 @@ func (b *Budget) AdmitReceive(w, h, fps int, codec string, newSender bool) Decis
 	d := AdmitNeed(b.inputs(), OpReceive, gd, cost, follow, b.pol)
 	b.record(OpReceive, d)
 	return d
+}
+
+// OpDecodeSW is the SOFTWARE decode mode (coded-size NV12 upload texture + VP; destination excluded).
+const OpDecodeSW Op = "decode-sw"
+
+// AdmitCost admits an op whose cost the caller computed (no learned entry yet).
+func (b *Budget) AdmitCost(op Op, g Geom, costMB float64) Decision {
+	d := AdmitNeed(b.inputs(), op, g, Cost{MB: costMB, Source: "estimate"}, 0, b.pol)
+	b.record(op, d)
+	return d
+}
+
+// AdmitLightCost admits a LIGHT-path allocation (software decode upload texture + VP) against the
+// hard floor (AdmitLight).
+func (b *Budget) AdmitLightCost(op Op, g Geom, costMB float64) Decision {
+	d := AdmitLight(b.inputs(), op, g, Cost{MB: costMB, Source: "estimate"}, 0, b.pol)
+	b.record(op, d)
+	return d
+}
+
+// AdmitReceiveTiered is the receive decision with the lightest-path fallback: HW decode when the full
+// need leaves the system floor; else (cpuOK) CPU decode mode - cpuMB for the upload path plus, for a
+// NEW destination, the sender + receiver follow - when that leaves the hard floor; else hold.
+func (b *Budget) AdmitReceiveTiered(w, h, fps int, codec string, newSender bool, cpuOK bool, cpuMB float64) Decision {
+	d := b.AdmitReceive(w, h, fps, codec, newSender)
+	if d.Admit {
+		d.DecodeMode = "hw"
+		return d
+	}
+	if !cpuOK {
+		return d
+	}
+	cost := Cost{MB: cpuMB, Source: "estimate"}
+	follow := 0.0
+	if newSender {
+		gs := Geom{W: w, H: h, Codec: "nrgba"}
+		cost.MB += b.cost(OpSender, gs).MB
+		follow = FollowCostMB(gs)
+	}
+	l := AdmitLight(b.inputs(), OpReceive, Geom{W: w, H: h, FPS: fps, Codec: codec}, cost, follow, b.pol)
+	if l.Admit {
+		l.DecodeMode = "cpu"
+		l.Reason = "HW decode would breach the system floor (" + d.Reason + ") - CPU decode mode: " + l.Reason
+		b.record(OpReceive, l)
+		return l
+	}
+	l.Reason = d.Reason + "; " + l.Reason
+	b.record(OpReceive, l)
+	return l
 }
 
 // Headroom returns the current primary-adapter headroom (attempt verification). Absent => Present=false.

@@ -916,6 +916,10 @@ type openCmd struct {
 	// SW: take the SOFTWARE encoder tier for this session (our ledger poisoned the hardware MFT
 	// on this adapter). Per-session, so one bad adapter never forces software on the others.
 	SW bool `json:"sw,omitempty"`
+	// proto v6 dir:"dec": SW above = SOFTWARE decode mode; Threads bounds its worker threads; KeyGate
+	// feeds a fresh decoder only from the first keyframe.
+	Threads int  `json:"threads,omitempty"`
+	KeyGate bool `json:"keygate,omitempty"`
 }
 
 func (c *procChild) openSession(s *ProcSession) (openedEv, error) {
@@ -976,6 +980,12 @@ func (c *procChild) openDecSession(d *ProcDecSession) (openedEv, error) {
 		OutW: d.outW, OutH: d.outH, FpsN: fpsN, FpsD: fpsD,
 		Dir: "dec", Codec: codec, DSh: h, DFmt: dfmt, DName: name, InRingKB: d.ringKB,
 		NullDec: d.nullDec, NetBlk: d.netBlk}
+	if c.waitProtoVer(0) >= protoVerSWDec { // pre-v6 children ignore unknown fields, but never ask them
+		cmd.SW, cmd.KeyGate = d.software.Load(), d.keygate.Load()
+		if cmd.SW {
+			cmd.Threads = d.threads
+		}
+	}
 	if err := c.send(cmd); err != nil {
 		return openedEv{}, err
 	}

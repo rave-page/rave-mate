@@ -1492,6 +1492,9 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 			}
 		}
 		ar.jb = jb
+		if kr, ok := final.(KeyframeRequestable); ok {
+			kr.SetKeyframeRequester(jb.pli) // a decode-mode switch asks for an IDR at once (1e)
+		}
 	}
 	rm.trackRoute(ans.Session, ar)
 	rm.dropDuplicateRecv(peer, po.sourceID, ans.Session) // one recv route per (peer, source): replace atomically
@@ -1521,9 +1524,9 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 		budget := rm.budgetKbpsFn(ans.Codec, srcDesc.Width, srcDesc.Height, int(srcDesc.FPS), linkCeil)
 		switch {
 		case udp != nil:
-			go rm.guard("congestGovernor", func() { rm.congestGovernor(rctx, rio, udp, ans.Stream, budget, int(srcDesc.FPS)) })
+			go rm.guard("congestGovernor", func() { rm.congestGovernor(rctx, rio, udp, ans.Stream, budget, int(srcDesc.FPS), decodeCapOf(final)) })
 		case rm.headroom != nil:
-			go rm.guard("rateGovernor", func() { rm.rateGovernor(rctx, rio, ans.Stream, budget, int(srcDesc.FPS)) })
+			go rm.guard("rateGovernor", func() { rm.rateGovernor(rctx, rio, ans.Stream, budget, int(srcDesc.FPS), decodeCapOf(final)) })
 		}
 	}
 	if jb != nil {
@@ -1567,6 +1570,14 @@ func (rm *RouteManager) runNativeReceive(rctx context.Context, cancel context.Ca
 	ar.conn, ar.udp = conn, nil
 	rio.st.setTransportImpl("native")
 	rio.st.setNativeRX(rm.playoutPreset().Name)
+	if kr, ok := final.(KeyframeRequestable); ok { // decode-mode switch: PLI over the native control seq
+		stream := ans.Stream
+		kr.SetKeyframeRequester(func() {
+			if rio.writeMeta(NACK{Type: MetaNACK, Stream: stream, From: 1, To: 0, FrameLevel: true}, rm.clock.Now()) == nil {
+				rio.st.addPLI()
+			}
+		})
+	}
 	rm.trackRoute(ans.Session, ar)
 	rm.dropDuplicateRecv(peer, ar.sourceID, ans.Session)
 	rm.infof("route up (recv) [native rx]", map[string]any{"session": ans.Session, "peer": peer, "stream": ans.Stream,
@@ -1586,7 +1597,7 @@ func (rm *RouteManager) runNativeReceive(rctx context.Context, cancel context.Ca
 		}
 		budget := rm.budgetKbpsFn(ans.Codec, srcDesc.Width, srcDesc.Height, int(srcDesc.FPS), rm.localLinkCeilKbps(ans.Addr, frac))
 		go rm.guard("congestGovernor", func() {
-			rm.congestGovernor(rctx, rio, nativeUDPStats{nrx}, ans.Stream, budget, int(srcDesc.FPS))
+			rm.congestGovernor(rctx, rio, nativeUDPStats{nrx}, ans.Stream, budget, int(srcDesc.FPS), decodeCapOf(final))
 		})
 	}
 	err := rm.superviseNativeRX(rctx, conn, nrx, rio.st, peer)

@@ -165,6 +165,8 @@ type ProcDecStats struct {
 	DecResizes  uint64
 	DecCodedW   int
 	DecCodedH   int
+	Mode        string
+	ModeText    string
 }
 
 // ProcDecSession is unavailable on this platform (no Zig MF decode child).
@@ -187,6 +189,12 @@ func (d *ProcDecSession) Stats() ProcDecStats                    { return ProcDe
 func (d *ProcDecSession) Name() string                           { return "" }
 func (d *ProcDecSession) IsHardware() bool                       { return false }
 func (d *ProcDecSession) Close()                                 {}
+
+// CodedCapHeight is always 0 here (no native decode).
+func (d *ProcDecSession) CodedCapHeight() int { return 0 }
+
+// SetKeyframeRequester is a no-op here.
+func (d *ProcDecSession) SetKeyframeRequester(func()) {}
 
 // NoteDecodeResizeGrace: no native decode destination to protect off Windows.
 func NoteDecodeResizeGrace() {}

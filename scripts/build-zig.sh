@@ -83,6 +83,14 @@ case "$target" in
     mkdir -p "$ROOT/internal/mfenc/embedded"
     cp -f zig-out/bin/rave-mate-enc.exe "$ROOT/internal/mfenc/embedded/rave-mate-enc.exe"
     echo "rave-mate-enc built + embed-staged ($ver, ${target:-native})"
+    # --- zigkeeper: long-lived pure-D3D11 Spout sender host (native/zigkeeper → rave-mate-keeper.exe,
+    # VRAM_FULL_CARD_POLICY 1b; config mediaLink.senderKeeper, default off). Ship beside rave-mate.exe.
+    # Not embedded yet: the self-updater swaps only the main exe (follow-up before default-on).
+    cd ../zigkeeper
+    "$ZIG" build -Drelease ${target:+-Dtarget=$target}
+    ls -la zig-out/bin
+    echo "rave-mate-keeper built ($ver, ${target:-native})"
+    cd ../zigenc
     ;;
 esac
 
