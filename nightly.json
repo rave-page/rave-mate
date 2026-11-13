@@ -1,13 +1,13 @@
 {
-  "version": "nightly-983732a",
-  "build": 449,
-  "commit": "983732a",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-449-20261113-983732a.exe",
-  "sha256": "dee2cb02fb1be893433ae034489cb52c6820f394a8ddaf87bfb1d11eb2123a73",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-449-20261113-983732a.exe",
-  "installer_sha256": "e048817055b56f31ed5cd3e12fb843797b4e04c04216bdc2de303af6705d7e4e",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-449-20261113-983732a",
-  "linux_sha256": "1fb2f70193e1c31640e53340752c2c8d1d0951bc2a8fde73fec675dd6ba13aa8",
+  "version": "nightly-6d19c73",
+  "build": 450,
+  "commit": "6d19c73",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-450-20261113-6d19c73.exe",
+  "sha256": "b36faa4d635146d99167e305380ee53c3a980190b0cba4e24f7af4b9e74af6d7",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-450-20261113-6d19c73.exe",
+  "installer_sha256": "447a1f2d9e0003638a9dac9f9578c891bb9c415f01a04dc66622ab5cecc57bed",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-450-20261113-6d19c73",
+  "linux_sha256": "57c252843e59905a382f9c9c8c0cec27998ea64d1c8cbf1d6110a79bc36d37ae",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-11-13T02:28:24Z",
-  "notes": "Merge feat/vram-fullcard: evidence-based VRAM admission (vramPolicy strict|balanced|permissive), verified attempt, HELD state in ctl"
+  "released": "2026-11-13T04:44:22Z",
+  "notes": "Merge feat/vram-fullcard: system headroom floor, adaptive HW/CPU decode, yield under pressure, claim-at-start, sender keeper (opt-in), rotating dated log + gpumem.csv"
 }
