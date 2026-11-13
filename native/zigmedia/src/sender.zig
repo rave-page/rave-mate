@@ -9,6 +9,7 @@ const builtin = @import("builtin");
 const linux = std.os.linux;
 const sock = @import("sock.zig");
 const hrtimer = @import("hrtimer.zig");
+const tcp_tx = @import("tcp_tx.zig");
 const keys = @import("keys.zig");
 const aead = @import("aead.zig");
 const wire = @import("wire.zig");
@@ -194,6 +195,8 @@ pub const Sender = struct {
     on_idr: ?*const fn (?*anyopaque) callconv(.c) void = null,
     idr_user: ?*anyopaque = null,
 
+    tcp: ?tcp_tx.TcpTx = null, // TCP transport (legacy Conn wire); null = UDP datagram profile
+
     pub fn open(alloc: std.mem.Allocator, cfg: Config, fd: sock.Fd, own_fd: bool) !*Sender {
         const s = try alloc.create(Sender);
         errdefer alloc.destroy(s);
@@ -209,6 +212,14 @@ pub const Sender = struct {
             .dg_buf = try alloc.alloc(u8, wire.header_len + cfg.body_max + aead.tag_len + 64),
             .rx_buf = try alloc.alloc(u8, 2048),
         };
+        errdefer {
+            s.queue.deinit();
+            s.ring.deinit();
+            alloc.free(s.frame_buf);
+            alloc.free(s.dg_buf);
+            alloc.free(s.rx_buf);
+        }
+        if (cfg.transport == .tcp) s.tcp = try tcp_tx.TcpTx.init(alloc, fd, au_slot_cap + wire.frame_header_len);
         s.seq = cfg.initial_seq; // continue the Go conn's datagram seq space (strictly-newest at the receiver)
         s.s_seq.store(cfg.initial_seq, .monotonic);
         s.last_recv_ns = nowNs();
@@ -221,6 +232,7 @@ pub const Sender = struct {
         s.stop.store(true, .release);
         if (s.thread) |t| t.join();
         if (s.own_fd) sock.close(s.fd);
+        if (s.tcp) |*t| t.deinit();
         s.queue.deinit();
         s.ring.deinit();
         s.alloc.free(s.frame_buf);
@@ -281,6 +293,18 @@ pub const Sender = struct {
         const m = wire.FrameMeta{ .stream = s.cfg.stream, .kind = 1, .codec = s.cfg.codec, .flags = @truncate(slot.flags & 0x07), .seq = s.frame_seq, .pts = s.rebasePts(slot.pts) };
         const wlen = wire.marshalFrame(s.frame_buf, m, slot.buf[0..slot.len]);
         const frame_wire = s.frame_buf[0..wlen];
+        if (s.tcp) |*t| { // TCP: one length-prefixed sealed frame (TCP owns loss + congestion)
+            if (!t.sendFrame(frame_wire, s.cfg.encrypt, s.cfg.send_key)) {
+                s.s_dead.store(1, .monotonic);
+                return;
+            }
+            s.frame_seq +%= 1;
+            _ = s.s_dgrams.fetchAdd(1, .monotonic);
+            const tag: usize = if (s.cfg.encrypt) aead.tag_len else 0;
+            _ = s.s_bytes.fetchAdd(wlen + 4 + tag, .monotonic);
+            _ = s.s_aus_sent.fetchAdd(1, .monotonic);
+            return;
+        }
         const count: u16 = @intCast(wire.numFrags(wlen, s.cfg.body_max));
         var i: u16 = 0;
         while (i < count) : (i += 1) {
@@ -343,6 +367,7 @@ pub const Sender = struct {
     }
 
     fn keepalive(s: *Sender, now: i64) void {
+        if (s.tcp != null) return; // TCP liveness = the connection itself
         if (now - s.last_keepalive_ns < keepalive_ns) return;
         s.last_keepalive_ns = now;
         var ts: [8]u8 = undefined;
@@ -352,17 +377,26 @@ pub const Sender = struct {
     }
 
     fn sendBye(s: *Sender) void {
+        if (s.tcp != null) return; // TCP: closing the socket (FIN) is the clean end
         const dglen = s.buildDatagram(wire.dg_type_bye, 0, 0, 0, 0, &[_]u8{});
         s.sendRaw(s.dg_buf[0..dglen]);
     }
 
     fn livenessDead(s: *Sender, now: i64) bool {
+        if (s.tcp) |t| return t.dead;
         const window: i64 = if (s.established) liveness_ns else s.cfg.startup_grace_ns;
         return now - s.last_recv_ns > window;
     }
 
     // drainControl reads any pending control datagrams (non-blocking) and handles them.
     fn drainControl(s: *Sender, now: i64) void {
+        if (s.tcp) |*t| {
+            while (t.poll(s.cfg.encrypt, s.cfg.recv_key)) |pt| {
+                const f = wire.parseFrameForTest(pt) catch continue;
+                if (f.stream == 0 and f.kind == 0) s.handleMetaPayload(f.payload, now);
+            }
+            return;
+        }
         while (true) {
             const n = sysRecv(s.fd, s.rx_buf) catch return;
             if (n == 0) return;
@@ -403,7 +437,11 @@ pub const Sender = struct {
         if (h.stream != 0 or h.frag_count != 1) return;
         const f = wire.parseFrameForTest(body) catch return;
         if (f.kind != 0) return;
-        const m = parseMeta(f.payload);
+        s.handleMetaPayload(f.payload, now);
+    }
+
+    fn handleMetaPayload(s: *Sender, payload: []const u8, now: i64) void {
+        const m = parseMeta(payload);
         if (std.mem.eql(u8, m.t, "nack")) {
             if (!m.pli) return;
             if (s.last_pli_ns != 0 and now - s.last_pli_ns < 250 * std.time.ns_per_ms) return;
@@ -430,6 +468,11 @@ pub const Sender = struct {
         var fr: [wire.frame_header_len + 192]u8 = undefined;
         if (json.len > 192) return;
         const n = wire.marshalFrame(&fr, .{ .stream = 0, .kind = 0, .codec = 0, .flags = 0, .seq = s.meta_seq, .pts = pts }, json);
+        if (s.tcp) |*t| {
+            _ = t.sendFrame(fr[0..n], s.cfg.encrypt, s.cfg.send_key);
+            s.meta_seq +%= 1;
+            return;
+        }
         const dglen = s.buildDatagram(wire.dg_type_media, 0, s.meta_seq, 0, 1, fr[0..n]);
         s.sendRaw(s.dg_buf[0..dglen]);
         s.meta_seq +%= 1;

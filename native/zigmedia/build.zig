@@ -19,6 +19,7 @@ pub fn build(b: *std.Build) void {
     // "failed command" line even on success, and a gate must not print a failure while passing.
     const opts = b.addOptions();
     opts.addOption(bool, "chaos_report", b.option(bool, "chaos-report", "print chaos/e2e acceptance numbers") orelse false);
+    opts.addOption(i64, "soak_seconds", b.option(i64, "soak-seconds", "transport soak duration (acceptance: 600)") orelse 5);
     mod.addOptions("build_options", opts);
 
     if (target.result.os.tag == .windows) mod.linkSystemLibrary("ws2_32", .{}); // Winsock (sock.zig)

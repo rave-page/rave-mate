@@ -1836,15 +1836,17 @@ int rpw_attach_native_tx(struct rpw_capture *c, int transport, int codec, int st
                          const unsigned char *recv_key, unsigned recv_prefix,
                          unsigned token, double initial_rate_bps,
                          unsigned long long initial_seq, int fps, long long startup_grace_ns,
-                         long long media_clock_ns) {
+                         long long media_clock_ns, long long socket_fd) {
 	if (!c || c->native_tx || !send_key || !recv_key)
 		return 0;
 	struct addrinfo hints, *res = NULL;
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = (transport == 1) ? SOCK_STREAM : SOCK_DGRAM;
-	if (getaddrinfo(peer_host, peer_port, &hints, &res) != 0 || !res)
-		return 0;
+	if (socket_fd < 0) { /* UDP: native opens its own socket toward the peer */
+		memset(&hints, 0, sizeof(hints));
+		hints.ai_family = AF_UNSPEC;
+		hints.ai_socktype = (transport == 1) ? SOCK_STREAM : SOCK_DGRAM;
+		if (getaddrinfo(peer_host, peer_port, &hints, &res) != 0 || !res)
+			return 0;
+	}
 	rm_open_params p;
 	memset(&p, 0, sizeof(p));
 	p.struct_size = (uint32_t)sizeof(rm_open_params); /* ABI v2 layout guard */
@@ -1853,9 +1855,9 @@ int rpw_attach_native_tx(struct rpw_capture *c, int transport, int codec, int st
 	p.codec = (codec == 5) ? RM_CODEC_HEVC : (codec == 6) ? RM_CODEC_AV1 : RM_CODEC_H264;
 	p.stream = (uint16_t)stream;
 	p.body_max = body_max;
-	p.socket_fd = -1; /* native opens its own socket toward peer_addr */
-	p.peer_addr = (const uint8_t *)res->ai_addr;
-	p.peer_addr_len = (int32_t)res->ai_addrlen;
+	p.socket_fd = socket_fd >= 0 ? socket_fd : -1; /* TCP: Go's accepted route connection (dup; Go closes it) */
+	p.peer_addr = res ? (const uint8_t *)res->ai_addr : NULL;
+	p.peer_addr_len = res ? (int32_t)res->ai_addrlen : 0;
 	memcpy(p.keys.send_key, send_key, 32);
 	p.keys.send_nonce_prefix = send_prefix;
 	memcpy(p.keys.recv_key, recv_key, 32);
@@ -1870,7 +1872,8 @@ int rpw_attach_native_tx(struct rpw_capture *c, int transport, int codec, int st
 	p.media_clock_ns = (int64_t)media_clock_ns; /* ABI v3: PTS into the Go media-clock domain (0 = local mono) */
 	rm_sender *s = NULL;
 	rm_status st = rm_tx_open(&p, native_idr_cb, c, &s);
-	freeaddrinfo(res);
+	if (res)
+		freeaddrinfo(res);
 	if (st != RM_OK || !s)
 		return 0;
 	pthread_mutex_lock(&c->enc_mu);

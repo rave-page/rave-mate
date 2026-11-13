@@ -11,6 +11,12 @@
  * ABI v4 (2026-11-13): rm_tx_rate_hint - the receiver's MetaRate (congestion AIMD + VRAM governor +
  *   adaptive budget) reaches the encoder on a native route; the sender also answers MetaSync and PLI
  *   natively. Callers recompile; poll rm_tx_rate_hint (~10 Hz) and apply on a gen change.
+ * TCP (rm_open_params.transport = RM_TRANSPORT_TCP, no ABI change - was RM_ERR_UNIMPL): Go accepts the
+ *   route connection + reads its preamble, then passes a duplicate of the connected socket in socket_fd
+ *   (required for TCP; the CALLER keeps ownership and closes it after rm_tx_close). Wire = the legacy
+ *   medialink TCP Conn: [u32 BE len][AES-256-GCM(frame), nonce = 0^4 || u64 BE counter, no AAD]; keys =
+ *   HKDF(master, salt, "medialink c2s v1"/"medialink s2c v1") (answerer seals s2c). Receiver meta (PLI,
+ *   MetaRate, MetaSync) is read on the same connection. Prefixes / token / initial_seq are ignored.
  * ABI v5 (2026-11-13): RECEIVER rm_rx_* (native UDP receive: reassembly, NACK, adaptive PTS-locked
  *   playout, PLI; frames delivered in cadence via callback). Sender API unchanged.
  *

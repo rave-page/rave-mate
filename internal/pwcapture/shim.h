@@ -108,7 +108,7 @@ int rpw_attach_native_tx(struct rpw_capture *c, int transport, int codec, int st
                          const unsigned char *recv_key, unsigned recv_prefix,
                          unsigned token, double initial_rate_bps,
                          unsigned long long initial_seq, int fps, long long startup_grace_ns,
-                         long long media_clock_ns);
+                         long long media_clock_ns, long long socket_fd);
 void rpw_native_tx_set_rate(struct rpw_capture *c, double bytes_per_sec);
 void rpw_native_tx_stats(struct rpw_capture *c, rm_tx_stats *out);
 void rpw_native_tx_rate_hint(struct rpw_capture *c, rm_rate_hint *out);
