@@ -540,7 +540,15 @@ func (c *appControl) Routes() string {
 	if c.mediaCtl == nil {
 		return "media plane unavailable\n"
 	}
-	return formatRoutes(c.mediaCtl.Stats())
+	return formatRoutes(c.mediaCtl.Stats()) + c.holdsText()
+}
+
+// holdsText renders VRAM-held receives (empty when none or unsupported).
+func (c *appControl) holdsText() string {
+	if hr, ok := c.mediaRoutes.(mediaroute.HoldReporter); ok {
+		return mediaroute.FormatHolds(hr.Holds(), time.Now())
+	}
+	return ""
 }
 
 // MediaPerf reports the media-plane process's Go GC/scheduler pauses (STEP-0: whether the Go runtime

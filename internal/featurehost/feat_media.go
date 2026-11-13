@@ -146,7 +146,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 		EncodeDevice:       encDevResolver,
 		Headroom:           func() (uint64, bool) { h := gpumem.ReadHeadroom(gpuSampler); return h.FreeMB, h.Present },
 		GovernorEnabled:    func() bool { return liveCfg().VramGovernorEnabled() },
-		GovernorFloorMB:    uint64(liveCfg().ResolvedVramReserveMB()),
+		GovernorFloorMB:    f.vram.GovernorFloorMB, // policy-derived: a full card is normal; trimming frees no VRAM
 		GovernorBaseKbps:   func() int { return liveCfg().Bitrate() },
 		BudgetMode:         func() string { return liveCfg().BitrateModeString() },
 		BudgetUserCeilKbps: func() int { return liveCfg().UserBitrateCeilKbps() },

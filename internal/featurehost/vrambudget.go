@@ -11,6 +11,7 @@ import (
 	"rave.page/mate/internal/gpubudget"
 	"rave.page/mate/internal/gpumem"
 	"rave.page/mate/internal/logbus"
+	"rave.page/mate/internal/mediaroute"
 	"rave.page/mate/internal/mfenc"
 	"rave.page/mate/internal/sysactivity"
 )
@@ -19,10 +20,26 @@ import (
 // mediaroute manager consumes. Decode + encode admission are installed directly into the mfenc seams.
 type VramBudget struct {
 	Budget      *gpubudget.Budget
-	AdmitSender func(w, h int) (allow bool, reason string, freeMB, reserveMB uint64)
-	// AdmitReceive is the pre-offer receive gate: a new sender AND its decoder must both fit, else the
-	// receive is held without offering (no capture/encode on the source PC).
-	AdmitReceive func(w, h, fps int) (allow bool, reason string, freeMB, reserveMB uint64)
+	AdmitSender func(w, h int) mediaroute.Admission
+	// AdmitReceive is the pre-offer receive gate: the decoder, plus a new sender and the receiver follow
+	// it triggers, judged as ONE need; refused => held without offering (no capture/encode on the source).
+	AdmitReceive func(w, h, fps int, newSender bool) mediaroute.Admission
+	// GovernorFloorMB is the receive rate-ladder floor for the active policy (gpubudget.GovernorFloorMB).
+	GovernorFloorMB uint64
+}
+
+// admission converts a budget decision for mediaroute.
+func admission(d gpubudget.Decision) mediaroute.Admission {
+	return mediaroute.Admission{Allow: d.Admit, Attempt: d.Attempt, Reason: d.Reason, Policy: string(d.Mode),
+		FreeMB: d.FreeMB, NeedMB: uint64(d.NeedMB + 0.5), RequiredMB: d.ReserveMB}
+}
+
+// PolicyFromConfig resolves the gpubudget policy from MediaLink config (unknown preset => balanced,
+// ok=false so the caller logs it once).
+func PolicyFromConfig(c config.MediaLinkFeature) (gpubudget.Policy, bool) {
+	mode, ok := gpubudget.ParseMode(c.VramPolicyName())
+	return gpubudget.Policy{Mode: mode, MarginMinMB: uint64(c.ResolvedVramMarginMB()),
+		ReserveCfgMB: uint64(c.ResolvedVramReserveMB())}, ok
 }
 
 // WireVramBudget builds the shared VRAM budget for whichever process opens GPU sessions (the media
@@ -50,7 +67,10 @@ func WireVramBudget(liveCfg func() config.MediaLinkFeature, sampler gpumem.Sampl
 		})
 		return adp
 	}
-	pol := gpubudget.Policy{ReserveCfgMB: uint64(liveCfg().ResolvedVramReserveMB())}
+	pol, polOK := PolicyFromConfig(liveCfg())
+	if !polOK && log != nil {
+		log.Warn("gpubudget", "unknown mediaLink.vramPolicy - using balanced", map[string]any{"value": liveCfg().VramPolicyName()})
+	}
 	store := gpubudget.NewCostStore(costPath, func(m string) {
 		if log != nil {
 			log.Warn("gpubudget", m, nil)
@@ -76,20 +96,12 @@ func WireVramBudget(liveCfg func() config.MediaLinkFeature, sampler gpumem.Sampl
 	}
 	return &VramBudget{
 		Budget: b,
-		AdmitSender: func(w, h int) (bool, string, uint64, uint64) {
-			d := b.AdmitSender(w, h)
-			return d.Admit, d.Reason, d.FreeMB, d.ReserveMB
+		AdmitSender: func(w, h int) mediaroute.Admission { return admission(b.AdmitSender(w, h)) },
+		// Codec unknown pre-offer: HEVC is the costlier learned 4K decode on the rig (114 vs 56 MB).
+		AdmitReceive: func(w, h, fps int, newSender bool) mediaroute.Admission {
+			return admission(b.AdmitReceive(w, h, fps, "hevc", newSender))
 		},
-		AdmitReceive: func(w, h, fps int) (bool, string, uint64, uint64) {
-			if d := b.AdmitSender(w, h); !d.Admit {
-				return false, "sender: " + d.Reason, d.FreeMB, d.ReserveMB
-			}
-			d := b.AdmitDecode(w, h, fps, "hevc") // codec unknown pre-offer; HEVC/H.264 decode cost is comparable
-			if !d.Admit {
-				return false, "decode: " + d.Reason, d.FreeMB, d.ReserveMB
-			}
-			return true, "", d.FreeMB, d.ReserveMB
-		},
+		GovernorFloorMB: gpubudget.GovernorFloorMB(pol.Mode, uint64(liveCfg().ResolvedVramReserveMB())),
 	}
 }
 

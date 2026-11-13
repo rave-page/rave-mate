@@ -658,13 +658,21 @@ func TestStartReceiveHeldForVRAM(t *testing.T) {
 	allow := false
 	m := New(Options{Log: logbus.New(16), Router: fr,
 		Cfg: func() config.MediaLinkFeature { return config.MediaLinkFeature{} }, // governor default ON
-		AdmitReceive: func(w, h, fps int) (bool, string, uint64, uint64) {
-			return allow, "sender: free 430 MB < reserve 1152 MB", 430, 1152
+		AdmitReceive: func(w, h, fps int, newSender bool) Admission {
+			return Admission{Allow: allow, Reason: "insufficient VRAM", Policy: "balanced", FreeMB: 123, NeedMB: 226, RequiredMB: 290}
 		}})
 	for i := 0; i < 3; i++ {
-		if _, err := m.StartReceive("peerB", "spout:VRC"); !IsHeld(err) {
+		_, err := m.StartReceive("peerB", "spout:VRC")
+		if !IsHeld(err) {
 			t.Fatalf("want held error, got %v", err)
 		}
+		h, ok := ParseHeld(err)
+		if !ok || h.FreeMB != 123 || h.NeedMB != 226 || h.RequiredMB != 290 || h.Policy != "balanced" || h.Sender != linkPrefix+"VRC" {
+			t.Fatalf("hold payload lost across the error string: %+v ok=%v", h, ok)
+		}
+	}
+	if hs := m.Holds(); len(hs) != 1 || hs[0].Peer != "peerB" {
+		t.Fatalf("visible hold state: %+v", hs)
 	}
 	fr.mu.Lock()
 	n, s := len(fr.offers), len(fr.sinks)
@@ -681,5 +689,8 @@ func TestStartReceiveHeldForVRAM(t *testing.T) {
 	fr.mu.Unlock()
 	if n != 1 {
 		t.Fatalf("admitted receive must offer once: %d", n)
+	}
+	if hs := m.Holds(); len(hs) != 0 {
+		t.Fatalf("admitted receive must clear its hold: %+v", hs)
 	}
 }

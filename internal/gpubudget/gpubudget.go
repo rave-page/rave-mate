@@ -5,8 +5,10 @@
 // saturated card into the E_OUTOFVIDEOMEMORY (0x8876017C) interop refusal that kills Spout
 // senders/receivers mid-set.
 //
-// Decision = free_headroom - cost(op, geometry) >= geometry-aware reserve, AND rave-mate's own
-// total GPU footprint across all its processes stays under a hard self-cap. Costs start as computed
+// Decision (mode balanced, default since 2026-11-13) = free >= need + margin, need = what OUR processes
+// allocate + what a NEW sender makes the receiver allocate; a tight band admits a VERIFIED attempt.
+// strict keeps the old free - cost >= geometry reserve. Every mode keeps rave-mate's own total GPU
+// footprint under a hard self-cap (.devnotes/VRAM_FULL_CARD_POLICY.md). Costs start as computed
 // estimates (W*H*bpp * surface counts) and are REFINED by measurement (per-process dedicated-VRAM
 // delta across a successful open, persisted per adapter+driver via the CostStore). Headroom unknown
 // => fail OPEN (never gate on a reading the platform can't give), matching internal/gpumem.
@@ -29,6 +31,8 @@ const (
 	OpDecode Op = "decode" // native decode pipeline: D3D11 device + DXVA DPB surfaces + VP + dest view
 	OpSender Op = "sender" // Spout sender shared texture + GL/DX interop registration
 	OpEncode Op = "encode" // MF encode session: VP NV12 pool + encoder MFT
+	// OpReceive is a composed decision (decode + optional new sender + receiver follow); never a cost key.
+	OpReceive Op = "receive"
 )
 
 // Geom is the frame geometry an op allocates for. Codec selects decode/encode surface shapes.
@@ -77,11 +81,14 @@ type Cost struct {
 	Source   string // "measured" | "estimate"
 }
 
-// Policy configures reserve + self-cap. Zero fields take safe defaults.
+// Policy configures mode, margin, reserve + self-cap. Zero fields take safe defaults (Mode "" = balanced).
 type Policy struct {
-	ReserveFloorMB uint64 // reserve never below this (default DefaultReserveFloorMB)
-	ReserveCfgMB   uint64 // user-configured reserve floor (0 = none); acts as a floor, geometry may raise it
-	HardCapMB      uint64 // rave-mate's own GPU footprint cap (0 = auto: min(1536, 12% of budget))
+	Mode           Mode    // strict | balanced | permissive ("" = balanced)
+	MarginMinMB    uint64  // non-strict margin floor (0 = DefaultMarginMinMB)
+	MarginPct      float64 // non-strict margin as a fraction of need (0 = DefaultMarginPct)
+	ReserveFloorMB uint64  // strict: reserve never below this (default DefaultReserveFloorMB)
+	ReserveCfgMB   uint64  // strict: user-configured reserve floor (0 = none); geometry may raise it
+	HardCapMB      uint64  // rave-mate's own GPU footprint cap (0 = auto: min(1536, 12% of budget))
 }
 
 // DefaultReserveFloorMB is the free-VRAM margin left for OTHER apps' interop after our allocation.
@@ -115,13 +122,21 @@ type Inputs struct {
 
 // Decision is the admission verdict with every number behind it (for logs + ctl explainability).
 type Decision struct {
-	Admit        bool
+	Admit bool
+	// Attempt: admitted only as a VERIFIED attempt (headroom tight): the caller must run the
+	// allocation where failure is contained (child/helper, never the daemon), re-read headroom after
+	// it and back out + hold on failure or collapse (see VerifyAttempt).
+	Attempt      bool
 	Reason       string
+	Mode         Mode
 	Op           Op
 	Geom         Geom
-	CostMB       float64
+	CostMB       float64 // OUR processes' allocation
+	FollowMB     float64 // receiver-side follow cost a NEW sender triggers (Resolume's copy)
+	NeedMB       float64 // CostMB + FollowMB
+	MarginMB     uint64  // non-strict margin; strict: 0
 	CostMeasured bool
-	ReserveMB    uint64
+	ReserveMB    uint64 // strict: geometry reserve; non-strict: need + margin (the "required free")
 	Present      bool
 	FreeMB       uint64
 	SelfUsedMB   uint64
@@ -229,42 +244,86 @@ func SelfCapMB(budgetMB uint64, pol Policy) uint64 {
 	return cap
 }
 
-// Admit is the pure admission rule: open only if free - cost >= reserve AND self + cost <= self-cap.
-// Headroom absent => admit (fail open). Self-footprint unknown => the cap axis is skipped.
+// Admit is the pure admission rule for an op whose whole cost lands in OUR processes (no receiver
+// follow term). See AdmitNeed.
 func Admit(in Inputs, op Op, g Geom, cost Cost, pol Policy) Decision {
+	return AdmitNeed(in, op, g, cost, 0, pol)
+}
+
+// AdmitNeed is the pure admission rule. need = cost (OUR allocation) + followMB (what a NEW sender makes
+// a receiver allocate). Per mode:
+//   - strict:     free - cost >= geometry reserve (the pre-2026-11-13 rule; follow ignored).
+//   - balanced:   free - need >= margin => admit; free - need >= margin/2 => verified ATTEMPT; else hold.
+//   - permissive: free - need >= margin => admit; free >= need => verified ATTEMPT; else hold.
+//
+// margin = max(MarginMinMB, MarginPct*need). Every mode also enforces self + cost <= self-cap.
+// Headroom absent => admit (fail open). Self-footprint unknown => the cap axis is skipped.
+func AdmitNeed(in Inputs, op Op, g Geom, cost Cost, followMB float64, pol Policy) Decision {
+	mode := pol.Mode.Resolved()
+	if mode == ModeStrict {
+		followMB = 0
+	}
+	need := cost.MB + followMB
 	d := Decision{
-		Op: op, Geom: g, CostMB: cost.MB, CostMeasured: cost.Measured,
-		Present: in.Headroom.Present, FreeMB: in.Headroom.FreeMB,
+		Mode: mode, Op: op, Geom: g, CostMB: cost.MB, FollowMB: followMB, NeedMB: need,
+		CostMeasured: cost.Measured, Present: in.Headroom.Present, FreeMB: in.Headroom.FreeMB,
 		SelfUsedMB: in.SelfUsedMB, SelfKnown: in.SelfKnown,
 	}
 	if !in.Headroom.Present {
 		d.Admit, d.Reason = true, "headroom unknown - fail open"
 		return d
 	}
-	reserve := Reserve(op, g, in.Headroom.BudgetMB, pol)
 	cap := SelfCapMB(in.Headroom.BudgetMB, pol)
-	d.ReserveMB, d.SelfCapMB = reserve, cap
-	if float64(in.Headroom.FreeMB)-cost.MB < float64(reserve) {
-		d.Reason = fmt.Sprintf("insufficient VRAM: free %d MB - cost %.0f MB < reserve %d MB",
-			in.Headroom.FreeMB, cost.MB, reserve)
-		return d
-	}
+	d.SelfCapMB = cap
 	if in.SelfKnown && float64(in.SelfUsedMB)+cost.MB > float64(cap) {
 		d.Reason = fmt.Sprintf("would exceed rave-mate GPU cap: self %d MB + cost %.0f MB > cap %d MB",
 			in.SelfUsedMB, cost.MB, cap)
 		return d
 	}
-	d.Admit = true
-	d.Reason = fmt.Sprintf("ok: free %d MB - cost %.0f MB >= reserve %d MB (self %d/%d MB)",
-		in.Headroom.FreeMB, cost.MB, reserve, in.SelfUsedMB, cap)
+	free := float64(in.Headroom.FreeMB)
+	if mode == ModeStrict {
+		reserve := Reserve(op, g, in.Headroom.BudgetMB, pol)
+		d.ReserveMB = reserve
+		if free-cost.MB < float64(reserve) {
+			d.Reason = fmt.Sprintf("insufficient VRAM: free %d MB - cost %.0f MB < reserve %d MB (strict)",
+				in.Headroom.FreeMB, cost.MB, reserve)
+			return d
+		}
+		d.Admit = true
+		d.Reason = fmt.Sprintf("ok: free %d MB - cost %.0f MB >= reserve %d MB (strict; self %d/%d MB)",
+			in.Headroom.FreeMB, cost.MB, reserve, in.SelfUsedMB, cap)
+		return d
+	}
+	margin := MarginMB(need, pol)
+	d.MarginMB = margin
+	d.ReserveMB = uint64(need + 0.5) + margin
+	attemptFloor := need + float64(margin)/2
+	if mode == ModePermissive {
+		attemptFloor = need
+	}
+	switch {
+	case free-need >= float64(margin):
+		d.Admit = true
+		d.Reason = fmt.Sprintf("ok: free %d MB >= need %.0f MB + margin %d MB (%s)", in.Headroom.FreeMB, need, margin, mode)
+	case free >= attemptFloor:
+		d.Admit, d.Attempt = true, true
+		d.Reason = fmt.Sprintf("tight: free %d MB, need %.0f MB + margin %d MB - verified attempt (%s)",
+			in.Headroom.FreeMB, need, margin, mode)
+	default:
+		d.Reason = fmt.Sprintf("insufficient VRAM: free %d MB < need %.0f MB (ours %.0f + receiver %.0f) + margin %d MB (%s)",
+			in.Headroom.FreeMB, need, cost.MB, followMB, margin, mode)
+	}
 	return d
 }
 
 // String renders a Decision for a log line / ctl row.
 func (d Decision) String() string {
 	verb := "ADMIT"
-	if !d.Admit {
+	switch {
+	case !d.Admit:
 		verb = "DENY"
+	case d.Attempt:
+		verb = "ATTEMPT"
 	}
 	src := "est"
 	if d.CostMeasured {
@@ -273,6 +332,7 @@ func (d Decision) String() string {
 	if !d.Present {
 		return fmt.Sprintf("%s %s %dx%d: %s", verb, d.Op, d.Geom.W, d.Geom.H, d.Reason)
 	}
-	return fmt.Sprintf("%s %s %dx%d cost=%.0fMB(%s) reserve=%dMB free=%dMB self=%d/%dMB: %s",
-		verb, d.Op, d.Geom.W, d.Geom.H, d.CostMB, src, d.ReserveMB, d.FreeMB, d.SelfUsedMB, d.SelfCapMB, d.Reason)
+	return fmt.Sprintf("%s %s %dx%d need=%.0fMB(ours %.0f %s + recv %.0f) required=%dMB free=%dMB self=%d/%dMB policy=%s: %s",
+		verb, d.Op, d.Geom.W, d.Geom.H, d.NeedMB, d.CostMB, src, d.FollowMB, d.ReserveMB, d.FreeMB,
+		d.SelfUsedMB, d.SelfCapMB, d.Mode, d.Reason)
 }
