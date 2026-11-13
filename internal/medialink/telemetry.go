@@ -130,7 +130,11 @@ type routeStat struct {
 	nativeStages  bool          // native send route: enc/tx stages come from the source (setNativeStats)
 	nativeEnc     StageSnapshot // guarded by mu
 	nativeTx      StageSnapshot
-	encoder       string // §3.2 negotiated encoder ("" = raw/echo route)
+	nativeRecv    bool          // native receive route: counters come from the child (setNativeRXStats)
+	nrx           NativeRXStats // guarded by mu
+	nrxPreset     string
+	nrxMono       [7]monoCounter // cumulative across child re-attaches (a fresh receiver restarts at 0)
+	encoder       string         // §3.2 negotiated encoder ("" = raw/echo route)
 	tier          int
 	software      bool
 	transport     string // negotiated media transport ("tcp"/"udp")
@@ -268,9 +272,62 @@ func (st *routeStat) setNativeStats(s NativeTXStats) {
 	st.mu.Unlock()
 }
 
+// setNativeRX marks a native receive route (counters + rate window driven by setNativeRXStats only).
+func (st *routeStat) setNativeRX(preset string) {
+	st.mu.Lock()
+	st.nativeRecv, st.nrxPreset = true, preset
+	st.mu.Unlock()
+}
+
+// setNativeRXStats folds the native receiver's counters into the route's telemetry (~4 Hz). Absolute
+// cumulative values drive the sliding rate window exactly like setNativeStats on the send side.
+func (st *routeStat) setNativeRXStats(s NativeRXStats) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	m := &st.nrxMono
+	s.Delivered, s.MediaBytes, s.Keyframes = m[0].fold(s.Delivered), m[1].fold(s.MediaBytes), m[2].fold(s.Keyframes)
+	s.NacksSent, s.PLIsSent, s.NackRecovered, s.GapDrops = m[3].fold(s.NacksSent), m[4].fold(s.PLIsSent), m[5].fold(s.NackRecovered), m[6].fold(s.GapDrops)
+	st.nrx = s
+	st.frames, st.bytes, st.keyframes = s.Delivered, s.MediaBytes, s.Keyframes
+	st.nacksSent, st.pliReqs, st.recovered, st.lostEst = s.NacksSent, s.PLIsSent, s.NackRecovered, s.GapDrops
+	now := st.now()
+	if s.Delivered > 0 {
+		st.lastCount = now
+	}
+	if k := len(st.rate); k == 0 || now.Sub(st.rate[k-1].t) >= rateSampleEvery {
+		if len(st.rate) == rateSlots {
+			copy(st.rate, st.rate[1:])
+			st.rate = st.rate[:rateSlots-1]
+		}
+		st.rate = append(st.rate, rateSample{t: now, bytes: st.bytes, frames: st.frames})
+	}
+	for len(st.rate) > 1 && now.Sub(st.rate[1].t) >= rateSpan {
+		copy(st.rate, st.rate[1:])
+		st.rate = st.rate[:len(st.rate)-1]
+	}
+}
+
+// monoCounter turns a counter that restarts at 0 (a re-attached native receiver) into a monotonic one.
+type monoCounter struct{ base, last uint64 }
+
+func (c *monoCounter) fold(raw uint64) uint64 {
+	if raw < c.last {
+		c.base += c.last
+	}
+	c.last = raw
+	return c.base + raw
+}
+
 // sent counts an outbound frame (media or meta).
 func (st *routeStat) sent(f *Frame) {
 	st.mu.Lock()
+	if st.nativeRecv { // native receive: only meta goes out; counters are the child's (absolute)
+		if r, err := metaType(f); err == nil && r == MetaReport {
+			st.reportsSent++
+		}
+		st.mu.Unlock()
+		return
+	}
 	st.count(len(f.Payload))
 	if f.Stream != metaStream {
 		st.sentHighest, st.sentAny = f.Seq, true
@@ -464,6 +521,20 @@ func (st *routeStat) snapshot() RouteStat {
 	if st.nativeStages && out.Stages != nil { // native route: the source's natively computed enc/tx stages
 		out.Stages.EncDone, out.Stages.TxQueue = st.nativeEnc, st.nativeTx
 	}
+	if st.nativeRecv { // native receive: transport, playout and publish numbers from the child
+		s := st.nrx
+		out.NativeRX = &s
+		u := nativeToUDPStats(s, st.encrypted)
+		out.UDP = &u
+		j := nativeToJitter(s, st.nrxPreset)
+		out.JB = &j
+		out.JitterNs = float64(s.OwdJitterNs)
+		if out.Stages != nil {
+			out.Stages.JBRelease = StageSnapshot{Count: s.Delivered, P99Ms: s.RelP99Ms, MaxMs: s.RelMaxMs, Over25: s.RelOver25}
+			out.Stages.Publish = StageSnapshot{Count: s.PubCount, MeanMs: s.PubMeanMs, P50Ms: s.PubP50Ms, P99Ms: s.PubP99Ms,
+				MaxMs: s.PubMaxMs, Over25: s.PubOver25, Over50: s.PubOver50, Over100: s.PubOver100}
+		}
+	}
 	return out
 }
 
@@ -537,6 +608,7 @@ type RouteStat struct {
 	BudgetModelKbps  int
 	BudgetLinkKbps   int
 	BudgetReason     string
-	UDP              *UDPStats   // §2.5 UDP transport telemetry (loss/NACK/retransmit/pacer/owd); nil = TCP route
-	Stages           *StageStats // STEP-0 per-stage inter-frame interval histograms (hang localization); nil = none yet
+	UDP              *UDPStats      // §2.5 UDP transport telemetry (loss/NACK/retransmit/pacer/owd); nil = TCP route
+	NativeRX         *NativeRXStats // native receive route (TransportImpl "native", recv): the child's counters
+	Stages           *StageStats    // STEP-0 per-stage inter-frame interval histograms (hang localization); nil = none yet
 }

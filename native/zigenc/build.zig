@@ -24,13 +24,32 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     }));
+    // Native receiver/sender (native/zigmedia) as a plain Zig module (zmod.zig: no C exports, no libc)
+    // - the decode session's network source (netrx.zig).
+    const zigmedia = b.createModule(.{
+        .root_source_file = .{ .cwd_relative = b.pathJoin(&.{ b.build_root.path.?, "..", "zigmedia", "src", "zmod.zig" }) },
+        .target = target,
+        .optimize = optimize,
+    });
+    zigmedia.linkSystemLibrary("ws2_32", .{});
+    mod.addImport("zigmedia", zigmedia);
     mod.linkSystemLibrary("mfplat", .{});
     mod.linkSystemLibrary("d3d11", .{});
     mod.linkSystemLibrary("dxgi", .{});
     mod.linkSystemLibrary("ole32", .{});
+    mod.linkSystemLibrary("ws2_32", .{});
     const exe = b.addExecutable(.{ .name = "rave-mate-enc", .root_module = mod });
     exe.subsystem = .Console; // stdio control plane; parent hides the window
     b.installArtifact(exe);
+
+    // rave-mate-txtest: TEST-ONLY native sender (+ optional chaos relay) driving the child's network
+    // receive from Go tests. Never embedded or shipped (build-zig.sh stages rave-mate-enc only).
+    const txmod = b.createModule(.{ .root_source_file = b.path("src/txtest.zig"), .target = target, .optimize = optimize });
+    txmod.addImport("zigmedia", zigmedia);
+    txmod.linkSystemLibrary("ws2_32", .{});
+    const txexe = b.addExecutable(.{ .name = "rave-mate-txtest", .root_module = txmod });
+    txexe.subsystem = .Console;
+    b.installArtifact(txexe);
 
     const tests = b.addTest(.{ .root_module = mod });
     const run_tests = b.addRunArtifact(tests);

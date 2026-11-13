@@ -77,6 +77,9 @@ type ProcDecOpts struct {
 	HEVC       bool
 	KbpsHint   int // sizes the inbound ring (bitrate-derived, geometry-independent)
 	Dest       *DecodeDest
+	// NullDecode: no decoder, no destination (child proto v5 null_dec) - GPU-free tests of the network
+	// source. Never set by production callers.
+	NullDecode bool
 }
 
 // ProcDecStats is one decode session's live telemetry.
@@ -137,12 +140,20 @@ type ProcDecSession struct {
 
 	failMu  sync.Mutex
 	failErr error
+
+	// network source (procnet_windows.go, child proto v5)
+	nullDec bool
+	netBlk  bool    // the mapping carries the netrx telemetry block (child v5)
+	netOff  uintptr // block offset (header + ring)
+	netMu   sync.Mutex
+	netP    *NetRXParams // attached (owns the parked socket); nil = shm-ring source
+	netMeta chan NetMeta
 }
 
 // OpenProcDecSession opens a native decode session. Errors are CLEAN: ErrDecodeRefused (or any
 // other error) means the caller runs the ffmpeg decode child instead.
 func OpenProcDecSession(o ProcDecOpts) (*ProcDecSession, error) {
-	if o.Dest == nil || o.Dest.Resolve == nil {
+	if !o.NullDecode && (o.Dest == nil || o.Dest.Resolve == nil) {
 		return nil, fmt.Errorf("%w: no destination texture", ErrDecodeRefused)
 	}
 	if os.Getenv("RAVE_MATE_MFDEC_OPEN_FAIL") != "" {
@@ -152,7 +163,7 @@ func OpenProcDecSession(o ProcDecOpts) (*ProcDecSession, error) {
 	// on a saturated card the open fails AND the ffmpeg fallback is heavier (readback + a fresh Spout
 	// interop registration that crashes Resolume). Refuse with ErrDecodeHeldVRAM so the caller HOLDS
 	// instead of demoting. Only reached for GPU-destination routes (Dest.Resolve != nil). Fails open.
-	if DecAdmit != nil {
+	if DecAdmit != nil && !o.NullDecode {
 		if v := DecAdmit(o.InW, o.InH, o.OutW, o.OutH, int(o.FPS), o.HEVC); !v.Allow {
 			return nil, fmt.Errorf("%w: %s", ErrDecodeHeldVRAM, v.Reason)
 		}
@@ -181,16 +192,29 @@ func OpenProcDecSession(o ProcDecOpts) (*ProcDecSession, error) {
 		if v := child.waitProtoVer(2 * time.Second); v < protoVerDecode {
 			return nil, fmt.Errorf("%w: encoder child protocol v%d (need v%d)", ErrDecodeRefused, v, protoVerDecode)
 		}
+		// Proto v5: a telemetry block after the ring so the session can later take a network source.
+		netBlk := child.waitProtoVer(0) >= protoVerNetRX
+		if o.NullDecode && !netBlk {
+			return nil, fmt.Errorf("%w: null decode needs child proto v%d", ErrDecodeRefused, protoVerNetRX)
+		}
+		size := shmHdrSize + ringSize
+		if netBlk {
+			size += netBlkSize
+		}
 		sid := sidSeq.Add(1)
-		shm, err := createShm(fmt.Sprintf(`Local\rvmfenc-%d-%d`, os.Getpid(), sid), shmHdrSize+ringSize)
+		shm, err := createShm(fmt.Sprintf(`Local\rvmfenc-%d-%d`, os.Getpid(), sid), size)
 		if err != nil {
 			return nil, err
 		}
 		d := &ProcDecSession{
 			child: child, sid: sid, shm: shm,
 			inW: o.InW, inH: o.InH, outW: o.OutW, outH: o.OutH, fps: fps, hevc: o.HEVC,
-			ringKB: ringKB, ringSize: uint64(ringSize), ringOff: shmHdrSize,
-			dstName: o.Dest.Name, resolve: o.Dest.Resolve, done: make(chan struct{}),
+			ringKB: ringKB, ringSize: uint64(ringSize), ringOff: shmHdrSize, done: make(chan struct{}),
+			nullDec: o.NullDecode, netBlk: netBlk, netOff: uintptr(shmHdrSize + ringSize),
+			netMeta: make(chan NetMeta, netMetaQueue),
+		}
+		if o.Dest != nil {
+			d.dstName, d.resolve = o.Dest.Name, o.Dest.Resolve
 		}
 		d.recycle = d.recycleDest
 		ev, err := child.openDecSession(d)
@@ -404,6 +428,9 @@ func (d *ProcDecSession) watchDest() {
 		d.dstMu.Unlock()
 		frames := atomic.LoadUint64(d.shm.u64(offDecFrames))
 		appended := d.appended.Load()
+		if n, ok := d.netDelivered(); ok {
+			appended = n // network source: frames the child's playout released into the decoder
+		}
 		mtx := atomic.LoadUint64(d.shm.u64(offDecMtxTimeo))
 		v, why := decCheck(decProbe{curHandle: cur, newHandle: newH, resolved: ok,
 			decFrames: frames, prevFrames: prevFrames,
@@ -566,6 +593,7 @@ func (d *ProcDecSession) recycleDest(why string) {
 		d.dstMu.Lock()
 		d.dstRecycles = 0
 		d.dstMu.Unlock()
+		d.reattachNet() // a network source rides the reopen (fresh duplicate, seq continued)
 		return
 	}
 	msg := "reopen refused"
@@ -653,5 +681,6 @@ func (d *ProcDecSession) Close() {
 	if d.watchDone != nil {
 		<-d.watchDone // the watchdog reads the shm header: it must be gone before unmap
 	}
+	d.closeNet() // child closed its duplicate (RX thread joined first); now release ours
 	d.shm.close()
 }

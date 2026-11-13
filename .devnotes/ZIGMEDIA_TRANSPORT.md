@@ -170,3 +170,54 @@ meta mailbox, publish histogram), Linux + Windows, tested via the C ABI. Not yet
   discovery multicast re-join on interface change, TCP receive-route idle deadline (10 s), receive resume on peer up.
 - D next: native TCP sender path (sender side only, `sender.zig` + new files; rm_open_params.transport = TCP is
   currently RM_ERR_UNIMPL) + soak with a failing-allocator guard. Receiver side belongs to feat/native-rx.
+
+## Native RX integration - DONE GPU-free (2026-11-13, feat/native-rx)
+Path: UDP recv route + per-route keys + native decode sink -> `medialink.tryAttachNativeRX`
+(native_rx.go) -> `mediapipe.mfDecoder.AttachNativeRX` (NativeRXSink) -> `mfenc.ProcDecSession.AttachNet`
+-> child op `netrx` (proto v5) -> `zigenc/src/netrx.zig` (zigmedia receiver via `zmod.zig`, no libc).
+- Deviation from plan item 1 (reason): NOT a new `open src:"net"` session. The network source ATTACHES to
+  the decode session the decode factory already opened (VRAM-admitted via DecAdmit, destination bound,
+  HOLD/recycle semantics intact). A second open would allocate a second decoder or force a close+reopen
+  on a possibly full card. Open gains `null_dec` (GPU-free tests) + `net_blk` (512 B seqlocked telemetry
+  block after the inbound ring; slot list mirrored in netrx.zig `Slot` / procnet_windows.go `ns*`).
+- Socket: Go parks a duplicate in its own process (WSADuplicateSocketW + WSASocketW), the session
+  re-duplicates it into the child per (re)attach; the Go udpConn closes after a successful attach (no bye).
+  Control seq: child starts at `udp.sendSeq() + 2^20` (Go conn may still send during the overlap: distinct
+  nonces); re-attach continues `ctl_seq + 2^20` from the block (block survives a child crash).
+- FINDING: `net.ListenUDP("udp", 0.0.0.0)` is a dual-stack AF_INET6 socket on Windows; the zigmedia
+  receiver passes a sockaddr_in to recvfrom -> WSAEFAULT -> every datagram silently dropped (0 datagrams).
+  dialUDP now binds `udp4` for IPv4 remotes; parkUDPSocket refuses non-AF_INET (Go path). Receiver counts
+  non-would-block recv errors (`rx_errors`, ctl routes `native rx ... rxErrors`).
+- Receiver additions: bye flag, live last-rx (liveness = udpConn rules in Go: 15 s startup grace, then 2 s),
+  rebind to a strictly-newer authenticated datagram from a new address (native sender's own socket),
+  inbound sender-meta mailbox (sync pongs / reports forwarded as `meta` events with child arrival time ->
+  exact T4), idle hook (async MFT output pumped <= 2 ms on the receiver thread), NACK recovered/expired.
+- Decoder ownership: while attached ONLY the receiver thread touches Dec (frame cb at the playout
+  deadline + idle pump); session thread mirrors telemetry + forwards meta. Teardown: RX thread joined ->
+  final block -> socket -> Dec drain/close -> shm -> parent closes parked socket -> destination released.
+- Recycle (frozen-dest oracle uses native `delivered` as the "AUs arrived" input) and child crash both
+  re-attach automatically; route counters stay monotonic across a re-attach (telemetry monoCounter).
+- Go side: governor reads native loss/owd/rtt; MetaRate/reports/sync pings via SendMeta (child seals);
+  receiver reports synthesized from native counters; `ctl routes`: `impl=native`, playout line, `native
+  rx` line, `stage pub` (in-child publish histogram), `stage jb` = release p99/max.
+- Escape hatch: `mediaLink.recvImpl="go"` or env `RAVE_MATE_NATIVE_RX=0`. Engages on every UDP recv
+  route whose decode runs native (ZeroCopyDecode defaults ON); TCP routes (the owner's
+  `mediaLink.transport=tcp`) are untouched. Until the GPU window passes, deploy with `recvImpl="go"` or
+  keep test routes only on UDP.
+- Tests (GPU-free, real child + `rave-mate-txtest` test-only native sender, never shipped): loopback,
+  pipe mode, attach refusals, child-crash re-attach, chaos "this rig" (strict: 0 intervals > 25 ms after
+  convergence, publish p99 19 ms, 41 NACKs / 40 recovered), negotiated route Go sender -> child, native
+  sender -> native receiver through both hooks (rebind=1, MetaRate polled at the sender, bye ends route).
+
+### GPU window (lead; >= 4 GB free per nvidia-smi; abort < 3 GB; <= 15 s)
+```
+cd native/zigenc && zig build -Drelease -Dtarget=x86_64-windows-gnu && cd ../..
+RAVE_MATE_NETRX_GPU=1 GOWORK=off go test ./internal/mfenc -run TestNetRXDecodeLive4K -v -count=1
+```
+4K60 MF encode -> txtest pipe -> UDP -> child decode -> 4K destination. Phase A: publish p99 <= 18 ms,
+zero > 25 ms after 2 s warm-up. Phase B: 10 coded-cap toggles 2160<->1080, decResizes >= 9, destination
+handle unchanged, restarts 0, no recycle/pin log. `RAVE_MATE_NETRX_GPU_FPS=30` if the RGBA upload cannot
+sustain 60 (sender-side limit, not the receiver). Rig (after deploy, test source only, never the owner's
+routes): `rave-mate ctl route-start <peer> "<test source> --transport udp"`, then `rave-mate ctl routes`
+-> recv `impl=native`, `native rx` line, `stage pub` p99 <= 18 ms / >25 = 0; toggle the receiver VRAM cap
+10x and confirm the republished Spout sender geometry stays 3840x2160.

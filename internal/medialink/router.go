@@ -319,6 +319,9 @@ type Options struct {
 	// PlayoutPreset returns the recv playout preset (config mediaLink.playout:
 	// low-latency|balanced|smooth; ""/nil = balanced). Read at route start.
 	PlayoutPreset func() string
+	// RecvImpl returns the recv path preference (config mediaLink.recvImpl): "go" forces the Go
+	// receive path; ""/"auto"/nil = native when the route + decode engine support it (native_rx.go).
+	RecvImpl func() string
 }
 
 // RouteManager owns the media listener + negotiation. Create with New, attach sources/sinks, then
@@ -361,6 +364,7 @@ type RouteManager struct {
 	budgetUserK func() int                           // adaptive user ceiling kbps (0=none)
 	budgetLinkF func() int                           // static link-ceiling fraction pct (0=default)
 	playout     func() string                        // recv playout preset name (nil = balanced)
+	recvImpl    func() string                        // recv path preference ("go" = escape hatch)
 
 	sampler procstat.Sampler // daemon RSS sampler for the media memory watchdog
 
@@ -419,7 +423,7 @@ func New(opts Options) *RouteManager {
 		headroom: opts.Headroom, governorOn: opts.GovernorEnabled,
 		govFloorMB: opts.GovernorFloorMB, govBaseKbps: opts.GovernorBaseKbps,
 		budgetMode: opts.BudgetMode, budgetUserK: opts.BudgetUserCeilKbps, budgetLinkF: opts.BudgetLinkFracPct,
-		playout: opts.PlayoutPreset,
+		playout: opts.PlayoutPreset, recvImpl: opts.RecvImpl,
 		udp:     opts.UDP,
 		sources: map[string]sourceReg{}, sinks: map[string]sinkReg{},
 		remoteAdvert: map[string]Advert{}, pendingAns: map[string]*pendingAnswer{},
@@ -1468,6 +1472,13 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 	if pr, ok := final.(PipelineReporter); ok {
 		ar.pipe = pr
 	}
+	// Native receive path (owner directive 2026-11-12): a decode sink in the native child takes the
+	// whole receive path (socket -> playout -> decode -> publish); the Go recv loop + jitter buffer do
+	// not run. Unsupported routes fall through to the Go path unchanged.
+	if nrx, ok := rm.tryAttachNativeRX(final, udp, peer, salt, encrypt, ans.Stream, srcDesc.FPS); ok {
+		rm.runNativeReceive(rctx, cancel, nrx, rio, ar, final, ans, peer, srcDesc)
+		return
+	}
 	// §3.3: video recv routes get the adaptive jitter buffer + keyframe-aware policy drops;
 	// NACK-unrecoverable loss triggers a PLI over the control plane (§2.5).
 	var jb *jitterBuffer
@@ -1542,6 +1553,54 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 		// up as a second live route for one source and which `route-stop all` could not find.
 		rm.warnf("udp route blackout - route ended; receive layer will re-establish (TCP if UDP stays blocked)",
 			map[string]any{"session": ans.Session, "peer": peer})
+	}
+	rm.endRoute(ans.Session, conn, err, "recv")
+}
+
+// runNativeReceive supervises a recv route whose receive path runs in the native child. Teardown order:
+// supervisor returns -> final.Close() (child: RX thread joined -> decoder closed -> session closed; then
+// the destination sender is released by the inner sink) -> endRoute.
+func (rm *RouteManager) runNativeReceive(rctx context.Context, cancel context.CancelFunc, nrx NativeRX, rio *routeIO,
+	ar *activeRoute, final Sink, ans Answer, peer string, srcDesc SourceDesc) {
+	conn := newNativeRXConn(nrx)
+	rio.conn = conn
+	ar.conn, ar.udp = conn, nil
+	rio.st.setTransportImpl("native")
+	rio.st.setNativeRX(rm.playoutPreset().Name)
+	rm.trackRoute(ans.Session, ar)
+	rm.dropDuplicateRecv(peer, ar.sourceID, ans.Session)
+	rm.infof("route up (recv) [native rx]", map[string]any{"session": ans.Session, "peer": peer, "stream": ans.Stream,
+		"codec": ans.Codec, "preset": rm.playoutPreset().Name})
+	if rio.caps.report {
+		go rm.guard("nativeReceiverReports", func() { rm.nativeReceiverReports(rctx, rio, nrx) })
+	}
+	if rio.caps.sync {
+		go rm.guard("syncProbe", func() { rm.syncProbe(rctx, rio, peer) }) // pongs return via nrx.Meta()
+	}
+	if ans.Codec.CompressedVideo() {
+		frac := DefaultLinkFracPct
+		if rm.budgetLinkF != nil {
+			if f := rm.budgetLinkF(); f > 0 {
+				frac = f
+			}
+		}
+		budget := rm.budgetKbpsFn(ans.Codec, srcDesc.Width, srcDesc.Height, int(srcDesc.FPS), rm.localLinkCeilKbps(ans.Addr, frac))
+		go rm.guard("congestGovernor", func() {
+			rm.congestGovernor(rctx, rio, nativeUDPStats{nrx}, ans.Stream, budget, int(srcDesc.FPS))
+		})
+	}
+	err := rm.superviseNativeRX(rctx, conn, nrx, rio.st, peer)
+	cancel()
+	_ = final.Close()
+	switch {
+	case errors.Is(err, errUDPEnded):
+		rm.infof("remote source ended (clean end-of-stream) - route ended", map[string]any{"session": ans.Session, "peer": peer})
+	case errors.Is(err, errUDPDead):
+		rm.warnf("udp route blackout - route ended; receive layer will re-establish (TCP if UDP stays blocked)",
+			map[string]any{"session": ans.Session, "peer": peer, "impl": "native"})
+	}
+	if errors.Is(err, errConnClosed) {
+		err = nil // replaced/stopped route: not an error
 	}
 	rm.endRoute(ans.Session, conn, err, "recv")
 }
