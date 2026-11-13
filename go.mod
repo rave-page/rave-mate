@@ -1,6 +1,6 @@
 module rave.page/mate
 
-go 1.26.6
+go 1.26.11
 
 require (
 	fyne.io/fyne/v2 v2.7.4
@@ -19,9 +19,9 @@ require (
 	github.com/webview/webview_go v0.0.0-20240831120633-6173450d4dd6
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/image v0.43.0
-	golang.org/x/net v0.55.0
-	golang.org/x/sys v0.45.0
-	golang.org/x/text v0.39.0
+	golang.org/x/net v0.60.0
+	golang.org/x/sys v0.48.0
+	golang.org/x/text v0.42.0
 	modernc.org/sqlite v1.50.1
 )
 

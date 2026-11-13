@@ -19,8 +19,8 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 # Go toolchain: the exact version go.mod requires, tarball SHA-256-pinned.
-ARG GO_VERSION=1.26.6
-ARG GO_SHA256=708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89
+ARG GO_VERSION=1.26.11
+ARG GO_SHA256=9849f4e04ee35303714e34fbc3ac8ab44ea3e448a95aa182f91e3b9b79c710ec
 RUN set -eux; cd /tmp; \
     curl -fsSLO "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"; \
     echo "${GO_SHA256}  go${GO_VERSION}.linux-amd64.tar.gz" | sha256sum -c -; \
