@@ -152,6 +152,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 		BudgetUserCeilKbps: func() int { return liveCfg().UserBitrateCeilKbps() },
 		BudgetLinkFracPct:  func() int { return liveCfg().LinkFractionPct() },
 		PlayoutPreset:      func() string { return liveCfg().PlayoutPreset() },
+		RecvImpl:           func() string { return liveCfg().RecvImplPref() },
 	})
 	if len(in.Encoders) > 0 || len(in.Decoders) > 0 {
 		f.router.SetCodecCaps(withVAAPINativeEncoders(in.Encoders), in.Decoders)

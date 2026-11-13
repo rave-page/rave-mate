@@ -4,8 +4,10 @@
 //!
 //! stdin line 1 (JSON): {"peer":"127.0.0.1:p","token":..,"skey":<hex32>,"spfx":..,"rkey":<hex32>,
 //!   "rpfx":..,"enc":true,"iseq":..,"stream":1,"codec":4,"frames":N (0 = until quit),"au":"small"|
-//!   "realistic","loss":0.0003,"stalls":[[start_ms,dur_ms],..],"seed":1}
-//! then "quit" (or EOF) ends: the sender closes with a bye.
+//!   "realistic"|"pipe","loss":0.0003,"stalls":[[start_ms,dur_ms],..],"seed":1}
+//! then "quit" (or EOF) ends: the sender closes with a bye. au "pipe": stdin instead carries REAL access
+//! units from the test's encoder, little-endian records [u32 len][u32 flags(bit0 key)][i64 pts ns][data];
+//! len 0 (or EOF) ends. The producer paces; each AU is submitted on arrival.
 //! stdout: {"ev":"up","local":"ip:port"} (the address the receiver will see datagrams from), then
 //!   {"ev":"stats",...} every 250 ms, {"ev":"done",...} at exit.
 const std = @import("std");
@@ -210,6 +212,19 @@ pub fn main(init: std.process.Init) !void {
     emit(.{ .ev = "up", .local = seen_from });
 
     const st_thread = try std.Thread.spawn(.{}, statsLoop, .{ s, relay });
+    if (std.mem.eql(u8, p.au, "pipe")) {
+        pipeLoop(gpa, in, s) catch {};
+        g_quit.store(true, .release);
+        st_thread.join();
+        report(s, relay, "done");
+        s.close();
+        if (relay) |r| {
+            hrt.sleepUntil(hrt.nowMono() + 50_000_000);
+            r.stop.store(true, .release);
+            relay_thread.?.join();
+        }
+        return;
+    }
     const quit_thread = try std.Thread.spawn(.{}, readQuit, .{in});
     quit_thread.detach(); // EOF/quit sets g_quit; a blocked stdin read must not delay exit
 
@@ -238,6 +253,25 @@ pub fn main(init: std.process.Init) !void {
         hrt.sleepUntil(hrt.nowMono() + 50_000_000); // let the relay forward the bye
         r.stop.store(true, .release);
         relay_thread.?.join();
+    }
+}
+
+// pipeLoop submits AUs streamed on stdin (bounded: one AU buffer, 4 MiB cap = the sender's slot cap).
+fn pipeLoop(gpa: std.mem.Allocator, in: *std.Io.Reader, s: *snd.Sender) !void {
+    const buf = try gpa.alloc(u8, 4 << 20);
+    defer gpa.free(buf);
+    while (true) {
+        const len = try in.takeInt(u32, .little);
+        if (len == 0) return;
+        const flags = try in.takeInt(u32, .little);
+        const pts = try in.takeInt(i64, .little);
+        if (len > buf.len) {
+            try in.discardAll(len);
+            continue; // oversized: dropped (the receiver PLIs, the encoder re-keys)
+        }
+        try in.readSliceAll(buf[0..len]);
+        const key = (flags & 1) != 0 or g_force_key.swap(false, .acq_rel);
+        s.submit(buf[0..len], pts, if (key) snd.flag_keyframe else 0);
     }
 }
 

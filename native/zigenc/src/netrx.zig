@@ -93,10 +93,10 @@ pub const Slot = enum(u8) {
     max_ms, misses, misses10m, repeats, repeats10m, rebases, gap_drops, grows, decays, pub_count,
     pub_p50, pub_p99, pub_max, pub_over25, pub_over50, pub_over100, last_rx_ns, ctl_seq, key_waits,
     rebinds, media_bytes, keyframes, rel_p99, rel_max, rel_over25, meta_in_drops, buffered, dec_errors,
-    now_ns, pub_mean, bye, state,
+    now_ns, pub_mean, bye, state, rx_errors,
 };
 comptime {
-    std.debug.assert(@as(usize, @intFromEnum(Slot.state)) * 8 + 8 <= blk_size);
+    std.debug.assert(@as(usize, @intFromEnum(Slot.rx_errors)) * 8 + 8 <= blk_size);
 }
 
 /// Net is the attached network source of one decode session. Heap-owned by the session.
@@ -192,7 +192,16 @@ fn onIdle(user: ?*anyopaque) callconv(.c) void {
 
 /// writeBlock publishes the telemetry block (session thread, ~4 Hz). Seqlock-framed.
 pub fn writeBlock(base: [*]u8, n: *Net, state: u64) void {
-    const s = n.rx.stats();
+    var s = n.rx.stats();
+    // Lifecycle + control fields LIVE (the receiver's snapshot is up to 250 ms old): liveness, bye,
+    // the control seq floor for a re-attach and the meta counters must not lag.
+    const r = n.rx;
+    s.last_rx_ns = r.last_rx.load(.monotonic);
+    s.bye = r.bye.load(.acquire);
+    s.ctl_seq = r.seq_pub.load(.monotonic);
+    s.metas_sent = r.metas_sent.load(.monotonic);
+    s.delivered = r.delivered.load(.monotonic);
+    s.datagrams = r.net_marks.load(.monotonic);
     const rel = n.rx.publish.snapshot();
     const pb = n.pub_hist.snapshot();
     const pl = s.playout;
@@ -224,6 +233,7 @@ pub fn writeBlock(base: [*]u8, n: *Net, state: u64) void {
         .{ .buffered, pl.buffered },                 .{ .dec_errors, n.dec_errors.load(.monotonic) },
         .{ .now_ns, ib(hrt.nowMono()) },              .{ .pub_mean, fb(pb.mean_ms) },
         .{ .bye, @intFromBool(s.bye) },              .{ .state, state },
+        .{ .rx_errors, s.rx_errors },
     };
     for (vals) |v| {
         const p: *volatile u64 = @ptrCast(@alignCast(base + @as(usize, @intFromEnum(v[0])) * 8));

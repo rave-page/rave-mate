@@ -515,6 +515,11 @@ func formatRoutes(stats []medialink.RouteStat) string {
 				u.LossPct, float64(u.RTTns)/1e6, float64(u.OwdNs)/1e6, float64(u.OwdJitterNs)/1e6,
 				u.NacksSent, u.NacksRecv, u.Retransmits, u.ReasmDrops, u.PacerDepth, u.PacerDrops)
 		}
+		// Native receive path (socket -> playout -> decode -> publish inside the decode child).
+		if n := s.NativeRX; n != nil {
+			fmt.Fprintf(&b, "    native rx delivered=%d published=%d keyWaits=%d nack(recovered/expired)=%d/%d gapDrops=%d rebinds=%d decErrors=%d rxErrors=%d\n",
+				n.Delivered, n.Published, n.KeyWaits, n.NackRecovered, n.NackExpired, n.GapDrops, n.Rebinds, n.DecErrors, n.RxErrors)
+		}
 		// Jitter buffer (recv video).
 		if jb := s.JB; jb != nil {
 			fmt.Fprintf(&b, "    jitterbuf depth=%d buffered=%d lateRate=%.2f policyDrops=%d\n",
@@ -530,6 +535,7 @@ func formatRoutes(stats []medialink.RouteStat) string {
 			writeStage(&b, "dec", st.DecSubmit)  // decode submit (backpressure)
 			writeStage(&b, "enc", st.EncDone)    // encoded AU available (send)
 			writeStage(&b, "tx ", st.TxQueue)    // packetized + queued (send)
+			writeStage(&b, "pub", st.Publish)    // decoded frame published (native receive, in-child)
 		}
 	}
 	return b.String()

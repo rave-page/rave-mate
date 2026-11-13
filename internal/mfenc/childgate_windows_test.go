@@ -3,6 +3,7 @@
 package mfenc
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -13,6 +14,9 @@ func TestProbeChildHello(t *testing.T) {
 	exe, err := encExePath()
 	if err != nil {
 		t.Skip("rave-mate-enc.exe not built: ", err)
+	}
+	if _, err := os.Stat(exe); err != nil {
+		t.Skip("rave-mate-enc.exe not present: ", err)
 	}
 	if err := probeChildHello(exe); err != nil {
 		t.Fatalf("hello probe against real child failed: %v", err)

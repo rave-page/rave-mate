@@ -66,6 +66,7 @@ pub const Stats = struct {
     nack_expired: u64 = 0, // NACKed frames that never completed (evicted / given up)
     ctl_seq: u64 = 0, // next control datagram seq (a re-attach continues ABOVE it: one nonce space)
     meta_in_drops: u64 = 0, // inbound meta dropped (mailbox full / oversized)
+    rx_errors: u64 = 0, // socket receive errors other than would-block (a deaf socket is visible)
     playout: playout_mod.Stats = undefined,
 };
 
@@ -136,6 +137,7 @@ pub const Receiver = struct {
     media_bytes: std.atomic.Value(u64) = .init(0),
     keyframes: std.atomic.Value(u64) = .init(0),
     seq_pub: std.atomic.Value(u64) = .init(0),
+    rx_errors: std.atomic.Value(u64) = .init(0),
     rx_buf: []u8,
     dg_buf: []u8,
 
@@ -291,6 +293,7 @@ pub const Receiver = struct {
             .nack_expired = r.reasm.nack_expired,
             .ctl_seq = r.seq_pub.load(.monotonic),
             .meta_in_drops = r.meta_in_drops.load(.monotonic),
+            .rx_errors = r.rx_errors.load(.monotonic),
             .playout = r.playout.stats(now),
         };
         spinLock(&r.stats_mu);
@@ -304,7 +307,10 @@ pub const Receiver = struct {
         var k: usize = 0;
         while (k < rx_batch) : (k += 1) {
             var src: sock.Addr4 = .{};
-            const n = sock.recvFrom(r.fd, r.rx_buf, &src) catch return false;
+            const n = sock.recvFrom(r.fd, r.rx_buf, &src) catch |e| {
+                if (e != error.WouldBlock) _ = r.rx_errors.fetchAdd(1, .monotonic);
+                return false;
+            };
             const t = hrtimer.nowMono(); // first bytes of this datagram off the socket
             _ = r.net_marks.fetchAdd(1, .monotonic);
             if (!r.have_peer) {
