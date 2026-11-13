@@ -82,6 +82,7 @@ type pwSource struct {
 	encName    string // negotiated engine name (PipelineStats.Encoder)
 	encNode    string // VA render node
 	lastMaxH   int    // last MaxHeight applied via SetRateHint (coded-height cap; 0 = native)
+	lastMaxFPS int    // last MaxFPS applied via SetRateHint (PTS-grid cap; 0 = none)
 	encQuality int    // active constant-quality target (1..100; 0 = legacy rate-controlled) - for ctl
 	encKbps    int    // active bitrate budget CEILING (kbps); updated live by SetRateHint - for ctl
 
@@ -287,7 +288,7 @@ func (s *pwSource) RequestKeyframe() {
 // SetRateHint implements medialink.RateControlSource: the receiver's VRAM governor caps our output.
 // Bitrate is the live lever (the corrector-scaled CBR target, no reopen). MaxHeight is now LIVE: the
 // encoder re-creates at the capped CODED size (nominal source geometry unchanged - the receiver
-// upscales). MaxFPS stays reserved (logged).
+// upscales). MaxFPS is LIVE: the shim's PTS grid decimates to the capped rate (even spacing).
 func (s *pwSource) SetRateHint(h medialink.RateHint) {
 	if !s.encMode {
 		return
@@ -309,9 +310,9 @@ func (s *pwSource) SetRateHint(h medialink.RateHint) {
 		s.lastMaxH = h.MaxHeight
 		C.rpw_set_cap_height(s.h, C.int(h.MaxHeight))
 	}
-	if h.MaxFPS > 0 && s.log != nil {
-		s.log.Debug(source, "rate hint: fps cap not yet live on the native path (reserved); applied bitrate + height", map[string]any{
-			"maxFPS": h.MaxFPS, "maxHeight": h.MaxHeight, "maxBitrateKbps": h.MaxBitrateKbps})
+	if h.MaxFPS != s.lastMaxFPS { // fps rung: PTS-grid decimation in the shim (0 = restore)
+		s.lastMaxFPS = h.MaxFPS
+		C.rpw_set_cap_fps(s.h, C.int(h.MaxFPS))
 	}
 }
 

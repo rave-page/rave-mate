@@ -381,6 +381,7 @@ struct rpw_capture {
 	int enc_kbps;        /* target bitrate budget (CBR target, or the CQP ceiling in quality mode) */
 	int enc_maxh;        /* coded-height cap (0 = native); VPP downscales taller sources */
 	int enc_fps;
+	int cap_fps; /* receiver rate hint MaxFPS (atomic; 0 = none): the PTS grid decimates to min(enc_fps, cap_fps) */
 	int enc_quality_qp;  /* 0 = legacy CBR; >0 = constant-quality CQP at this target QP (ceiling=kbps) */
 	char enc_node[96];   /* VA render node */
 	int force_idr;       /* rpw_request_keyframe sets it; on_process consumes + clears (under mu) */
@@ -1362,8 +1363,12 @@ static void on_process(void *data) {
 					long long gpts = buffer_pts(sb);
 					if (gpts <= 0)
 						gpts = mono_ns();
-					if (c->enc_fps > 0) {
-						long long period = 1000000000LL / c->enc_fps;
+					int gfps = c->enc_fps;
+					int capf = __atomic_load_n(&c->cap_fps, __ATOMIC_RELAXED);
+					if (capf > 0 && (gfps <= 0 || capf < gfps))
+						gfps = capf; /* governor fps rung: same grid, coarser slot */
+					if (gfps > 0) {
+						long long period = 1000000000LL / gfps;
 						long long tol = period / 4;
 						/* source interval EMA (clamped to 2p): decimate ONLY a source that really runs
 						 * faster than the rate (VRChat 120 -> 60). A ~rate source with arrival jitter (no
@@ -1717,6 +1722,14 @@ void rpw_request_keyframe(struct rpw_capture *c) {
 	pthread_mutex_lock(&c->mu);
 	c->force_idr = 1;
 	pthread_mutex_unlock(&c->mu);
+}
+
+/* rpw_set_cap_fps caps the encoded frame rate (receiver governor fps rung; 0 = clear) via the PTS
+ * grid: newest frame per 1/fps slot, so the output stays evenly spaced. Applied on the next frame. */
+void rpw_set_cap_fps(struct rpw_capture *c, int fps) {
+	if (!c)
+		return;
+	__atomic_store_n(&c->cap_fps, fps > 0 ? fps : 0, __ATOMIC_RELAXED);
 }
 
 /* rpw_set_bitrate updates the live target bitrate (kbps); applied on the next encoded frame. */
