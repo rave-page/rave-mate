@@ -205,6 +205,13 @@ func (rm *RouteManager) serveUDPFirst(token uint32, session string, src *net.UDP
 	}
 	mc.deliver(append([]byte(nil), dg...), src) // feed the authenticated first datagram (pong + bind)
 	go rm.guard("pumpSourceUDP", func() {
+		// deliver is async (inbox): until recvLoop processes the first datagram the remote is unbound and
+		// paceWrite discards every send. Wait for the bind, else a source that emits at route start (first
+		// keyframe, a burst) loses those frames silently.
+		if !u.waitReachable(udpReachTimeout) {
+			_ = u.Close()
+			return
+		}
 		rm.pumpSource(rm.routeCtx(), session, pa, u, u)
 	})
 	return mc

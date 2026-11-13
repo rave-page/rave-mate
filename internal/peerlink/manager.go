@@ -79,6 +79,8 @@ type Manager struct {
 	store *peers.Store
 	log   *logbus.Bus
 
+	peerMu sync.Mutex // serializes read-modify-write of remembered-peer records (openConnected)
+
 	mu        sync.Mutex
 	conns     map[string]*connState   // by peer node id
 	dialGates map[string]*logbus.Gate // by peer node id: don't re-warn every re-discovery of an unreachable peer
@@ -564,9 +566,11 @@ func (m *Manager) maybeFinalize(cs *connState) {
 }
 
 func (m *Manager) openConnected(cs *connState) {
-	cs.info.Status, cs.info.SAS = StatusConnected, ""
 	// Refresh last-seen/address on the remembered peer; an outbound link's address is the peer's
-	// listener (the re-dial target after a link flap).
+	// listener (the re-dial target after a link flap). Persisted BEFORE the link reads as connected,
+	// and the Get+Save is serialized (peerMu): a concurrent inbound open re-saving a stale snapshot
+	// would otherwise erase the DialAddress just learned (lost update -> no re-dial target).
+	m.peerMu.Lock()
 	if known, ok := m.store.Get(cs.res.PeerNodeID); ok {
 		known.LastSeen = time.Now().UTC()
 		known.LastAddress = cs.info.Address
@@ -575,7 +579,9 @@ func (m *Manager) openConnected(cs *connState) {
 		}
 		_ = m.store.Save(known)
 	}
+	m.peerMu.Unlock()
 	m.mu.Lock()
+	cs.info.Status, cs.info.SAS = StatusConnected, ""
 	delete(m.redial, cs.res.PeerNodeID) // connected: backoff resets
 	m.mu.Unlock()
 	debuglog.Go(m.log, logTag, func() { cs.link.keepalive(cs.ctx) })

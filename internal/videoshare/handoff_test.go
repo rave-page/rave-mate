@@ -134,7 +134,11 @@ func TestHandoffDisplacedFrameReleasesProducer(t *testing.T) {
 	if a.readOK.Load() {
 		t.Fatal("displaced frame reported as read")
 	}
-	// the displacing frame is still queued: budget-expiry must reclaim it, not block forever
+	// the displacing frame is still queued: budget-expiry must reclaim it, not block forever. deliverJob
+	// releases the displaced frame BEFORE its next loop iteration enqueues the new one - wait for it.
+	for dl := time.Now().Add(time.Second); len(ch) == 0 && time.Now().Before(dl); {
+		time.Sleep(time.Millisecond)
+	}
 	if got := handoffReclaimQueued(ch); !got {
 		t.Fatal("queued frame could not be reclaimed")
 	}
