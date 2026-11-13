@@ -529,7 +529,33 @@ type MediaLinkFeature struct {
 type RememberedReceive struct {
 	Peer     string `json:"peer"`           // remote node id (stable)
 	SourceID string `json:"sourceId"`       // stable source id ("spout:<name>")
-	Name     string `json:"name,omitempty"` // display only
+	Name     string `json:"name,omitempty"` // display only; also names the republish sender ("rave-mate link <Name>")
+	// Nominal geometry of the source (the advert's real size, NOT the coded size): lets the receiver
+	// claim its destination at start, before the first advert (VRAM_FULL_CARD_POLICY 1a). 0 = unknown.
+	W   int `json:"w,omitempty"`
+	H   int `json:"h,omitempty"`
+	FPS int `json:"fps,omitempty"`
+}
+
+// SetRememberedGeometry records the nominal geometry (and display name) of a remembered receive.
+// Returns true if anything changed (caller persists). A geometry change is a NOMINAL change only when
+// the advert's real size changed - the coded size never reaches here.
+func (m *MediaLinkFeature) SetRememberedGeometry(peer, sourceID, name string, w, h, fps int) bool {
+	for i := range m.RememberedReceives {
+		r := &m.RememberedReceives[i]
+		if r.Peer != peer || r.SourceID != sourceID {
+			continue
+		}
+		if w <= 0 || h <= 0 || (r.W == w && r.H == h && r.FPS == fps && (name == "" || r.Name == name)) {
+			return false
+		}
+		r.W, r.H, r.FPS = w, h, fps
+		if name != "" {
+			r.Name = name
+		}
+		return true
+	}
+	return false
 }
 
 // ZeroCopyCapture reports whether zero-copy Spout→encoder capture is enabled. Env

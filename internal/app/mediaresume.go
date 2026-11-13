@@ -170,8 +170,19 @@ func (r *rememberingReceives) reconcile() {
 		}
 	}
 	avail := map[string]bool{}
+	geomChanged := false
 	for _, s := range r.ReceiveControl.RemoteVideoSources() {
 		avail[s.Peer+"\x00"+s.Desc.ID] = true
+		// Persist the nominal geometry of remembered sources so the destination can be claimed at the
+		// next start before any advert arrives (1a). Advert size = nominal; coded size never shows here.
+		r.mu.Lock()
+		if r.cfg.Features.MediaLink.SetRememberedGeometry(s.Peer, s.Desc.ID, s.Desc.Name, s.Desc.Width, s.Desc.Height, int(s.Desc.FPS)) {
+			geomChanged = true
+		}
+		r.mu.Unlock()
+	}
+	if geomChanged {
+		r.save()
 	}
 	for _, w := range wanted {
 		key := w.Peer + "\x00" + w.SourceID
