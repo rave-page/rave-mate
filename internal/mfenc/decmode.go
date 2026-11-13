@@ -22,15 +22,17 @@ var DecCPUFallback func() (enabled bool, threads int, cfg decmode.Config)
 // that has collapsed outright).
 var DecAdmitCPU func(inW, inH, outW, outH, fps int) DecVerdict
 
-// CPUDecodeCostMB estimates SOFTWARE-mode GPU memory: the coded-size NV12 upload texture + one VP
-// intermediate + device/VP objects. The destination (exists anyway) is not counted.
+// CPUDecodeCostMB estimates SOFTWARE-mode GPU memory: device/VP objects + the coded-size NV12 upload
+// texture. The destination (exists anyway) is not counted. Measured on the RTX 3060 (2026-11-13,
+// TestSWDecodeCodedSizes, child VRAM over its device baseline): 4K coded +14 MB, 1080p +5, 720p +3
+// (HW DXVA at the same sizes: +84 / +23 / +12). The VP allocates no BGRA intermediate.
 func CPUDecodeCostMB(inW, inH int) float64 {
 	px := float64(inW * inH)
 	if px <= 0 {
 		px = 1920 * 1080
 	}
 	const mib = 1024.0 * 1024.0
-	return 8 + px*1.5/mib + px*4/mib
+	return 8 + px*1.5/mib
 }
 
 // DecodeModeStatus is one session's visible decode mode (ctl routes / encoder-scan).
