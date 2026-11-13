@@ -31,6 +31,8 @@ pub const RxConfig = struct {
     max_frame_bytes: usize = 4 << 20,
     preset: playout_mod.Preset = playout_mod.balanced,
     stream: u16 = 1, // media stream the PLI names
+    initial_seq: u64 = 0, // first control datagram seq: CONTINUE the Go dialer conn's seq space (a Go
+    //                        sender's replay window rejects a restart at 0)
 };
 
 const keepalive_ns: i64 = 100 * std.time.ns_per_ms;
@@ -48,6 +50,12 @@ pub const Stats = struct {
     plis_sent: u64 = 0,
     reasm_drops: u64 = 0,
     slot_drops: u64 = 0,
+    // congestion-controller inputs (same semantics as medialink.UDPStats):
+    loss_pct: f64 = 0, // datagram loss over the last ~1 s window (seq gaps; retransmits refill)
+    owd_ns: i64 = 0, // smoothed queuing delay above the windowed-min transit
+    owd_jitter_ns: i64 = 0, // |transit delta| EWMA
+    rtt_ns: i64 = 0, // keepalive ping -> pong
+    metas_sent: u64 = 0,
     playout: playout_mod.Stats = undefined,
 };
 
@@ -70,6 +78,28 @@ pub const Receiver = struct {
     have_peer: bool = false,
     seq: u64 = 0,
     meta_seq: u32 = 0,
+    // transport telemetry (worker-owned)
+    dg_hi: u64 = 0,
+    dg_have: bool = false,
+    win_hi0: u64 = 0,
+    win_got: u64 = 0,
+    win_start: i64 = 0,
+    loss_pct: f64 = 0,
+    owd_min_cur: i64 = 0,
+    owd_min_prev: i64 = 0,
+    owd_bucket_at: i64 = 0,
+    owd_have: bool = false,
+    owd_ns: i64 = 0,
+    owd_jit: i64 = 0,
+    last_transit: i64 = 0,
+    rtt_ns: i64 = 0,
+    // meta mailbox: Go-originated control (MetaRate, receiver reports, sync pings) sent by the worker
+    // so every control datagram uses ONE seq/nonce counter. Bounded: 16 x 256 B, newest dropped if full.
+    mbox_mu: std.atomic.Mutex = .unlocked,
+    mbox: [16][256]u8 = undefined,
+    mbox_len: [16]usize = [_]usize{0} ** 16,
+    mbox_n: usize = 0,
+    metas_sent: std.atomic.Value(u64) = .init(0),
     last_ping: i64 = 0,
     last_pli: i64 = 0,
     rx_buf: []u8,
@@ -101,6 +131,11 @@ pub const Receiver = struct {
     /// open starts the receiver worker on an already-bound UDP socket (ownership stays with the
     /// caller). cb is installed before the worker starts.
     pub fn open(alloc: std.mem.Allocator, fd: sock.Fd, cfg: RxConfig, cb: ?FrameCb, user: ?*anyopaque) !*Receiver {
+        return openPeer(alloc, fd, cfg, null, cb, user);
+    }
+
+    /// openPeer is open with the sender's address known up front (control can flow before media).
+    pub fn openPeer(alloc: std.mem.Allocator, fd: sock.Fd, cfg: RxConfig, peer: ?sock.Addr4, cb: ?FrameCb, user: ?*anyopaque) !*Receiver {
         const r = try alloc.create(Receiver);
         errdefer alloc.destroy(r);
         const pbuf = try alloc.alloc(playout_mod.Item, n_slots);
@@ -122,11 +157,16 @@ pub const Receiver = struct {
             .slot_buf = sbuf,
             .slot_len = slen,
             .slot_free = sfree,
+            .seq = cfg.initial_seq,
             .rx_buf = try alloc.alloc(u8, 2048),
             .dg_buf = try alloc.alloc(u8, 2 + nack_max * 8 + wire.header_len + 128), // fits a full NACK / PLI
             .on_frame = cb,
             .user = user,
         };
+        if (peer) |pa| {
+            r.peer = pa;
+            r.have_peer = true;
+        }
         sock.setBufs(fd, 16 << 20, 0); // large SO_RCVBUF: a receiver-host stall must not overflow it
         r.thread = try std.Thread.spawn(.{}, worker, .{r});
         return r;
@@ -165,6 +205,7 @@ pub const Receiver = struct {
             r.scanAndNack(now);
             r.drainPlayout();
             r.keepalive(now);
+            r.drainMailbox(now);
             if (now - last_stats >= 250 * std.time.ns_per_ms) {
                 last_stats = now;
                 r.publishStats(now);
@@ -186,6 +227,11 @@ pub const Receiver = struct {
             .plis_sent = r.plis_sent.load(.monotonic),
             .reasm_drops = r.reasm.droppedCount(),
             .slot_drops = r.slot_drops.load(.monotonic),
+            .loss_pct = r.loss_pct,
+            .owd_ns = r.owd_ns,
+            .owd_jitter_ns = r.owd_jit,
+            .rtt_ns = r.rtt_ns,
+            .metas_sent = r.metas_sent.load(.monotonic),
             .playout = r.playout.stats(now),
         };
         spinLock(&r.stats_mu);
@@ -224,6 +270,7 @@ pub const Receiver = struct {
     }
 
     fn handleBody(r: *Receiver, h: wire.Header, body: []const u8, now: i64) void {
+        r.noteSeq(h.seq, now);
         switch (h.typ) {
             wire.dg_type_media => {
                 if (r.drop_frame >= 0 and h.frame_seq == @as(u32, @intCast(r.drop_frame)) and h.frag_idx == @as(u16, @intCast(r.drop_frag))) {
@@ -234,6 +281,7 @@ pub const Receiver = struct {
                 const whole = r.reasm.accept(h.stream, h.frame_seq, h.frag_idx, h.frag_count, body) orelse return;
                 const f = wire.parseFrameForTest(whole) catch return;
                 if (f.kind != 1) return; // video only
+                r.noteTransit(now - f.pts, now);
                 if (r.stall_at_frame >= 0 and f.seq == @as(u32, @intCast(r.stall_at_frame))) {
                     r.stall_at_frame = -1; // simulated receiver-host stall: nothing is read meanwhile
                     hrtimer.sleepUntil(hrtimer.nowMono() + r.stall_ns);
@@ -248,6 +296,11 @@ pub const Receiver = struct {
                 if (!r.playout.push(f.seq, f.pts, (f.flags & 0x01) != 0, si, now)) r.slot_free[si] = true;
             },
             wire.dg_type_ping => r.sendCtrl(wire.dg_type_pong, 0, 0, body),
+            wire.dg_type_pong => if (body.len >= 8) { // our keepalive echoed: RTT
+                const sent: i64 = @bitCast(std.mem.readInt(u64, body[0..8], .big));
+                const rtt = hrtimer.nowMono() - sent;
+                if (rtt >= 0 and rtt < 5_000_000_000) r.rtt_ns = if (r.rtt_ns == 0) rtt else r.rtt_ns + @divTrunc(rtt - r.rtt_ns, 8);
+            },
             else => {},
         }
     }
@@ -320,6 +373,80 @@ pub const Receiver = struct {
         r.sendCtrl(wire.dg_type_media, 0, r.meta_seq, fr[0..n]);
         r.meta_seq +%= 1;
         _ = r.plis_sent.fetchAdd(1, .monotonic);
+    }
+
+    // noteSeq folds an authenticated datagram's seq into the ~1 s loss window (seq gaps / expected).
+    fn noteSeq(r: *Receiver, seq: u64, now: i64) void {
+        if (!r.dg_have) {
+            r.dg_have = true;
+            r.dg_hi = seq;
+            r.win_hi0 = seq;
+            r.win_start = now;
+        }
+        if (seq > r.dg_hi) r.dg_hi = seq;
+        r.win_got += 1;
+        if (now - r.win_start >= 1_000_000_000) {
+            const expected = r.dg_hi - r.win_hi0;
+            r.loss_pct = if (expected > 0 and r.win_got < expected) @as(f64, @floatFromInt(expected - r.win_got)) * 100 / @as(f64, @floatFromInt(expected)) else 0;
+            r.win_hi0 = r.dg_hi;
+            r.win_got = 0;
+            r.win_start = now;
+        }
+    }
+
+    // noteTransit maintains OWD as queuing delay above a 2 x 2 s windowed-min transit (offset-free,
+    // the congestion controller's delay-gradient input) + |transit delta| jitter.
+    fn noteTransit(r: *Receiver, transit: i64, now: i64) void {
+        if (!r.owd_have) {
+            r.owd_have = true;
+            r.owd_min_cur = transit;
+            r.owd_min_prev = transit;
+            r.owd_bucket_at = now;
+            r.last_transit = transit;
+        }
+        if (now - r.owd_bucket_at >= 2_000_000_000) {
+            r.owd_min_prev = r.owd_min_cur;
+            r.owd_min_cur = transit;
+            r.owd_bucket_at = now;
+        } else if (transit < r.owd_min_cur) r.owd_min_cur = transit;
+        const q = transit - @min(r.owd_min_cur, r.owd_min_prev);
+        r.owd_ns += @divTrunc(q - r.owd_ns, 8);
+        const d = if (transit > r.last_transit) transit - r.last_transit else r.last_transit - transit;
+        r.owd_jit += @divTrunc(d - r.owd_jit, 16);
+        r.last_transit = transit;
+    }
+
+    /// sendMeta queues one stream-0 meta frame (Go-originated JSON: MetaRate, reports, sync) for the
+    /// worker. false = mailbox full / too large (dropped, counted by the caller).
+    pub fn sendMeta(r: *Receiver, json: []const u8) bool {
+        if (json.len > 256) return false;
+        spinLock(&r.mbox_mu);
+        defer r.mbox_mu.unlock();
+        if (r.mbox_n == r.mbox.len) return false;
+        @memcpy(r.mbox[r.mbox_n][0..json.len], json);
+        r.mbox_len[r.mbox_n] = json.len;
+        r.mbox_n += 1;
+        return true;
+    }
+
+    fn drainMailbox(r: *Receiver, now: i64) void {
+        var tmp: [16][256]u8 = undefined;
+        var lens: [16]usize = undefined;
+        spinLock(&r.mbox_mu);
+        const n = r.mbox_n;
+        for (0..n) |i| {
+            lens[i] = r.mbox_len[i];
+            @memcpy(tmp[i][0..lens[i]], r.mbox[i][0..lens[i]]);
+        }
+        r.mbox_n = 0;
+        r.mbox_mu.unlock();
+        for (0..n) |i| {
+            var fr: [wire.frame_header_len + 256]u8 = undefined;
+            const fl = wire.marshalFrame(&fr, .{ .stream = 0, .kind = 0, .codec = 0, .flags = 0, .seq = r.meta_seq, .pts = now }, tmp[i][0..lens[i]]);
+            r.sendCtrl(wire.dg_type_media, 0, r.meta_seq, fr[0..fl]);
+            r.meta_seq +%= 1;
+            _ = r.metas_sent.fetchAdd(1, .monotonic);
+        }
     }
 
     fn keepalive(r: *Receiver, now: i64) void {

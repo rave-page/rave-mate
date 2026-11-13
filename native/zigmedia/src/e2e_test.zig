@@ -231,7 +231,7 @@ test "e2e chaos: 4K60 sizes, 10 s, 0.1% loss + 2 arrival stalls (60/130 ms): eve
     const stalls = [_][2]i64{ .{ 4_000_000_000, 60_000_000 }, .{ 7_000_000_000, 130_000_000 } };
     const r = try runE2E(.{ .frames = 600, .au_bytes = realisticAU, .loss = 0.001, .stalls = &stalls });
     const p = r.publish;
-    std.debug.print("e2e chaos 4K60: delivered={d}/600 relayLost={d} nacks={d} retx={d} txDropped={d} plis={d} playout={d:.1}ms misses={d} repeats={d} publish p50/p99/max={d:.1}/{d:.1}/{d:.1}ms over25={d} reasmDrops={d} slotDrops={d} gapDrops={d} dgrams={d} txDg={d} relaySeen={d} relayFwd={d}\n", .{
+    if (@import("build_options").chaos_report) std.debug.print("e2e chaos 4K60: delivered={d}/600 relayLost={d} nacks={d} retx={d} txDropped={d} plis={d} playout={d:.1}ms misses={d} repeats={d} publish p50/p99/max={d:.1}/{d:.1}/{d:.1}ms over25={d} reasmDrops={d} slotDrops={d} gapDrops={d} dgrams={d} txDg={d} relaySeen={d} relayFwd={d}\n", .{
         r.sink.count.load(.monotonic), r.relay_lost,      r.rx.nacks_sent,     r.tx.retransmits,
         r.tx.aus_dropped,              r.rx.plis_sent,    r.rx.playout.playout_ms, r.rx.playout.misses,
         r.rx.playout.repeats,          p.p50_ms,          p.p99_ms,            p.max_ms,

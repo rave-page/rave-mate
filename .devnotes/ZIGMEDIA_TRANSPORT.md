@@ -146,3 +146,21 @@ path (unchanged, wire-compatible, so native↔Go interoperate). Route telemetry 
 - Native routes (ABI v4): the native sender parses receiver meta - MetaRate -> rm_tx_rate_hint (Go polls 10 Hz ->
   RateControlSource.SetRateHint), MetaSync -> SyncPong, PLI -> on_need_idr. Sender reports (MetaReport) are not
   emitted natively: the receiver's congestion inputs (datagram-seq loss, PTS OWD, ping RTT) do not use them.
+
+## Native RX integration - remaining work (2026-11-13)
+Done: `rm_rx_*` (ABI v5) = complete native receive (socket, reassembly, NACK, playout, PLI, loss/OWD/RTT,
+meta mailbox, publish histogram), Linux + Windows, tested via the C ABI. Not yet wired:
+1. zigenc child (`native/zigenc`): `{"op":"open","dir":"dec","src":"net",...}` session. Import
+   `native/zigmedia/src/receiver.zig` as a module (NOT root.zig: its exports need libc's c_allocator), link
+   ws2_32. Socket: Go dials + runs the reachability handshake, then WSADuplicateSocketW(child pid) ->
+   base64 WSAPROTOCOL_INFOW in the open op -> WSASocketW(FROM_PROTOCOL_INFO) in the child. Frame callback
+   (receiver thread, at the playout deadline) -> Dec.feed + Dec.pump on that thread (decLoop must not touch
+   the Dec in net mode). `null_dec` flag for GPU-free loopback tests. Telemetry -> the shm header + 1 Hz
+   stats event. Initial control seq = Go udpConn send seq.
+2. Go: mfenc parent op + socket duplication (syscall lazy ws2_32, no new deps); medialink dialAndReceive:
+   when the decoder factory offers native RX and the route is UDP with per-route keys -> hand off, stop the
+   Go udpConn RX (no bye), skip jbSink/runJitter; congestGovernor reads native stats (loss/owd/rtt) via a
+   `NativeRXStats` source; MetaRate/receiver reports/sync pings go through rm_rx_send_meta (never Go's own
+   socket handle: nonce reuse). RouteStat impl=native, playout + publish histogram on `ctl routes`.
+3. VRAM: mediaroute.StartReceive already admits sender + decoder BEFORE the offer (AdmitReceive); the
+   child's Dec.open keeps its own admission (mfenc.DecAdmit).

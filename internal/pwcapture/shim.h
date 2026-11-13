@@ -112,6 +112,7 @@ int rpw_attach_native_tx(struct rpw_capture *c, int transport, int codec, int st
 void rpw_native_tx_set_rate(struct rpw_capture *c, double bytes_per_sec);
 void rpw_native_tx_stats(struct rpw_capture *c, rm_tx_stats *out);
 void rpw_native_tx_rate_hint(struct rpw_capture *c, rm_rate_hint *out);
+void rpw_set_cap_fps(struct rpw_capture *c, int fps);
 void rpw_native_tx_close(struct rpw_capture *c);
 
 /* rpw_stop disconnects + frees the capture. */

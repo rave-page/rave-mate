@@ -98,8 +98,8 @@ func (realClock) Quality() ClockQuality { return ClockQuality{Tier: TierMonotoni
 // The receiver binds to the native socket on the first datagram, media flows, a dropped fragment is
 // recovered via NACK->retransmit, and rm_tx_close's bye ends the route with errUDPEnded (not a blackout).
 func TestNativeSenderToGoReceiverInterop(t *testing.T) {
-	if v := nativeABIVersion(); v != 4 {
-		t.Fatalf("linked libravemedia ABI = %d, want 4 (stale lib?)", v)
+	if v := nativeABIVersion(); v != 5 {
+		t.Fatalf("linked libravemedia ABI = %d, want 5 (stale lib?)", v)
 	}
 	if rc := nativeWireSelftest(); rc != 0 {
 		t.Fatalf("rm_wire_selftest = %d (wire core mismatch)", rc)
