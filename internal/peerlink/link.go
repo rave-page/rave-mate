@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -139,7 +140,11 @@ func (l *Link) close(err error) {
 	}
 	l.closed = true
 	l.mu.Unlock()
-	l.conn.Close()
+	if cn, ok := l.conn.(interface{ CloseNow() }); ok && err != nil {
+		cn.CloseNow() // error close (dead link / bad frame): no handshake wait
+	} else {
+		l.conn.Close()
+	}
 	if l.onClose != nil {
 		l.onClose(err)
 	}
@@ -148,10 +153,21 @@ func (l *Link) close(err error) {
 // Close terminates the link.
 func (l *Link) Close() { l.close(nil) }
 
+// Keepalive cadence + dead-link bound. A NIC link reset leaves the TCP connection HALF-OPEN: writes
+// still land in the send buffer and the read side blocks forever, so both peers stayed "paired"
+// until restart. A ping unanswered for pongTimeout now closes the link (-> dropConn -> redial).
+var (
+	pingEvery   = 2 * time.Second
+	pongTimeout = 6 * time.Second
+)
+
+var errPingTimeout = errors.New("peerlink: ping timeout (dead link)")
+
 // keepalive pings the peer periodically so a dead connection is noticed. Each ping carries
-// our wall clock (pts, µs) - the pong echo doubles as the RTT/clock-offset probe.
+// our wall clock (pts, µs) - the pong echo doubles as the RTT/clock-offset probe. One ping in
+// flight at a time; unanswered past pongTimeout = dead link, closed.
 func (l *Link) keepalive(ctx context.Context) {
-	t := time.NewTicker(5 * time.Second)
+	t := time.NewTicker(pingEvery)
 	defer t.Stop()
 	for {
 		select {
@@ -160,8 +176,19 @@ func (l *Link) keepalive(ctx context.Context) {
 		case <-t.C:
 			pts := time.Now().UnixMicro()
 			l.pingMu.Lock()
-			l.pingPts, l.pingSentMono = pts, time.Now()
+			inflight := !l.pingSentMono.IsZero()
+			overdue := inflight && time.Since(l.pingSentMono) > pongTimeout
+			if !inflight {
+				l.pingPts, l.pingSentMono = pts, time.Now()
+			}
 			l.pingMu.Unlock()
+			if overdue {
+				l.close(errPingTimeout)
+				return
+			}
+			if inflight {
+				continue
+			}
 			sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			err := l.send(sctx, framePing, map[string]any{"pts": pts})
 			cancel()

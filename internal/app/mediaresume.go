@@ -28,6 +28,11 @@ type rememberingReceives struct {
 	save    func()
 	mu      sync.Mutex               // guards RememberedReceives writes + Save
 	backoff map[string]*reoffBackoff // per (peer,source) re-offer backoff; reconcile-goroutine only (no lock)
+	// peerUp reports whether the peer link to a node is connected (nil = always). A down->up
+	// transition (link flap recovered) resets that peer's backoff so its remembered receives resume
+	// at once instead of after up to reoffCap. reconcile-goroutine only.
+	peerUp func(node string) bool
+	wasUp  map[string]bool
 }
 
 // re-offer backoff: a died route is retried fast (immediate, then 1s, 2s, 4s … capped), so a stage
@@ -115,6 +120,7 @@ func (r *rememberingReceives) reconcile() {
 		return
 	}
 	now := time.Now()
+	r.resetOnReconnect(wanted)
 	active := map[string]bool{}
 	for _, rc := range r.ReceiveControl.Receives() {
 		// Occupied = LIVE or still establishing (offer in-flight). A died-but-not-GC'd receive is NOT
@@ -158,6 +164,33 @@ func (r *rememberingReceives) reconcile() {
 		r.armBackoff(b, now) // provisional: don't re-offer again until it has had a chance to come up
 		r.log.Info("mediaroute", "auto-reactivated remembered remote source", map[string]any{
 			"peer": w.Peer, "source": w.SourceID, "name": w.Name})
+	}
+}
+
+// resetOnReconnect clears the re-offer backoff of every remembered source whose peer link just came
+// back (down -> up): a flap must not leave a route waiting out a 30 s backoff step.
+func (r *rememberingReceives) resetOnReconnect(wanted []config.RememberedReceive) {
+	if r.peerUp == nil {
+		return
+	}
+	if r.wasUp == nil {
+		r.wasUp = map[string]bool{}
+	}
+	for _, w := range wanted {
+		up := r.peerUp(w.Peer)
+		if up && !r.wasUp[w.Peer] {
+			for _, x := range wanted {
+				if x.Peer == w.Peer {
+					if b := r.backoff[x.Peer+"\x00"+x.SourceID]; b != nil {
+						b.next, b.interval = time.Time{}, reoffBase
+					}
+				}
+			}
+			if r.log != nil {
+				r.log.Info("mediaroute", "peer link up - resuming remembered receives now", map[string]any{"peer": w.Peer})
+			}
+		}
+		r.wasUp[w.Peer] = up
 	}
 }
 

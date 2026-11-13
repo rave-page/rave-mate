@@ -111,3 +111,7 @@ func (w *wsConn) Recv(ctx context.Context) ([]byte, error) {
 }
 
 func (w *wsConn) Close() { _ = w.ws.Close(websocket.StatusNormalClosure, "") }
+
+// CloseNow drops the connection without the closing handshake (a dead link never answers it; the
+// graceful Close would block up to 5 s before the peer is marked down).
+func (w *wsConn) CloseNow() { _ = w.ws.CloseNow() }

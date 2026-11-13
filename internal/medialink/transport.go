@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"sync"
+	"time"
 
 	"rave.page/mate/internal/wirecrypto"
 )
@@ -33,7 +34,15 @@ type Conn struct {
 	ptbuf []byte // reused plaintext buffer
 
 	onFirstByte func() // STEP-0: called when a frame's length prefix is read (first bytes off the socket)
+
+	// idle bounds the wait for the next frame on a RECEIVE route (0 = none). After a NIC link reset a
+	// TCP route is half-open - no FIN ever arrives and the read blocked forever, so the route never
+	// ended and nothing re-offered it. Needs a net.Conn underneath (deadline support).
+	idle time.Duration
 }
+
+// SetIdleTimeout arms the per-frame read deadline (receive routes; 0 disables).
+func (c *Conn) SetIdleTimeout(d time.Duration) { c.idle = d }
 
 // SetFirstByteHook sets a per-frame first-byte-arrival callback (STEP-0 arrival-jitter localization).
 func (c *Conn) SetFirstByteHook(fn func()) { c.onFirstByte = fn }
@@ -86,6 +95,11 @@ func (c *Conn) ReadFrame() (*Frame, error) {
 	c.rmu.Lock()
 	defer c.rmu.Unlock()
 	var lp [4]byte
+	if c.idle > 0 {
+		if dc, ok := c.rw.(interface{ SetReadDeadline(time.Time) error }); ok {
+			_ = dc.SetReadDeadline(time.Now().Add(c.idle))
+		}
+	}
 	if _, err := io.ReadFull(c.br, lp[:]); err != nil {
 		return nil, err
 	}

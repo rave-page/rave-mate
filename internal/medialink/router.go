@@ -1419,6 +1419,9 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 		rm.warnf("media dial failed", map[string]any{"addr": ans.Addr, "transport": ans.Transport, "error": err.Error()})
 		return
 	}
+	if tc, ok := conn.(*Conn); ok {
+		tc.SetIdleTimeout(recvIdleTimeout) // half-open TCP after a link reset: end the route, resume re-offers
+	}
 	sink, err := po.open(ctx, ans)
 	if err != nil {
 		rm.warnf("sink open failed", map[string]any{"session": ans.Session, "error": err.Error()})
@@ -1558,6 +1561,11 @@ func (rm *RouteManager) remoteSourceDesc(peer, sourceID string) (SourceDesc, boo
 	}
 	return SourceDesc{}, false
 }
+
+// recvIdleTimeout ends a TCP receive route that has carried no frame (media, report, sync) for
+// this long: the sender emits media at the frame rate plus 1 Hz reports, so silence this long is a
+// dead (half-open) connection, not a quiet source.
+var recvIdleTimeout = 10 * time.Second
 
 // playoutPreset resolves the configured recv playout preset.
 func (rm *RouteManager) playoutPreset() PlayoutPreset {

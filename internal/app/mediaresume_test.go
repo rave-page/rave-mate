@@ -170,3 +170,26 @@ func TestReconcileHeldRechecksWithoutBackoff(t *testing.T) {
 		t.Fatalf("admitted source not offered: starts=%d recvs=%d", f.starts, len(f.recvs))
 	}
 }
+
+// A remembered source deep in backoff (peer link was down) is re-offered as soon as its peer link
+// comes back up - a link flap must not cost up to reoffCap of black screen.
+func TestReconcileResumesOnPeerReconnect(t *testing.T) {
+	f := &fakeRecv{avail: []mediaroute.RemoteSource{srcAvail("p1", "vrc")}}
+	rr := newRR(f, config.RememberedReceive{Peer: "p1", SourceID: "vrc"})
+	up := true
+	rr.peerUp = func(string) bool { return up }
+	rr.reconcile() // initial offer
+	b := rr.backoff["p1\x00vrc"]
+	b.next, b.interval = time.Now().Add(time.Hour), reoffCap // deep backoff from repeated failures
+	f.recvs = nil                                            // route died with the link
+	up = false
+	rr.reconcile()
+	if f.starts != 1 {
+		t.Fatalf("offered while backing off: %d", f.starts)
+	}
+	up = true // link flap recovered
+	rr.reconcile()
+	if f.starts != 2 {
+		t.Fatalf("not re-offered on peer reconnect: starts=%d", f.starts)
+	}
+}

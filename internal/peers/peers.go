@@ -24,9 +24,13 @@ type Peer struct {
 	IdentityPub ed25519.PublicKey `json:"identityPub"` // the key SAS-verified at pairing
 	Nickname    string            `json:"nickname"`
 	LastAddress string            `json:"lastAddress"` // host:port last seen/connected
-	LastSeen    time.Time         `json:"lastSeen"`
-	PairedAt    time.Time         `json:"pairedAt"`
-	Trusted     bool              `json:"trusted"`
+	// DialAddress is the peer's LISTENER host:port from our last successful outbound dial (an
+	// inbound link only knows the remote host + an ephemeral port). Used to re-dial after a link
+	// flap without waiting for mDNS.
+	DialAddress string    `json:"dialAddress,omitempty"`
+	LastSeen    time.Time `json:"lastSeen"`
+	PairedAt    time.Time `json:"pairedAt"`
+	Trusted     bool      `json:"trusted"`
 	// EncOff is the per-transfer-type encryption opt-out (keys: PlaneControl/PlaneFiles/
 	// PlaneMedia). Encryption is DEFAULT ON: a plane absent (or false) means encrypted. A wire
 	// opt-out takes effect only when BOTH ends set it, so a lone true here never downgrades.
