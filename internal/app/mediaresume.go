@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 
@@ -33,6 +34,44 @@ type rememberingReceives struct {
 	// at once instead of after up to reoffCap. reconcile-goroutine only.
 	peerUp func(node string) bool
 	wasUp  map[string]bool
+	// holds: VRAM-held remembered receives (key peer\x00source) with the numbers the media plane sent back
+	// in the held error (ctl routes / encoder-scan). Bounded by the remembered set; holdMu since ctl reads.
+	holdMu sync.Mutex
+	holds  map[string]mediaroute.Hold
+}
+
+var _ mediaroute.HoldReporter = (*rememberingReceives)(nil)
+
+// noteHold records the hold carried by a held StartReceive error.
+func (r *rememberingReceives) noteHold(key string, err error) {
+	h, ok := mediaroute.ParseHeld(err)
+	if !ok {
+		return
+	}
+	r.holdMu.Lock()
+	defer r.holdMu.Unlock()
+	if r.holds == nil {
+		r.holds = map[string]mediaroute.Hold{}
+	}
+	r.holds[key] = h
+}
+
+func (r *rememberingReceives) clearHold(key string) {
+	r.holdMu.Lock()
+	delete(r.holds, key)
+	r.holdMu.Unlock()
+}
+
+// Holds lists the current VRAM-held remembered receives, oldest first.
+func (r *rememberingReceives) Holds() []mediaroute.Hold {
+	r.holdMu.Lock()
+	defer r.holdMu.Unlock()
+	out := make([]mediaroute.Hold, 0, len(r.holds))
+	for _, h := range r.holds {
+		out = append(out, h)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Since.Before(out[j].Since) })
+	return out
 }
 
 // re-offer backoff: a died route is retried fast (immediate, then 1s, 2s, 4s … capped), so a stage
@@ -138,12 +177,14 @@ func (r *rememberingReceives) reconcile() {
 		key := w.Peer + "\x00" + w.SourceID
 		b := r.backoffFor(key)
 		if active[key] {
+			r.clearHold(key)
 			r.noteLive(b, now) // live: arm the stable-reset timer; reset backoff once stable
 			continue
 		}
 		b.liveSince = time.Time{} // not live: restart the stability clock for the next up period
 		if !avail[key] {
-			continue // source PC has not advertised it (yet): wait, do not burn a backoff step
+			r.clearHold(key) // a hold is only meaningful while the source is offered
+			continue         // source PC has not advertised it (yet): wait, do not burn a backoff step
 		}
 		if now.Before(b.next) {
 			continue // backing off from a recent attempt
@@ -152,8 +193,9 @@ func (r *rememberingReceives) reconcile() {
 			if mediaroute.IsHeld(err) {
 				// Pre-offer VRAM hold: nothing was sent to the source PC; re-check admission locally on a
 				// short fixed cadence (cheap) so the route comes up promptly once VRAM is freed. The hold
-				// is logged by mediaroute on entry/exit, not per tick.
+				// is logged by mediaroute on entry/exit, not per tick; its numbers are kept for ctl/UI.
 				b.next = now.Add(reoffHeldRecheck)
+				r.noteHold(key, err)
 				continue
 			}
 			r.armBackoff(b, now)
@@ -161,6 +203,7 @@ func (r *rememberingReceives) reconcile() {
 				"peer": w.Peer, "source": w.SourceID, "err": err.Error()})
 			continue
 		}
+		r.clearHold(key)
 		r.armBackoff(b, now) // provisional: don't re-offer again until it has had a chance to come up
 		r.log.Info("mediaroute", "auto-reactivated remembered remote source", map[string]any{
 			"peer": w.Peer, "source": w.SourceID, "name": w.Name})

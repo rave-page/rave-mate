@@ -495,6 +495,14 @@ type MediaLinkFeature struct {
 	// GPU allocation/recycle runs and the ladder steps down. 0 = auto (the gpumem watchdog
 	// threshold, max(1024, 8% budget)). A rebuild needing more than the current free is always held.
 	VramReserveMB int `json:"vramReserveMB,omitempty"`
+	// VramPolicy is the VRAM admission preset (.devnotes/VRAM_FULL_CARD_POLICY.md): "balanced" (default;
+	// need = what rave-mate allocates + what a NEW sender makes Resolume allocate, plus a margin; a tight
+	// band opens as a verified attempt that backs out on a collapse), "strict" (the old geometry reserve
+	// 768-1536 MB - VramReserveMB applies here only), "permissive" (verified attempt whenever the need
+	// fits at all). Env RAVE_MATE_VRAM_POLICY overrides.
+	VramPolicy string `json:"vramPolicy,omitempty"`
+	// VramMarginMB raises the non-strict margin floor (0 = default 64 MB; margin = max(this, 25% need)).
+	VramMarginMB int `json:"vramMarginMB,omitempty"`
 	// SenderMaxHeight pins the immortal Spout sender texture height so its shared handle never
 	// changes across a source-resolution change (decode scales into it). 0 = auto (first-observed
 	// source height, capped 2160); >0 = explicit cap.
@@ -587,6 +595,23 @@ func (m MediaLinkFeature) ResolvedVramReserveMB() int {
 		return 0
 	}
 	return m.VramReserveMB
+}
+
+// VramPolicyName returns the configured VRAM admission preset (env RAVE_MATE_VRAM_POLICY wins; ""
+// = default balanced). Validation lives in gpubudget.ParseMode (unknown => balanced).
+func (m MediaLinkFeature) VramPolicyName() string {
+	if v := strings.TrimSpace(os.Getenv("RAVE_MATE_VRAM_POLICY")); v != "" {
+		return v
+	}
+	return m.VramPolicy
+}
+
+// ResolvedVramMarginMB returns the configured non-strict margin floor (0 = default; negatives => 0).
+func (m MediaLinkFeature) ResolvedVramMarginMB() int {
+	if m.VramMarginMB < 0 {
+		return 0
+	}
+	return m.VramMarginMB
 }
 
 // ResolvedSenderMaxHeight returns the immortal-sender texture height cap (0 = auto: first-observed

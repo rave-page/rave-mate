@@ -753,7 +753,7 @@ func run(parent context.Context, serviceMode bool) error {
 		EncodeDevice:       featurehost.NewEncodeDeviceResolver(mediaLinkCfg, vramBudget.Budget, nil, log),
 		Headroom:           func() (uint64, bool) { h := gpumem.ReadHeadroom(gpuGovSampler); return h.FreeMB, h.Present },
 		GovernorEnabled:    func() bool { return mediaLinkCfg().VramGovernorEnabled() },
-		GovernorFloorMB:    uint64(mediaLinkCfg().ResolvedVramReserveMB()),
+		GovernorFloorMB:    vramBudget.GovernorFloorMB, // policy-derived: a full card is normal; trimming frees no VRAM
 		GovernorBaseKbps:   func() int { return mediaLinkCfg().Bitrate() },
 		BudgetMode:         func() string { return mediaLinkCfg().BitrateModeString() },
 		BudgetUserCeilKbps: func() int { return mediaLinkCfg().UserBitrateCeilKbps() },
@@ -3602,6 +3602,7 @@ func (c *appControl) EncoderScan() string {
 
 	var b strings.Builder
 	b.WriteString(rep.String())
+	b.WriteString(c.holdsText())
 	fmt.Fprintf(&b, "cpu=%.0f%%  advertised-encoders=%d  policy=%s\n", cpu, len(devices), policy)
 	if len(advertised) > 0 {
 		fmt.Fprintf(&b, "advertised order: [%s]\n", strings.Join(advertised, " "))
