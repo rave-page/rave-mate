@@ -96,12 +96,35 @@ type Manager struct {
 	authzLabel string
 	authzCode  authz.CredentialFunc
 
+	// Re-dial after a link flap (independent of mDNS): per-peer backoff + down-since (mu).
+	redial  map[string]*redialState
+	dialing map[string]bool
+	started time.Time
+
 	ctx context.Context
 }
 
+type redialState struct {
+	next      time.Time
+	interval  time.Duration
+	downSince time.Time
+}
+
+// Re-dial policy. The peer with the LOWER node id re-dials first (one dialer: simultaneous mutual
+// dials would replace each other's link); the other side joins in once the link has been down
+// redialFallback, so a one-sided address problem still recovers.
+var (
+	redialTick     = time.Second
+	redialBase     = 2 * time.Second
+	redialCap      = 30 * time.Second
+	redialFallback = 20 * time.Second
+	redialDialTO   = 4 * time.Second
+)
+
 // New builds the manager. id is this node's identity; store remembers paired peers.
 func New(id *identity.Identity, store *peers.Store, log *logbus.Bus) *Manager {
-	return &Manager{id: id, store: store, log: log, conns: map[string]*connState{}, dialGates: map[string]*logbus.Gate{}}
+	return &Manager{id: id, store: store, log: log, conns: map[string]*connState{}, dialGates: map[string]*logbus.Gate{},
+		redial: map[string]*redialState{}, dialing: map[string]bool{}}
 }
 
 // AddListener registers peer-event hooks (additive - both the Fyne UI and the studio peer
@@ -148,6 +171,8 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 	})
 	m.log.Info(logTag, "listening", map[string]any{"port": port, "node": m.id.NodeID})
+	m.started = time.Now()
+	debuglog.Go(m.log, logTag, func() { m.redialLoop(ctx) })
 	return nil
 }
 
@@ -540,12 +565,19 @@ func (m *Manager) maybeFinalize(cs *connState) {
 
 func (m *Manager) openConnected(cs *connState) {
 	cs.info.Status, cs.info.SAS = StatusConnected, ""
-	// Refresh last-seen/address on the remembered peer.
+	// Refresh last-seen/address on the remembered peer; an outbound link's address is the peer's
+	// listener (the re-dial target after a link flap).
 	if known, ok := m.store.Get(cs.res.PeerNodeID); ok {
 		known.LastSeen = time.Now().UTC()
 		known.LastAddress = cs.info.Address
+		if !cs.info.Inbound && cs.info.Address != "" {
+			known.DialAddress = cs.info.Address
+		}
 		_ = m.store.Save(known)
 	}
+	m.mu.Lock()
+	delete(m.redial, cs.res.PeerNodeID) // connected: backoff resets
+	m.mu.Unlock()
 	debuglog.Go(m.log, logTag, func() { cs.link.keepalive(cs.ctx) })
 	m.fireState()
 }
@@ -555,11 +587,115 @@ func (m *Manager) openConnected(cs *connState) {
 func (m *Manager) dropConn(cs *connState) {
 	m.mu.Lock()
 	id := cs.res.PeerNodeID
-	if m.conns[id] == cs {
+	dropped := m.conns[id] == cs
+	wasOpen := cs.info.Status == StatusConnected
+	if dropped {
 		delete(m.conns, id)
+		if m.redial != nil {
+			m.redial[id] = &redialState{interval: redialBase, downSince: time.Now()}
+		}
 	}
 	m.mu.Unlock()
+	if dropped && wasOpen && m.log != nil {
+		m.log.Info(logTag, "peer link down - re-dialing the last-known address", map[string]any{"peer": id})
+	}
 	m.fireState()
+}
+
+// redialLoop re-dials trusted, remembered peers that are not connected, on a backoff timer and
+// independent of mDNS (a NIC link reset left both peers "paired" forever: discovery never re-fired).
+func (m *Manager) redialLoop(ctx context.Context) {
+	t := time.NewTicker(redialTick)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			m.redialDue(time.Now())
+		}
+	}
+}
+
+// redialDue starts a dial for every remembered peer whose backoff elapsed.
+func (m *Manager) redialDue(now time.Time) {
+	list, _ := m.store.List()
+	for _, p := range list {
+		if !p.Trusted || p.NodeID == m.id.NodeID {
+			continue
+		}
+		addrs := dialCandidates(p)
+		if len(addrs) == 0 {
+			continue
+		}
+		m.mu.Lock()
+		_, live := m.conns[p.NodeID]
+		st := m.redial[p.NodeID]
+		if st == nil {
+			st = &redialState{interval: redialBase, downSince: m.started}
+			m.redial[p.NodeID] = st
+		}
+		lead := m.id.NodeID < p.NodeID || now.Sub(st.downSince) >= redialFallback
+		due := !live && !m.dialing[p.NodeID] && lead && !now.Before(st.next)
+		if due {
+			m.dialing[p.NodeID] = true
+			st.next = now.Add(st.interval)
+			if st.interval *= 2; st.interval > redialCap {
+				st.interval = redialCap
+			}
+		}
+		m.mu.Unlock()
+		if due {
+			peer := p
+			debuglog.Go(m.log, logTag, func() { m.dialKnown(peer, addrs) })
+		}
+	}
+}
+
+// dialCandidates is the re-dial address list: the last outbound (listener) address, else the
+// last-seen host on each listener port of the range.
+func dialCandidates(p peers.Peer) []string {
+	if p.DialAddress != "" {
+		return []string{p.DialAddress}
+	}
+	host := p.LastAddress
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if host == "" {
+		return nil
+	}
+	out := make([]string, 0, len(listenPorts()))
+	for _, port := range listenPorts() {
+		out = append(out, net.JoinHostPort(host, strconv.Itoa(port)))
+	}
+	return out
+}
+
+// dialKnown tries each candidate until one handshakes (trusted peer: silent reconnect).
+func (m *Manager) dialKnown(p peers.Peer, addrs []string) {
+	defer func() {
+		m.mu.Lock()
+		delete(m.dialing, p.NodeID)
+		m.mu.Unlock()
+	}()
+	for _, addr := range addrs {
+		m.mu.Lock()
+		_, live := m.conns[p.NodeID]
+		m.mu.Unlock()
+		if live || m.ctx.Err() != nil {
+			return
+		}
+		dctx, cancel := context.WithTimeout(m.ctx, redialDialTO)
+		ws, _, err := websocket.Dial(dctx, "ws://"+addr+"/", nil)
+		cancel()
+		if err != nil {
+			continue
+		}
+		m.log.Info(logTag, "re-dialed remembered peer", map[string]any{"peer": p.NodeID, "addr": addr})
+		m.runHandshake(newWSConn(ws), roleInitiator, p.Nickname, addr, p.NodeID)
+		return
+	}
 }
 
 // ── auto-reconnect ───────────────────────────────────────────────────────────

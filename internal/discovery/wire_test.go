@@ -180,3 +180,32 @@ func TestSubscribeDeliversCurrent(t *testing.T) {
 		t.Fatal("no initial snapshot")
 	}
 }
+
+// TestRejoinOnInterfaceChange: an unchanged interface set never re-joins; a NIC link reset (address
+// gone, then back / new address) re-joins the group on every capable interface (leave first).
+func TestRejoinOnInterfaceChange(t *testing.T) {
+	d := newTestDiscovery("self", time.Now)
+	eth := net.Interface{Index: 3, Name: "eth0", Flags: net.FlagUp | net.FlagMulticast}
+	lo := net.Interface{Index: 1, Name: "lo", Flags: net.FlagUp | net.FlagLoopback} // not multicast: skipped
+	cur := []ifaceInfo{{ifi: eth, addrs: []string{"192.168.1.5/24"}}, {ifi: lo}}
+	d.listIfaces = func() []ifaceInfo { return cur }
+	var joins, leaves []string
+	d.join = func(ifi *net.Interface) error { joins = append(joins, ifi.Name); return nil }
+	d.leave = func(ifi *net.Interface) error { leaves = append(leaves, ifi.Name); return nil }
+	d.ifSig = ifaceSignature(mcastCapable(cur)) // as after Start
+
+	if d.rejoinIfChanged() || len(joins) != 0 {
+		t.Fatalf("unchanged set re-joined: %v", joins)
+	}
+	cur = []ifaceInfo{{ifi: net.Interface{Index: 3, Name: "eth0", Flags: net.FlagMulticast}}, {ifi: lo}} // link down
+	if !d.rejoinIfChanged() || len(joins) != 0 {
+		t.Fatalf("link down: changed=%v joins=%v", true, joins)
+	}
+	cur = []ifaceInfo{{ifi: eth, addrs: []string{"192.168.1.5/24"}}, {ifi: lo}} // link back up
+	if !d.rejoinIfChanged() || len(joins) != 1 || joins[0] != "eth0" || len(leaves) != 1 {
+		t.Fatalf("link up: joins=%v leaves=%v", joins, leaves)
+	}
+	if d.rejoinIfChanged() {
+		t.Fatal("re-joined again without a change")
+	}
+}

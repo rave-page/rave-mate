@@ -9,7 +9,9 @@ package discovery
 import (
 	"context"
 	"net"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,6 +77,87 @@ type Discovery struct {
 	conn   *net.UDPConn
 	p      *ipv4.PacketConn
 	ifaces []net.Interface
+	ifSig  string // interface set signature at the last (re)join
+
+	// seams (tests): interface listing + group membership.
+	listIfaces func() []ifaceInfo
+	join       func(ifi *net.Interface) error
+	leave      func(ifi *net.Interface) error
+}
+
+// ifaceInfo is one interface + its addresses (the change-detection input).
+type ifaceInfo struct {
+	ifi   net.Interface
+	addrs []string
+}
+
+func sysIfaces() []ifaceInfo {
+	ifs, _ := net.Interfaces()
+	out := make([]ifaceInfo, 0, len(ifs))
+	for _, ifi := range ifs {
+		ii := ifaceInfo{ifi: ifi}
+		if as, err := ifi.Addrs(); err == nil {
+			for _, a := range as {
+				ii.addrs = append(ii.addrs, a.String())
+			}
+		}
+		out = append(out, ii)
+	}
+	return out
+}
+
+// mcastCapable filters up + multicast interfaces.
+func mcastCapable(all []ifaceInfo) []ifaceInfo {
+	var out []ifaceInfo
+	for _, ii := range all {
+		if ii.ifi.Flags&net.FlagUp != 0 && ii.ifi.Flags&net.FlagMulticast != 0 {
+			out = append(out, ii)
+		}
+	}
+	return out
+}
+
+func ifaceSignature(ifs []ifaceInfo) string {
+	parts := make([]string, 0, len(ifs))
+	for _, ii := range ifs {
+		as := append([]string(nil), ii.addrs...)
+		sort.Strings(as)
+		parts = append(parts, strconv.Itoa(ii.ifi.Index)+"/"+ii.ifi.Name+"="+strings.Join(as, ","))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ";")
+}
+
+// rejoinIfChanged re-joins the mDNS group on every capable interface when the interface set or an
+// address changed (NIC link reset / DHCP renew / adapter re-plug): a reset adapter silently loses its
+// group membership, so discovery went deaf until restart. Returns true when it re-joined.
+func (d *Discovery) rejoinIfChanged() bool {
+	capIfs := mcastCapable(d.listIfaces())
+	sig := ifaceSignature(capIfs)
+	d.mu.Lock()
+	same := sig == d.ifSig
+	d.mu.Unlock()
+	if same {
+		return false
+	}
+	var joined []net.Interface
+	for _, ii := range capIfs {
+		ifi := ii.ifi
+		_ = d.leave(&ifi) // stale membership (if any) first; errors are expected after a reset
+		if err := d.join(&ifi); err == nil {
+			joined = append(joined, ifi)
+		}
+	}
+	d.mu.Lock()
+	d.ifSig = sig
+	if len(joined) > 0 {
+		d.ifaces = joined
+	}
+	d.mu.Unlock()
+	if d.log != nil {
+		d.log.Info(logTag, "interfaces changed - multicast group re-joined", map[string]any{"interfaces": len(joined)})
+	}
+	return true
 }
 
 // SetPort sets the advertised peer-link TCP port. Call before Start (the port is known
@@ -84,11 +167,12 @@ func (d *Discovery) SetPort(p int) { d.svc.Port = p }
 // New builds a Discovery for the given service advertisement.
 func New(svc Service, log *logbus.Bus) *Discovery {
 	return &Discovery{
-		svc:   svc,
-		log:   log,
-		clock: time.Now,
-		peers: map[string]Peer{},
-		subs:  map[int]chan []Peer{},
+		svc:        svc,
+		log:        log,
+		clock:      time.Now,
+		peers:      map[string]Peer{},
+		subs:       map[int]chan []Peer{},
+		listIfaces: sysIfaces,
 	}
 }
 
@@ -123,6 +207,9 @@ func (d *Discovery) Start(ctx context.Context) error {
 
 	d.mu.Lock()
 	d.conn, d.p, d.ifaces = conn, p, joined
+	d.ifSig = ifaceSignature(mcastCapable(d.listIfaces()))
+	d.join = func(ifi *net.Interface) error { return p.JoinGroup(ifi, group) }
+	d.leave = func(ifi *net.Interface) error { return p.LeaveGroup(ifi, group) }
 	d.mu.Unlock()
 
 	d.log.Info(logTag, "started", map[string]any{"interfaces": len(joined), "node": d.svc.NodeID})
@@ -216,6 +303,7 @@ func (d *Discovery) tickLoop(ctx context.Context) {
 			if !open {
 				return
 			}
+			d.rejoinIfChanged() // a reset NIC loses its group membership: re-join, then announce/query
 			d.announce(announceTTL)
 			d.query()
 			d.expire()

@@ -1058,7 +1058,15 @@ func run(parent context.Context, serviceMode bool) error {
 	// again (restart/reconnect/offline-then-back). Wraps whichever ReceiveControl is live (in-proc
 	// or child proxy), so all UI paths persist intent; a daemon-side ticker resumes them.
 	if mediaRoutesCtl != nil {
-		rr := &rememberingReceives{ReceiveControl: mediaRoutesCtl, log: log, cfg: &cfg, save: func() { _ = cfg.Save() }}
+		rr := &rememberingReceives{ReceiveControl: mediaRoutesCtl, log: log, cfg: &cfg, save: func() { _ = cfg.Save() },
+			peerUp: func(node string) bool {
+				for _, c := range peerMgr.Connections() {
+					if c.NodeID == node && c.Status == peerlink.StatusConnected {
+						return true
+					}
+				}
+				return false
+			}}
 		mediaRoutesCtl = rr
 		debuglog.Go(log, "receive-resume", func() { runReceiveResume(ctx, rr) })
 	}
