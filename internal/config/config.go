@@ -503,6 +503,13 @@ type MediaLinkFeature struct {
 	VramPolicy string `json:"vramPolicy,omitempty"`
 	// VramMarginMB raises the non-strict margin floor (0 = default 64 MB; margin = max(this, 25% need)).
 	VramMarginMB int `json:"vramMarginMB,omitempty"`
+	// VramSystemHeadroomMB is the free VRAM a FULL allocation (HW decode, new sender) must leave for
+	// OTHER apps (Parsec/OBS NVENC, Resolume) - incident 2026-11-13. 0 = policy default (balanced 700,
+	// permissive 400; strict uses its reserve). Also the floor under which a running HW decoder yields.
+	VramSystemHeadroomMB int `json:"vramSystemHeadroomMB,omitempty"`
+	// VramHardFloorMB: even the lightest path (CPU decode into the destination) never leaves less free
+	// VRAM than this (0 = 256); below it the receive is HELD.
+	VramHardFloorMB int `json:"vramHardFloorMB,omitempty"`
 	// CPUDecodeFallback (owner directive 2026-11-13): when the VRAM budget refuses or cannot keep a HW
 	// decode pipeline, decode in SOFTWARE inside the decode child into the SAME destination (no DXVA
 	// pool, no new sender, sender asked for a lower coded height) and return to HW once free VRAM >= HW

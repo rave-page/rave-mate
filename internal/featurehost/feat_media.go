@@ -133,7 +133,6 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 	// Resolution-cap changes grant the local decoder a re-init grace so a coded-size switch is not
 	// mistaken for a frozen-destination wedge (the destination geometry stays nominal regardless).
 	medialink.OnResolutionCapChange = mfenc.NoteDecodeResizeGrace
-	medialink.DecodeCapHeight = mfenc.DecodeCapHeight // CPU decode mode (1e) caps the sender's coded height
 	// Plan-driven AUTO device selection (throughput-aware; pin/avoid unchanged; unmeasured => engine
 	// default). The sender-side CPU% is not sampled here (a HW encoder is the common case); nil.
 	encDevResolver := NewEncodeDeviceResolver(liveCfg, f.vram.Budget, nil, rt.Log)
@@ -146,7 +145,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 			return c.PreferCodec, c.PinnedEncoder()
 		},
 		EncodeDevice:       encDevResolver,
-		Headroom:           func() (uint64, bool) { h := gpumem.ReadHeadroom(gpuSampler); return h.FreeMB, h.Present },
+		Headroom:           SmoothedFree(gpuSampler), // 10 s mean: raw free swings 100s of MB/s (incident 2026-11-13)
 		GovernorEnabled:    func() bool { return liveCfg().VramGovernorEnabled() },
 		GovernorFloorMB:    f.vram.GovernorFloorMB, // policy-derived: a full card is normal; trimming frees no VRAM
 		GovernorBaseKbps:   func() int { return liveCfg().Bitrate() },

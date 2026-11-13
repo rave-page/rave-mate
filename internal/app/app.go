@@ -759,14 +759,13 @@ func run(parent context.Context, serviceMode bool) error {
 		})
 	}
 	medialink.OnResolutionCapChange = mfenc.NoteDecodeResizeGrace // decoder re-init grace on a cap change
-	medialink.DecodeCapHeight = mfenc.DecodeCapHeight             // CPU decode mode (1e) caps the sender's coded height
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,
 		Encoder: encFac, Decoder: decFac, UDP: cfg.Features.MediaLink.UDPEnabled(), // §2.5 UDP datagram profile (reachability-gated, TCP fallback; mediaLink.transport="tcp" disables)
 		EncodeMaxHeight:    cfg.Features.MediaLink.MaxHeight,
 		EncodePolicy:       mediaEncodePolicy(mediaLinkCfg),
 		EncodeDevice:       featurehost.NewEncodeDeviceResolver(mediaLinkCfg, vramBudget.Budget, nil, log),
-		Headroom:           func() (uint64, bool) { h := gpumem.ReadHeadroom(gpuGovSampler); return h.FreeMB, h.Present },
+		Headroom:           featurehost.SmoothedFree(gpuGovSampler), // 10 s mean (incident 2026-11-13)
 		GovernorEnabled:    func() bool { return mediaLinkCfg().VramGovernorEnabled() },
 		GovernorFloorMB:    vramBudget.GovernorFloorMB, // policy-derived: a full card is normal; trimming frees no VRAM
 		GovernorBaseKbps:   func() int { return mediaLinkCfg().Bitrate() },
@@ -2132,6 +2131,7 @@ func run(parent context.Context, serviceMode bool) error {
 			SampleInterval:  time.Duration(gm.SampleIntervalSeconds) * time.Second,
 			ProcessInterval: time.Duration(gm.ProcessIntervalSeconds) * time.Second,
 			WarnFreeMB:      warnFree,
+			CSVPath:         gpuCSVPath(), // per-minute VRAM history beside the log (incident 2026-11-13)
 		})
 		gpuMon = mon // wire the cached sample into Services (Live VRAM meter)
 		perfmon.RegisterProbe("gpu memory", mon.Probe)

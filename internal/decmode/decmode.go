@@ -33,6 +33,12 @@ type Config struct {
 	MaxDwell        time.Duration // dwell back-off cap after failed promotions (default 10 min)
 	MinResidency    time.Duration // minimum time in a mode before a NON-forced switch (default 30 s)
 	StableReset     time.Duration // HW stable this long resets the dwell back-off (default 60 s)
+	// SystemFloorMB is the free VRAM OTHER apps need (incident 2026-11-13). A running HW decoder whose
+	// AVERAGED free VRAM stays below it for StarveDwell is demoted to CPU (yield, before anything
+	// fails); promotion needs floor + HW need + buffer. 0 = no yield rule, promotion floor without it.
+	SystemFloorMB uint64
+	StarveDwell   time.Duration // default 15 s
+	AvgWindow     time.Duration // free-VRAM averaging window (default 10 s; free swings GBs per second)
 }
 
 const (
@@ -47,6 +53,8 @@ func (c Config) dwell() time.Duration        { return orDur(c.Dwell, defaultDwel
 func (c Config) maxDwell() time.Duration     { return orDur(c.MaxDwell, defaultMaxDwell) }
 func (c Config) minResidency() time.Duration { return orDur(c.MinResidency, defaultMinResidency) }
 func (c Config) stableReset() time.Duration  { return orDur(c.StableReset, defaultStableReset) }
+func (c Config) starveDwell() time.Duration  { return orDur(c.StarveDwell, 15*time.Second) }
+func (c Config) avgWindow() time.Duration    { return orDur(c.AvgWindow, 10*time.Second) }
 
 func orDur(v, d time.Duration) time.Duration {
 	if v > 0 {
@@ -55,7 +63,8 @@ func orDur(v, d time.Duration) time.Duration {
 	return d
 }
 
-// PromoteFloorMB is the free VRAM a promotion needs: HW need + buffer.
+// PromoteFloorMB is the free VRAM a promotion needs: system floor + HW need + buffer (the buffer sits
+// ON TOP of the floor, so promoting can never take others below it).
 func (c Config) PromoteFloorMB(hwNeedMB uint64) uint64 {
 	buf := c.PromoteBufferMB
 	if buf == 0 {
@@ -63,8 +72,14 @@ func (c Config) PromoteFloorMB(hwNeedMB uint64) uint64 {
 		if 2*hwNeedMB > buf {
 			buf = 2 * hwNeedMB
 		}
+		if c.SystemFloorMB > 0 { // with a floor underneath, a smaller buffer suffices: max(256, need)
+			buf = 256
+			if hwNeedMB > buf {
+				buf = hwNeedMB
+			}
+		}
 	}
-	return hwNeedMB + buf
+	return c.SystemFloorMB + hwNeedMB + buf
 }
 
 // Input is one policy tick's view of the world.
@@ -97,6 +112,7 @@ type Status struct {
 	Dwell       time.Duration // current promotion dwell (grows after failed promotions)
 	ReadySince  time.Time     // promotion headroom has held since (zero = not ready)
 	FailedPromo int
+	AvgFreeMB   uint64 // free VRAM averaged over AvgWindow (the value the yield/promotion rules use)
 }
 
 // Controller is one route's decode-mode state machine. Not safe for concurrent use (one policy
@@ -114,6 +130,41 @@ type Controller struct {
 	dwell      time.Duration
 	failed     int
 	hwStableAt time.Time
+	// free-VRAM samples within AvgWindow (bounded ring, cap avgCap; oldest overwritten).
+	samples     [avgCap]sample
+	nSamples    int
+	head        int
+	avgFree     uint64
+	starveSince time.Time
+}
+
+type sample struct {
+	at   time.Time
+	free uint64
+}
+
+const avgCap = 64 // > AvgWindow / tick period for any sane config (10 s / 2 s ticks = 5)
+
+// observe adds a sample and returns the mean free VRAM over the window.
+func (c *Controller) observe(now time.Time, free uint64) uint64 {
+	c.samples[c.head] = sample{at: now, free: free}
+	c.head = (c.head + 1) % avgCap
+	if c.nSamples < avgCap {
+		c.nSamples++
+	}
+	var sum, n uint64
+	win := c.cfg.avgWindow()
+	for i := 0; i < c.nSamples; i++ {
+		s := c.samples[i]
+		if now.Sub(s.at) <= win {
+			sum += s.free
+			n++
+		}
+	}
+	if n == 0 {
+		return free
+	}
+	return sum / n
 }
 
 // New starts a controller in mode m at now.
@@ -127,12 +178,15 @@ func (c *Controller) Mode() Mode { return c.mode }
 // Status snapshots the visible state.
 func (c *Controller) Status() Status {
 	return Status{Mode: c.mode, Pending: c.pending, Since: c.since, Why: c.why, LastSwitch: c.lastSwitch,
-		LastReason: c.lastReason, Dwell: c.dwell, ReadySince: c.readySince, FailedPromo: c.failed}
+		LastReason: c.lastReason, Dwell: c.dwell, ReadySince: c.readySince, FailedPromo: c.failed, AvgFreeMB: c.avgFree}
 }
 
 // Tick evaluates one policy step. Returns a Switch to execute, or nil. While a switch is pending no
 // new one is issued (the driver must report Done first).
 func (c *Controller) Tick(in Input) *Switch {
+	if in.Present {
+		c.avgFree = c.observe(in.Now, in.FreeMB)
+	}
 	if c.pending != "" {
 		return nil
 	}
@@ -167,13 +221,27 @@ func (c *Controller) Tick(in Input) *Switch {
 			}
 			return nil // nothing lighter fits; HW stays as is (resident pipelines allocate nothing)
 		}
+		// Yield to starved neighbours: averaged free VRAM below the system floor for StarveDwell while we
+		// hold a DXVA pool => demote and release it, BEFORE Resolume/Parsec fail (incident 2026-11-13).
+		if in.Present && c.cfg.SystemFloorMB > 0 && c.avgFree < c.cfg.SystemFloorMB {
+			if c.starveSince.IsZero() {
+				c.starveSince = in.Now
+			}
+			if in.Now.Sub(c.starveSince) >= c.cfg.starveDwell() && cpuFits {
+				c.starveSince = time.Time{}
+				return c.request(CPU, fmt.Sprintf("yield: free VRAM averaged %d MB < system floor %d MB for %s - releasing the HW decoder (%d MB)",
+					c.avgFree, c.cfg.SystemFloorMB, c.cfg.starveDwell(), in.HWNeedMB), true)
+			}
+		} else {
+			c.starveSince = time.Time{}
+		}
 		if !c.hwStableAt.IsZero() && in.Now.Sub(c.hwStableAt) >= c.cfg.stableReset() {
 			c.failed, c.dwell, c.hwStableAt = 0, c.cfg.dwell(), time.Time{}
 		}
 		return nil
 	case CPU:
 		floor := c.cfg.PromoteFloorMB(in.HWNeedMB)
-		ready := in.Present && in.HWAdmit && in.FreeMB >= floor
+		ready := in.Present && in.HWAdmit && in.FreeMB >= floor && c.avgFree >= floor
 		if !ready {
 			c.readySince = time.Time{}
 			return nil
@@ -286,7 +354,7 @@ func Threads(cfg, numCPU int) int {
 
 // Text renders a Status for ctl.
 func (s Status) Text(now time.Time) string {
-	out := fmt.Sprintf("decode mode %s for %s (%s)", s.Mode, now.Sub(s.Since).Round(time.Second), s.Why)
+	out := fmt.Sprintf("decode mode %s for %s (%s); free avg %d MB", s.Mode, now.Sub(s.Since).Round(time.Second), s.Why, s.AvgFreeMB)
 	if s.Pending != "" {
 		out += fmt.Sprintf("; switching to %s", s.Pending)
 	}

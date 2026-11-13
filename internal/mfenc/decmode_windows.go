@@ -102,6 +102,7 @@ func (d *ProcDecSession) switchMode(to decmode.Mode, reason string) (bool, strin
 	NoteDecodeResizeGrace() // coded size will change: a publish stall now is expected, not a wedge
 	ev, err := d.reopenPipeline()
 	if err == nil && ev.OK {
+		d.requestKeyframe() // fresh decoder: ask for an IDR now, never wait out a GOP
 		d.dstMu.Lock()
 		d.dstHeld, d.dstRecycles = false, 0
 		d.dstMu.Unlock()
@@ -117,7 +118,9 @@ func (d *ProcDecSession) switchMode(to decmode.Mode, reason string) (bool, strin
 	Warnf("mfenc: decode %q switch to %s failed (%s) - restoring %s", d.dstName, modeName(next), msg, modeName(prev))
 	d.software.Store(prev)
 	d.applyCap(prev)
-	if ev2, err2 := d.reopenPipeline(); err2 != nil || !ev2.OK {
+	if ev2, err2 := d.reopenPipeline(); err2 == nil && ev2.OK {
+		d.requestKeyframe()
+	} else {
 		d.fail("mfenc: decode mode restore failed after a failed switch: " + msg)
 	}
 	return false, msg
@@ -127,11 +130,11 @@ func (d *ProcDecSession) switchMode(to decmode.Mode, reason string) (bool, strin
 func (d *ProcDecSession) applyCap(software bool) {
 	if !software {
 		d.modeSt.capH = 0
-		setDecodeCap(d.dstName, 0)
+		d.capH.Store(0)
 		return
 	}
 	d.modeSt.capH = decmode.CapHeight(decmode.CPU, int(d.fps+0.5), d.modeSt.measured)
-	setDecodeCap(d.dstName, d.modeSt.capH)
+	d.capH.Store(int32(d.modeSt.capH))
 }
 
 // publishModeStatus refreshes the visible state (and, in software mode, re-derives the cap from the
@@ -152,4 +155,21 @@ func modeName(software bool) string {
 		return "cpu"
 	}
 	return "hw"
+}
+
+// CodedCapHeight is this session's CPU-mode coded-height cap for ITS route's sender (0 = none).
+func (d *ProcDecSession) CodedCapHeight() int { return int(d.capH.Load()) }
+
+// SetKeyframeRequester installs the route's keyframe request (PLI); called once by the route.
+func (d *ProcDecSession) SetKeyframeRequester(f func()) {
+	if f != nil {
+		d.kfReq.Store(&f)
+	}
+}
+
+// requestKeyframe asks the sender for an IDR (no-op without a requester).
+func (d *ProcDecSession) requestKeyframe() {
+	if p := d.kfReq.Load(); p != nil {
+		(*p)()
+	}
 }

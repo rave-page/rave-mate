@@ -169,3 +169,10 @@ func (m *mfDecoder) PipeStats() medialink.PipelineStats {
 		DegradeReason: degrade,
 	}
 }
+
+// CodedCapHeight implements medialink.CodedCapper: THIS route's CPU-decode-mode coded-height cap.
+func (m *mfDecoder) CodedCapHeight() int { return m.dec.CodedCapHeight() }
+
+// SetKeyframeRequester implements medialink.KeyframeRequestable: a decode-mode switch asks the
+// route's sender for an IDR at once.
+func (m *mfDecoder) SetKeyframeRequester(f func()) { m.dec.SetKeyframeRequester(f) }

@@ -33,39 +33,6 @@ func CPUDecodeCostMB(inW, inH int) float64 {
 	return 8 + px*1.5/mib + px*4/mib
 }
 
-// decodeCaps is the coded-height cap each destination in CPU mode asks of its sender (decmode.CapHeight).
-// Bounded: one entry per live decode session, deleted when the session leaves CPU mode or closes.
-var (
-	decodeCapMu sync.Mutex
-	decodeCaps  = map[string]int{}
-)
-
-func setDecodeCap(dst string, h int) {
-	decodeCapMu.Lock()
-	defer decodeCapMu.Unlock()
-	if h <= 0 {
-		delete(decodeCaps, dst)
-		return
-	}
-	decodeCaps[dst] = h
-}
-
-// DecodeCapHeight is the tightest coded-height cap any CPU-mode decode session currently asks for
-// (0 = none). The receive rate governor min()s it into its hint (medialink.DecodeCapHeight seam). It
-// is GLOBAL across routes on purpose-limited grounds: the routeIO carries no destination identity, and
-// a rig runs one heavy route; a second HW route under a CPU-mode cap is the documented trade.
-func DecodeCapHeight() int {
-	decodeCapMu.Lock()
-	defer decodeCapMu.Unlock()
-	best := 0
-	for _, h := range decodeCaps {
-		if best == 0 || h < best {
-			best = h
-		}
-	}
-	return best
-}
-
 // DecodeModeStatus is one session's visible decode mode (ctl routes / encoder-scan).
 type DecodeModeStatus struct {
 	Dest    string
@@ -91,7 +58,6 @@ func dropMode(dst string) {
 	decModesMu.Lock()
 	delete(decModes, dst)
 	decModesMu.Unlock()
-	setDecodeCap(dst, 0)
 }
 
 // Text renders the visible mode line (ctl routes "degraded"/engine field, logs).

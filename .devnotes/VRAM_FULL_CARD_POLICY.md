@@ -236,3 +236,51 @@ until a measured sender cost exists (follow-up: sender cost observation / keeper
    rave-mate.exe): log `sender keeper up`; Spout sender list shows the destination with host path
    rave-mate-keeper.exe; restart rave-mate -> `receive sink open (keeper-hosted GPU destination) adopted:true`,
    Resolume does NOT re-follow (no flicker); kill the keeper -> one re-create, a second kill -> HELD.
+
+## Rework after the Parsec incident (2026-11-13, `INCIDENT_GPU_HANG_PARSEC_2026-11-13.md`)
+
+The first `balanced` (need + 25 % margin) admitted a 4K route at ~350 MB free; rave-mate added ~215 MB
+(decode child 109 + media child 74 + sender ~32) and Parsec's NVENC failed twice in the 150-400 MB band.
+Measured: Parsec encode latency 1.7 ms @ 5.1 GB free, 3.7 ms @ 0.69 GB, 6.8 ms @ 0.29 GB; >300 ms stalls
+only below ~700 MB average free. Criterion changed: OTHER apps need headroom; rave-mate must never be
+the process that takes the card below it.
+
+### Presets - what each guarantees
+
+| Preset | Full allocation (HW decode, new sender) | Light path (CPU decode into the destination) | Running HW decoder |
+|---|---|---|---|
+| `strict` | free - cost >= geometry reserve (768-1536 MB) | allowed while free - need >= hard floor (256) when `cpuDecodeFallback` | yields below the balanced system floor (700) |
+| `balanced` (default) | free - need >= **system floor 700 MB** (`vramSystemHeadroomMB`) | free - need >= **hard floor 256 MB** (`vramHardFloorMB`) | demoted to CPU when free averaged over 10 s stays < 700 MB for 15 s |
+| `permissive` | free - need >= 400 MB; verified attempt down to 256 | same as balanced | yields below 400 MB |
+
+Promotion CPU -> HW: free (instantaneous AND 10 s mean) >= system floor + HW need + max(256, need)
+(= 1070 MB for 4K HEVC on the rig) continuously for the dwell (45 s), min residency 30 s, failed
+promotion doubles the dwell. Below the hard floor even the light path holds (HELD with numbers).
+
+### Where our MB go and how the light path stays light
+
+- Media child 74 MB (incident) = the SpoutLibrary GL sender: GL context + Spout's D3D11 device + interop
+  device + the 4K texture (31.6 MiB) (+ the transient probe device). The decode lives in the enc child, so
+  the media child holds NO GPU memory on the keeper path (`mediaLink.senderKeeper`): there the destination
+  is ~32 MB in the keeper and nothing else.
+- Receiver follow (~32 MB in Resolume per NEW sender) is only paid at creation. Remembered destinations
+  are claimed with the FULL rule (system floor) - i.e. created while the card still has headroom - and
+  adopted later at no cost (claim at start, keeper across restarts). On a tight card the light path only
+  creates a destination when the hard floor still holds after it.
+- CPU mode (software decode, 720p coded after the per-route cap): coded NV12 upload 1.3 MB + VP output /
+  intermediates (~3.5 MB est) + device ~8 MB est = ~13 MB; at 4K coded before the cap engages ~52 MB est.
+  Admission uses the nominal 4K figure (conservative). Unmeasured on the GPU.
+- HW decoder never opens and never stays below the floor: admission (system floor) + the yield rule.
+
+### Also in this rework
+
+- Receive rate governors read free VRAM averaged over 10 s (`featurehost.SmoothedFree`): the 1 s
+  150<->700 MB swing no longer flips 30<->50 Mbps every second.
+- Height cap is PER ROUTE (`medialink.CodedCapper` on the route's decode sink), not global.
+- Mode switch requests an IDR at once (`medialink.KeyframeRequestable` -> route PLI; native-rx routes
+  send it over the native control seq); the child still gates the fresh decoder on the first keyframe.
+- Linux sender applies MaxHeight live (`SetRateHint.MaxHeight` -> `rpw_set_cap_height`, verified by the
+  Linux agent at 4K -> 1080 -> 4K).
+- Logging: fixed rotating log `%LOCALAPPDATA%\rave-mate\logs\rave-mate.log` (5 x 50 MB, ISO-dated lines,
+  `RAVE_MATE_LOG_DIR` override; non-Windows `$XDG_STATE_HOME/rave-mate/logs`) + `gpumem.csv` beside it
+  (adapter + per-process rows every gpumem sample = 1/min, 2 x 20 MB).

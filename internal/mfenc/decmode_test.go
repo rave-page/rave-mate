@@ -27,49 +27,28 @@ func TestModeInputKeepVsAdmit(t *testing.T) {
 }
 
 // End-to-end policy over the seam inputs: full card -> CPU (forced), headroom back -> HW only after the
-// dwell, and the cap is set in CPU mode and lifted on promotion.
+// dwell; the per-route cap follows the mode (set in CPU, lifted on promotion).
 func TestAdaptiveModeCycleWithCap(t *testing.T) {
 	now := time.Unix(100, 0)
 	c := decmode.New(decmode.Config{}, decmode.HW, now, "start")
-	dst := "rave-mate link VRC"
-	defer setDecodeCap(dst, 0)
+	capH := 0
 	step := func(free uint64, admit, held bool) *decmode.Switch {
 		in := modeInput(now, c.Mode(), free, true, DecVerdict{Allow: admit, CostMB: 114}, held, 16)
 		sw := c.Tick(in)
 		if sw != nil {
 			c.Done(now, true, sw.Reason)
-			capH := decmode.CapHeight(c.Mode(), 60, nil)
-			setDecodeCap(dst, capH)
+			capH = decmode.CapHeight(c.Mode(), 60, nil)
 		}
 		return sw
 	}
-	if sw := step(150, false, true); sw == nil || sw.To != decmode.CPU {
-		t.Fatalf("held HW on a full card must go CPU: %+v", sw)
-	}
-	if DecodeCapHeight() != 720 {
-		t.Fatalf("CPU mode must cap the sender (unmeasured => 720), got %d", DecodeCapHeight())
+	if sw := step(150, false, true); sw == nil || sw.To != decmode.CPU || capH != 720 {
+		t.Fatalf("held HW on a full card must go CPU with a 720p cap: %+v cap=%d", sw, capH)
 	}
 	now = now.Add(time.Minute)
-	step(2000, true, false) // ready: dwell starts
+	step(2000, true, false)
 	now = now.Add(46 * time.Second)
-	if sw := step(2000, true, false); sw == nil || sw.To != decmode.HW {
-		t.Fatalf("headroom held past the dwell must promote: %+v", sw)
-	}
-	if DecodeCapHeight() != 0 {
-		t.Fatalf("promotion must lift the cap, got %d", DecodeCapHeight())
-	}
-}
-
-func TestDecodeCapHeightIsTightest(t *testing.T) {
-	setDecodeCap("a", 1080)
-	setDecodeCap("b", 720)
-	defer func() { setDecodeCap("a", 0); setDecodeCap("b", 0) }()
-	if h := DecodeCapHeight(); h != 720 {
-		t.Fatalf("tightest cap = %d, want 720", h)
-	}
-	dropMode("b")
-	if h := DecodeCapHeight(); h != 1080 {
-		t.Fatalf("dropMode must clear its cap: %d", h)
+	if sw := step(2000, true, false); sw == nil || sw.To != decmode.HW || capH != 0 {
+		t.Fatalf("promotion must lift the cap: %+v cap=%d", sw, capH)
 	}
 }
 

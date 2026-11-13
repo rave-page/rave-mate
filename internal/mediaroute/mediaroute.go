@@ -135,7 +135,7 @@ type Manager struct {
 	holds    map[string]Hold          // current holds (visible state)
 	holdLog  map[string]time.Time     // last hold log line per sender (rate limit)
 	attempts map[string]*attemptState // failed verified attempts
-	pending  map[string]bool          // sender admitted as an ATTEMPT, verify at sink open
+	pending  map[string]Admission     // NEW destination admitted pre-offer (tier + attempt), consumed at sink open
 	claimAt  map[string]time.Time     // last claim try per remembered destination (bounded by the remembered set)
 
 	listSenders  func() []string
@@ -175,7 +175,7 @@ func New(o Options) *Manager {
 		shared: map[string]medialink.SourceDesc{}, receives: map[string]Receive{},
 		parked: map[string]*parkedSink{}, stopping: map[string]bool{}, now: time.Now,
 		holds: map[string]Hold{}, holdLog: map[string]time.Time{}, attempts: map[string]*attemptState{},
-		pending: map[string]bool{}, claimAt: map[string]time.Time{}, keeper: o.Keeper,
+		pending: map[string]Admission{}, claimAt: map[string]time.Time{}, keeper: o.Keeper,
 	}
 	m.hub = newCaptureHub(o.Log, o.OpenReceiver, o.PutPix)
 	if m.listSenders == nil {
@@ -459,8 +459,8 @@ func (m *Manager) StartReceive(peer, sourceID string) (string, error) {
 		m.logHeld(hold)
 		return "", heldError(desc.Name, hold)
 	}
-	if a.Attempt && !parked {
-		m.pending[sender] = true // verify headroom right after the sender opens (openReceiveSink)
+	if !parked {
+		m.pending[sender] = a // the answer-time open honours THIS decision (tier, verified attempt)
 	}
 	m.mu.Unlock()
 	m.clearHeld(sender, a)
@@ -703,16 +703,19 @@ func (m *Manager) openReceiveSink(name string, w, h int) (medialink.Sink, error)
 		return &keptSink{m: m, inner: inner, name: name, w: w, h: h}, nil
 	}
 	m.mu.Lock()
-	attempt := m.pending[name]
+	a, preAdmitted := m.pending[name]
 	delete(m.pending, name)
-	a := m.gateAttempt(name, m.senderCreateGate(w, h), m.now())
+	if !preAdmitted {
+		// No pre-offer decision (a route not started by StartReceive): the full new-sender gate.
+		a = m.gateAttempt(name, m.senderCreateGate(w, h), m.now())
+	}
 	m.mu.Unlock()
 	if !a.Allow {
 		m.log.Warn(source, "receive sink NOT opened - VRAM budget refuses a new destination sender (Resolume would register a new interop on a full card). Source appears when VRAM recovers.",
 			map[string]any{"sender": name, "freeMB": a.FreeMB, "needMB": a.NeedMB, "requiredMB": a.RequiredMB, "policy": a.Policy, "reason": a.Reason})
 		return nil, fmt.Errorf("mediaroute: refusing new sender %q under VRAM pressure (%s)", name, a.Reason)
 	}
-	inner, err := m.openNewSender(name, w, h, attempt || a.Attempt, a.FreeMB)
+	inner, err := m.openNewSender(name, w, h, a.Attempt, a.FreeMB)
 	if err != nil {
 		return nil, err
 	}

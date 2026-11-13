@@ -14,9 +14,10 @@ type Mode string
 const (
 	// ModeStrict is the pre-2026-11-13 rule: free - cost >= geometry reserve (768..1536 MB).
 	ModeStrict Mode = "strict"
-	// ModeBalanced (default): evidence-based need + margin, verified attempt in the tight band.
+	// ModeBalanced (default): a full allocation must leave the SYSTEM floor (700 MB) for other apps;
+	// below it only the light path (CPU decode into the destination) down to the hard floor (256 MB).
 	ModeBalanced Mode = "balanced"
-	// ModePermissive attempts (verified) whenever the need fits at all.
+	// ModePermissive: system floor 400 MB, verified attempt down to the hard floor.
 	ModePermissive Mode = "permissive"
 )
 
@@ -63,6 +64,34 @@ func MarginMB(need float64, pol Policy) uint64 {
 		m = minMB
 	}
 	return m
+}
+
+// System / hard floor defaults (incident 2026-11-13, measured on the DJ PC: Parsec NVENC encode latency
+// 1.7 ms at 5.1 GB free, 3.7 ms at 0.69 GB, 6.8 ms at 0.29 GB; >300 ms stalls only once average free
+// VRAM fell below ~700 MB; hard NVENC failures in the 150-400 MB band).
+const (
+	DefaultSystemFloorBalancedMB   uint64 = 700 // below this other apps' encoders start stalling
+	DefaultSystemFloorPermissiveMB uint64 = 400 // explicit opt-in: accepts encoder latency for others
+	DefaultHardFloorMB             uint64 = 256 // even the lightest path never takes the card below this
+)
+
+// SystemFloorMB is the free VRAM a full allocation (HW decode, new sender at full need) must leave.
+func SystemFloorMB(pol Policy) uint64 {
+	if pol.SystemFloorMB > 0 {
+		return pol.SystemFloorMB
+	}
+	if pol.Mode.Resolved() == ModePermissive {
+		return DefaultSystemFloorPermissiveMB
+	}
+	return DefaultSystemFloorBalancedMB
+}
+
+// HardFloorMB is the free VRAM even the lightest path must leave.
+func HardFloorMB(pol Policy) uint64 {
+	if pol.HardFloorMB > 0 {
+		return pol.HardFloorMB
+	}
+	return DefaultHardFloorMB
 }
 
 // FollowCostMB is what a NEW sender of g makes a GL receiver (Resolume) allocate when it follows it:

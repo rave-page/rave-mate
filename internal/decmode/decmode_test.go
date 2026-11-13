@@ -223,3 +223,87 @@ func TestPromoteFloor(t *testing.T) {
 		t.Fatalf("configured buffer floor = %d", f)
 	}
 }
+
+// Incident 2026-11-13: a running HW decoder yields when OTHER apps starve. Free VRAM oscillating every
+// second between 150 and 700 MB (averaged below the 700 MB floor) demotes within the starve dwell -
+// before any failure - and the route then stays in CPU (no flapping) until floor + need + buffer holds.
+func TestYieldToStarvedNeighboursThenPromoteAboveFloor(t *testing.T) {
+	cfg := Config{SystemFloorMB: 700}
+	c := New(cfg, HW, t0, "start")
+	now := t0
+	tick := func(free uint64) *Switch {
+		now = now.Add(2 * time.Second) // watchDest cadence
+		i := in(now, free)
+		i.HWAdmit = true // resident pipeline: kept by admission; only the yield rule may demote it
+		return drive(c, i)
+	}
+	var demotedAt time.Duration
+	for k := 0; k < 30 && c.Mode() == HW; k++ {
+		free := uint64(150)
+		if k%2 == 1 {
+			free = 700
+		}
+		if sw := tick(free); sw != nil {
+			if sw.To != CPU || !sw.Forced {
+				t.Fatalf("want forced yield to CPU, got %+v", sw)
+			}
+			demotedAt = now.Sub(t0)
+		}
+	}
+	if c.Mode() != CPU || demotedAt > 20*time.Second {
+		t.Fatalf("must demote within the starve dwell (+avg window), mode=%s after %s", c.Mode(), demotedAt)
+	}
+	// Same oscillation for 10 min: never promotes, never flaps.
+	switches := 0
+	for k := 0; k < 300; k++ {
+		free := uint64(150)
+		if k%2 == 1 {
+			free = 700
+		}
+		now = now.Add(2 * time.Second)
+		if drive(c, in(now, free)) != nil {
+			switches++
+		}
+	}
+	if switches != 0 {
+		t.Fatalf("oscillating full card caused %d switches", switches)
+	}
+	// Promotion floor = 700 + 114 + max(256,114) = 1070: 1000 never promotes, 1200 after the dwell.
+	if f := cfg.PromoteFloorMB(hwNeed); f != 1070 {
+		t.Fatalf("promote floor %d, want 1070", f)
+	}
+	for k := 0; k < 60; k++ {
+		now = now.Add(2 * time.Second)
+		if sw := drive(c, in(now, 1000)); sw != nil {
+			t.Fatalf("promoted below floor+need+buffer: %+v", sw)
+		}
+	}
+	var promoted bool
+	for k := 0; k < 40 && !promoted; k++ {
+		now = now.Add(2 * time.Second)
+		if sw := drive(c, in(now, 1200)); sw != nil && sw.To == HW {
+			promoted = true
+		}
+	}
+	if !promoted {
+		t.Fatal("headroom above floor+need+buffer for the dwell must promote")
+	}
+}
+
+// A brief dip below the floor (shorter than the starve dwell, averaged) does not demote.
+func TestNoYieldOnBriefDip(t *testing.T) {
+	c := New(Config{SystemFloorMB: 700}, HW, t0, "start")
+	now := t0
+	for k := 0; k < 60; k++ {
+		now = now.Add(2 * time.Second)
+		free := uint64(2000)
+		if k%20 == 0 {
+			free = 100 // one 2 s sample far below, average stays high
+		}
+		i := in(now, free)
+		i.HWAdmit = true
+		if sw := drive(c, i); sw != nil {
+			t.Fatalf("brief dip demoted: %+v (avg %d)", sw, c.Status().AvgFreeMB)
+		}
+	}
+}

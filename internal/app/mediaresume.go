@@ -3,11 +3,14 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/debuglog"
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/mediaroute"
 	"rave.page/mate/internal/webcam"
@@ -333,4 +336,13 @@ func runWebcamSettingsPersist(ctx context.Context, cam webcam.CamControl, cfg *c
 			}
 		}
 	}
+}
+
+// gpuCSVPath is gpumem.csv in the fixed log dir ("" = none resolvable: CSV off).
+func gpuCSVPath() string {
+	d := debuglog.LogDir()
+	if d == "" || os.MkdirAll(d, 0o700) != nil {
+		return ""
+	}
+	return filepath.Join(d, "gpumem.csv")
 }

@@ -84,6 +84,8 @@ type Cost struct {
 // Policy configures mode, margin, reserve + self-cap. Zero fields take safe defaults (Mode "" = balanced).
 type Policy struct {
 	Mode           Mode    // strict | balanced | permissive ("" = balanced)
+	SystemFloorMB  uint64  // non-strict: free VRAM that must REMAIN for other apps after a full allocation (0 = mode default)
+	HardFloorMB    uint64  // lightest path (CPU decode / destination only) never below this (0 = DefaultHardFloorMB)
 	MarginMinMB    uint64  // non-strict margin floor (0 = DefaultMarginMinMB)
 	MarginPct      float64 // non-strict margin as a fraction of need (0 = DefaultMarginPct)
 	ReserveFloorMB uint64  // strict: reserve never below this (default DefaultReserveFloorMB)
@@ -126,7 +128,10 @@ type Decision struct {
 	// Attempt: admitted only as a VERIFIED attempt (headroom tight): the caller must run the
 	// allocation where failure is contained (child/helper, never the daemon), re-read headroom after
 	// it and back out + hold on failure or collapse (see VerifyAttempt).
-	Attempt      bool
+	Attempt bool
+	// DecodeMode is set by the tiered receive decision: "hw" (full pipeline above the system floor) or
+	// "cpu" (light path: software decode into the destination, above the hard floor). "" = n/a.
+	DecodeMode   string
 	Reason       string
 	Mode         Mode
 	Op           Op
@@ -294,25 +299,58 @@ func AdmitNeed(in Inputs, op Op, g Geom, cost Cost, followMB float64, pol Policy
 			in.Headroom.FreeMB, cost.MB, reserve, in.SelfUsedMB, cap)
 		return d
 	}
+	// Incident 2026-11-13 (Parsec NVENC starved at 150-400 MB free): OTHER apps need headroom to keep
+	// working, so the slack after our allocation is the SYSTEM floor, not a margin on our own need.
 	margin := MarginMB(need, pol)
-	d.MarginMB = margin
-	d.ReserveMB = uint64(need+0.5) + margin
-	attemptFloor := need + float64(margin)/2
-	if mode == ModePermissive {
-		attemptFloor = need
+	floor := SystemFloorMB(pol)
+	slack := floor
+	if margin > slack {
+		slack = margin
 	}
+	d.MarginMB = slack
+	d.ReserveMB = uint64(need+0.5) + slack
 	switch {
-	case free-need >= float64(margin):
+	case free-need >= float64(slack):
 		d.Admit = true
-		d.Reason = fmt.Sprintf("ok: free %d MB >= need %.0f MB + margin %d MB (%s)", in.Headroom.FreeMB, need, margin, mode)
-	case free >= attemptFloor:
+		d.Reason = fmt.Sprintf("ok: free %d MB - need %.0f MB leaves >= system floor %d MB (%s)", in.Headroom.FreeMB, need, slack, mode)
+	case mode == ModePermissive && free-need >= float64(HardFloorMB(pol)):
 		d.Admit, d.Attempt = true, true
-		d.Reason = fmt.Sprintf("tight: free %d MB, need %.0f MB + margin %d MB - verified attempt (%s)",
-			in.Headroom.FreeMB, need, margin, mode)
+		d.Reason = fmt.Sprintf("tight: free %d MB - need %.0f MB below system floor %d MB, above hard floor %d MB - verified attempt (permissive)",
+			in.Headroom.FreeMB, need, slack, HardFloorMB(pol))
 	default:
-		d.Reason = fmt.Sprintf("insufficient VRAM: free %d MB < need %.0f MB (ours %.0f + receiver %.0f) + margin %d MB (%s)",
-			in.Headroom.FreeMB, need, cost.MB, followMB, margin, mode)
+		d.Reason = fmt.Sprintf("insufficient VRAM: free %d MB - need %.0f MB (ours %.0f + receiver %.0f) < system floor %d MB (%s)",
+			in.Headroom.FreeMB, need, cost.MB, followMB, slack, mode)
 	}
+	return d
+}
+
+// AdmitLight is the LIGHTEST-PATH rule (CPU decode mode, a destination with no decoder pipeline): it
+// may go below the system floor - leaving the card's last headroom to others matters more than our
+// picture, but a light path costs tens of MB, not hundreds - down to the HARD floor, never below.
+// Self-cap still applies. Unknown headroom fails open. Same in every mode.
+func AdmitLight(in Inputs, op Op, g Geom, cost Cost, followMB float64, pol Policy) Decision {
+	need := cost.MB + followMB
+	hard := HardFloorMB(pol)
+	d := Decision{Mode: pol.Mode.Resolved(), Op: op, Geom: g, CostMB: cost.MB, FollowMB: followMB, NeedMB: need,
+		CostMeasured: cost.Measured, Present: in.Headroom.Present, FreeMB: in.Headroom.FreeMB,
+		SelfUsedMB: in.SelfUsedMB, SelfKnown: in.SelfKnown, MarginMB: hard, ReserveMB: uint64(need+0.5) + hard}
+	if !in.Headroom.Present {
+		d.Admit, d.Reason = true, "headroom unknown - fail open"
+		return d
+	}
+	cap := SelfCapMB(in.Headroom.BudgetMB, pol)
+	d.SelfCapMB = cap
+	if in.SelfKnown && float64(in.SelfUsedMB)+cost.MB > float64(cap) {
+		d.Reason = fmt.Sprintf("would exceed rave-mate GPU cap: self %d MB + cost %.0f MB > cap %d MB", in.SelfUsedMB, cost.MB, cap)
+		return d
+	}
+	if float64(in.Headroom.FreeMB)-need < float64(hard) {
+		d.Reason = fmt.Sprintf("insufficient VRAM even for the lightest path: free %d MB - need %.0f MB < hard floor %d MB",
+			in.Headroom.FreeMB, need, hard)
+		return d
+	}
+	d.Admit = true
+	d.Reason = fmt.Sprintf("light path: free %d MB - need %.0f MB >= hard floor %d MB", in.Headroom.FreeMB, need, hard)
 	return d
 }
 

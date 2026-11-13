@@ -166,6 +166,8 @@ type ProcDecSession struct {
 	threads  int
 	mode     *decmode.Controller
 	modeSt   modeState
+	capH     atomic.Int32           // CPU-mode coded-height cap for this route's sender (0 = none)
+	kfReq    atomic.Pointer[func()] // route keyframe request (PLI), set by medialink
 }
 
 // OpenProcDecSession opens a native decode session. Errors are CLEAN: ErrDecodeRefused (or any
@@ -632,6 +634,7 @@ func (d *ProcDecSession) recycleDest(why string) {
 	Warnf("mfenc: native decode destination %q recycling (%s)", d.dstName, why)
 	ev, err := d.reopenPipeline()
 	if err == nil && ev.OK {
+		d.requestKeyframe()
 		// Reopen succeeded: the pipeline is healthy again, clear the failure budget.
 		d.dstMu.Lock()
 		d.dstRecycles = 0
