@@ -350,8 +350,9 @@ func TestDMABufEncodeHistogram(t *testing.T) {
 	}
 	defer func() { _ = src.Close() }()
 	de := src.(medialink.DMABufEncodeSource)
+	maxH, _ := strconv.Atoi(os.Getenv("RPW_ENC_MAXH")) // coded-height cap (0 = native)
 	spec := medialink.EncodeSpec{Encoder: encoder, Codec: codec, FPS: 60,
-		BitrateKbps: kbps, QualityTarget: quality, VAAPIRenderNode: node4}
+		BitrateKbps: kbps, QualityTarget: quality, VAAPIRenderNode: node4, MaxHeight: maxH}
 	esrc, started, err := de.StartDMABufEncode(spec)
 	if err != nil || !started {
 		t.Fatalf("StartDMABufEncode started=%v err=%v", started, err)
@@ -461,6 +462,14 @@ func TestDMABufEncodeHistogram(t *testing.T) {
 			depth, hiwater, overflow, capDrops, gridDrops, keyframes, jitterMs)
 		t.Logf("HIST robust: repeats=%d ringSkips=%d startHolds=%d forcedIDRs=%d stalls=%d stallMs=%d",
 			repeats, skips, holds, fidr, stalls, stallMs)
+		capF, capD := ps.capFramesCount(), capDrops
+		t.Logf("HIST loss: capFrames=%d capDrops=%d (%.2f%%) ptsSkipped=%d", capF, capD,
+			100*float64(capD)/float64(max1(int(capF+capD))), ps.ptsSkipped())
+		for i, st := range ps.stepStats() {
+			if st.Count > 0 {
+				t.Logf("HIST step %-6s n=%d p50=%.2f p99=%.2f max=%.2f mean=%.2f ms", stepNames[i], st.Count, st.P50Ms, st.P99Ms, st.MaxMs, st.MeanMs)
+			}
+		}
 	}
 	if len(intervals) < secs*20 {
 		t.Errorf("far too few frames (%d) in %ds - capture stalled", len(intervals), secs)

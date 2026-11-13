@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <va/va.h>
@@ -30,6 +31,12 @@ static int va_dbg = 0;
 		if (va_dbg)                        \
 			fprintf(stderr, __VA_ARGS__);  \
 	} while (0)
+
+static long long now_us(void) {
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return (long long)t.tv_sec * 1000000LL + t.tv_nsec / 1000;
+}
 
 struct va_api {
 	int ok;
@@ -236,13 +243,26 @@ void rva_log_enc_caps(const char *node) {
 		close(fd);
 		return;
 	}
-	VAConfigAttrib a[3];
-	a[0].type = VAConfigAttribRateControl;
-	a[1].type = VAConfigAttribEncPackedHeaders;
-	a[2].type = VAConfigAttribEncMaxRefFrames;
-	VAStatus st = VA.GetConfigAttributes(dpy, VAProfileH264High, VAEntrypointEncSlice, a, 3);
-	fprintf(stderr, "RVA_ENC_CAPS H264High st=%d ratecontrol=0x%x packedheaders=0x%x maxref=0x%x\n",
-		st, a[0].value, a[1].value, a[2].value);
+	const VAProfile profs[] = {VAProfileH264ConstrainedBaseline, VAProfileHEVCMain};
+	const char *pn[] = {"H264CB", "HEVCMain"};
+	for (int i = 0; i < 2; i++) {
+		VAConfigAttrib a[6];
+		a[0].type = VAConfigAttribRateControl;
+		a[1].type = VAConfigAttribEncPackedHeaders;
+		a[2].type = VAConfigAttribEncMaxRefFrames;
+		a[3].type = VAConfigAttribRTFormat;        /* RGB32 bit => VCN encodes RGB input itself (no VPP) */
+		a[4].type = VAConfigAttribEncQualityRange; /* > 1 => VAEncMiscParameterTypeQualityLevel presets */
+		a[5].type = VAConfigAttribContextPriority; /* > 0 => per-context priority settable */
+		VAStatus st = VA.GetConfigAttributes(dpy, profs[i], VAEntrypointEncSlice, a, 6);
+		fprintf(stderr, "RVA_ENC_CAPS %s st=%d ratecontrol=0x%x packedheaders=0x%x maxref=0x%x rtformat=0x%x(rgb32=%d) qualityrange=0x%x ctxprio=0x%x\n",
+			pn[i], st, a[0].value, a[1].value, a[2].value, a[3].value, (a[3].value & VA_RT_FORMAT_RGB32) != 0,
+			a[4].value, a[5].value);
+	}
+	VAConfigAttrib vp[2];
+	vp[0].type = VAConfigAttribRTFormat;
+	vp[1].type = VAConfigAttribContextPriority;
+	VAStatus vst = VA.GetConfigAttributes(dpy, VAProfileNone, VAEntrypointVideoProc, vp, 2);
+	fprintf(stderr, "RVA_VPP_CAPS st=%d rtformat=0x%x ctxprio=0x%x\n", vst, vp[0].value, vp[1].value);
 	VA.Terminate(dpy);
 	close(fd);
 }
@@ -505,6 +525,13 @@ struct rva_enc {
 	int pend_idr;
 	int last_idx;  /* nv12[] holding the last real frame's VPP output (rva_enc_repeat source) */
 	int have_last;
+	/* per-call step timings (us; -1 = step not run this call) for the shim's step histograms */
+	long long st_us[RVA_NSTEP];
+	int vpp_filter;  /* VA_FILTER_SCALING_* for VPP (fast when not scaling; RPW_VPP_FILTER overrides) */
+	int fast_scale;  /* shim auto-cap overload step: FAST VPP downscale */
+	int vpp_sync;    /* RPW_VPP_SYNC (diag): sync VPP before encode submit to time the GFX colour convert */
+	int qlevel;      /* VAEncMiscParameterTypeQualityLevel (0 = driver default; RPW_ENC_QL overrides) */
+	int qrange;      /* driver's VAConfigAttribEncQualityRange */
 	unsigned char *au; /* returned AU buffer (AUD + coded) */
 	int au_cap;
 	/* import-surface cache: the PipeWire pool cycles a fixed set of dmabuf fds; create a VASurface
@@ -828,13 +855,18 @@ static VASurfaceID import_cached(struct rva_enc *e, uint32_t drm_fourcc, uint64_
  * shared nv12 surface, which lets VPP and encode pipeline. 0=ok. */
 static int vpp_to_nv12(struct rva_enc *e, VASurfaceID target, uint32_t drm_fourcc, uint64_t modifier, int w, int h,
                        int n_planes, const int *fds, const unsigned *offsets, const unsigned *strides, int flip) {
+	long long t0 = now_us();
 	VASurfaceID rgb = import_cached(e, drm_fourcc, modifier, w, h, n_planes, fds, offsets, strides);
+	e->st_us[RVA_ST_IMPORT] = now_us() - t0;
 	if (rgb == VA_INVALID_ID)
 		return -1;
 	VAProcPipelineParameterBuffer pp;
 	memset(&pp, 0, sizeof(pp));
 	pp.surface = rgb;
-	pp.filter_flags = VA_FILTER_SCALING_HQ;
+	/* HQ by default (measured cheaper than FAST at 1:1 on radeonsi under game load); FAST only for an
+	 * overload downscale (1440p: GPU VPP mean 0.40 ms FAST vs 2.22 ms HQ) */
+	pp.filter_flags = e->vpp_filter >= 0 ? (unsigned)e->vpp_filter
+	                 : (e->fast_scale && (w != e->out_w || h != e->out_h)) ? VA_FILTER_SCALING_FAST : VA_FILTER_SCALING_HQ;
 	pp.mirror_state = flip ? VA_MIRROR_VERTICAL : VA_MIRROR_NONE;
 	VABufferID pbuf = VA_INVALID_ID;
 	int rc = -2;
@@ -886,6 +918,23 @@ rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps,
 	e->mbh = (out_h + 15) / 16;
 	e->log2_max_fn = 4;
 	e->gop = e->fps * 2;
+	/* VPP filter: HQ scaling only matters when scaling; a 1:1 colour convert takes the FAST path (less
+	 * GFX time - the VPP runs on the shader queue the games are saturating). */
+	e->vpp_filter = -1; /* auto: HQ (fast_scale: FAST when downscaling) */
+	{
+		const char *vf = getenv("RPW_VPP_FILTER");
+		if (vf && !strcmp(vf, "fast"))
+			e->vpp_filter = VA_FILTER_SCALING_FAST;
+		else if (vf && !strcmp(vf, "default"))
+			e->vpp_filter = VA_FILTER_SCALING_DEFAULT;
+		else if (vf && !strcmp(vf, "hq"))
+			e->vpp_filter = VA_FILTER_SCALING_HQ;
+	}
+	e->vpp_sync = getenv("RPW_VPP_SYNC") != NULL;
+	{
+		const char *ql = getenv("RPW_ENC_QL");
+		e->qlevel = ql ? atoi(ql) : 0;
+	}
 	e->coded[0] = e->coded[1] = VA_INVALID_ID;
 	e->vpp_cfg = e->enc_cfg = VA_INVALID_ID;
 	e->vpp_ctx = e->enc_ctx = VA_INVALID_ID;
@@ -989,6 +1038,17 @@ static void append_rc_misc(struct rva_enc *e, VABufferID *bufs, int *pnb) {
 		fr->framerate = (unsigned)e->fps;
 		VA.UnmapBuffer(e->dpy, frb);
 		bufs[(*pnb)++] = frb;
+	}
+	VABufferID qlb;
+	if (e->qlevel > 0 && VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncMiscParameterBufferType,
+		sizeof(VAEncMiscParameterBuffer) + sizeof(VAEncMiscParameterBufferQualityLevel), 1, NULL, &qlb) == VA_STATUS_SUCCESS &&
+		VA.MapBuffer(e->dpy, qlb, (void **)&mb) == VA_STATUS_SUCCESS) {
+		mb->type = VAEncMiscParameterTypeQualityLevel;
+		VAEncMiscParameterBufferQualityLevel *qq = (VAEncMiscParameterBufferQualityLevel *)mb->data;
+		memset(qq, 0, sizeof(*qq));
+		qq->quality_level = (unsigned)e->qlevel; /* 1 = best quality ... qrange = fastest */
+		VA.UnmapBuffer(e->dpy, qlb);
+		bufs[(*pnb)++] = qlb;
 	}
 	VABufferID hrdb;
 	if (!e->quality_mode && VA.CreateBuffer(e->dpy, e->enc_ctx, VAEncMiscParameterBufferType,
@@ -1336,7 +1396,10 @@ do_submit:
 /* enc_emit waits for the encode whose input surface is sync (submitted into coded[pidx]), copies the
  * Annex-B AU out (+ H.264 AUD) and runs the rate controllers. */
 static int enc_emit(rva_enc *e, VASurfaceID sync, int pidx, int pidr, unsigned char **au, int *au_len, int *keyframe) {
+	long long ts = now_us();
 	VAStatus st = VA.SyncSurface(e->dpy, sync);
+	long long tc = now_us();
+	e->st_us[RVA_ST_SYNC] = tc - ts;
 	if (st != VA_STATUS_SUCCESS) {
 		VDBG("enc: sync pending: %s\n", VA.ErrorStr(st));
 		return -6;
@@ -1361,6 +1424,7 @@ static int enc_emit(rva_enc *e, VASurfaceID sync, int pidx, int pidr, unsigned c
 		off += (int)s->size;
 	}
 	VA.UnmapBuffer(e->dpy, e->coded[pidx]);
+	e->st_us[RVA_ST_COPY] = now_us() - tc;
 
 	if (e->quality_mode) {
 		/* constant-quality ceiling controller: hold cur_qp (== target_qp while content is simple, so it
@@ -1431,9 +1495,20 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 		return -1;
 	*au_len = 0;
 	int idx = e->pp, idr = 0;
+	for (int i = 0; i < RVA_NSTEP; i++)
+		e->st_us[i] = -1;
+	long long t0 = now_us();
 	if (vpp_to_nv12(e, e->nv12[idx], drm_fourcc, modifier, w, h, n_planes, fds, offsets, strides, flip) != 0)
 		return -2;
+	long long t1 = now_us();
+	e->st_us[RVA_ST_VPP] = t1 - t0 - (e->st_us[RVA_ST_IMPORT] > 0 ? e->st_us[RVA_ST_IMPORT] : 0);
+	if (e->vpp_sync) { /* diag: GPU latency of the colour convert alone (serializes the pipeline) */
+		VA.SyncSurface(e->dpy, e->nv12[idx]);
+		e->st_us[RVA_ST_VPPGPU] = now_us() - t1;
+		t1 = now_us();
+	}
 	int r = enc_submit(e, idx, e->nv12[idx], force_idr, &idr);
+	e->st_us[RVA_ST_SUBMIT] = now_us() - t1;
 	if (r != 0)
 		return r;
 	e->last_idx = idx; /* repeat source (rva_enc_repeat) */
@@ -1452,12 +1527,24 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
 	return enc_emit(e, e->nv12[pidx], pidx, pidr, au, au_len, keyframe);
 }
 
+void rva_enc_set_fast_scale(rva_enc *e, int on) {
+	if (e)
+		e->fast_scale = on;
+}
+
+void rva_enc_last_steps(rva_enc *e, long long out[RVA_NSTEP]) {
+	for (int i = 0; i < RVA_NSTEP; i++)
+		out[i] = e ? e->st_us[i] : -1;
+}
+
 int rva_enc_flush(rva_enc *e, unsigned char **au, int *au_len, int *keyframe) {
 	if (!e || !au || !au_len || !keyframe)
 		return -1;
 	*au_len = 0;
 	if (!e->have_pending)
 		return 0;
+	for (int i = 0; i < RVA_NSTEP; i++)
+		e->st_us[i] = -1;
 	e->have_pending = 0;
 	return enc_emit(e, e->nv12[e->pend_idx], e->pend_idx, e->pend_idr, au, au_len, keyframe);
 }
@@ -1474,7 +1561,11 @@ int rva_enc_repeat(rva_enc *e, int force_idr, unsigned char **au, int *au_len, i
 	 * surface, and this is synchronous) into recon/coded[pp]; identical content => P-skip, tiny AU. */
 	int idx = e->pp, idr = 0;
 	VASurfaceID src = e->nv12[e->last_idx];
+	for (int i = 0; i < RVA_NSTEP; i++)
+		e->st_us[i] = -1;
+	long long t1 = now_us();
 	int r = enc_submit(e, idx, src, force_idr, &idr);
+	e->st_us[RVA_ST_SUBMIT] = now_us() - t1;
 	if (r != 0)
 		return r;
 	return enc_emit(e, src, idx, idr, au, au_len, keyframe);

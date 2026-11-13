@@ -473,6 +473,9 @@ func formatRoutes(stats []medialink.RouteStat) string {
 		if s.Pipe != nil && s.Pipe.DegradeReason != "" {
 			fmt.Fprintf(&b, "    degraded: %s\n", s.Pipe.DegradeReason) // incl. the adaptive decode mode (hw/cpu, VRAM, cap, last switch)
 		}
+		if s.Pipe != nil && s.Pipe.SourceNote != "" {
+			fmt.Fprintf(&b, "    source: %s\n", s.Pipe.SourceNote) // e.g. the sender's frozen-picture detector
+		}
 		// Geometry (coded vs nominal) + fps in/out.
 		if s.Pipe != nil {
 			fmt.Fprintf(&b, "    fps wire=%.0f out=%.0f  dropped=%d (rate-capped=%d) restarts=%d\n",

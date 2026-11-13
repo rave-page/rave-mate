@@ -9,6 +9,12 @@
 
 #include <stdint.h>
 
+/* per-call encode-thread step timings (us), read after each rva_enc_* call (-1 = not run):
+ * IMPORT dmabuf->VASurface (cached), VPP colour-convert submit (CPU), SUBMIT encode param build +
+ * Begin/Render/EndPicture, SYNC vaSyncSurface wait (GPU time not yet overlapped), COPY map + Annex-B
+ * copy, VPPGPU (RPW_VPP_SYNC diag only) the colour convert's own GPU latency. */
+enum { RVA_ST_IMPORT, RVA_ST_VPP, RVA_ST_SUBMIT, RVA_ST_SYNC, RVA_ST_COPY, RVA_ST_VPPGPU, RVA_NSTEP };
+
 /* rva_available dlopens libva + libva-drm. 1 = usable. */
 int rva_available(void);
 
@@ -55,6 +61,12 @@ int rva_enc_flush(rva_enc *e, unsigned char **au, int *au_len, int *keyframe);
  * synchronous re-encode of the last frame's VPP output (P-skip, tiny; force_idr makes it an IDR). Keeps a
  * static/slow/hitching source at the negotiated cadence. -1 when no frame was ever encoded. */
 int rva_enc_repeat(rva_enc *e, int force_idr, unsigned char **au, int *au_len, int *keyframe);
+
+/* rva_enc_set_fast_scale selects the cheap VPP scaling filter for downscales (overload step). */
+void rva_enc_set_fast_scale(rva_enc *e, int on);
+
+/* rva_enc_last_steps copies the last call's step timings (us). */
+void rva_enc_last_steps(rva_enc *e, long long out[RVA_NSTEP]);
 
 /* rva_enc_set_bitrate updates the live target bitrate (kbps): the CBR target in legacy mode, or the
  * constant-quality CEILING in quality mode. Applied on the next encoded frame (no reopen). */
