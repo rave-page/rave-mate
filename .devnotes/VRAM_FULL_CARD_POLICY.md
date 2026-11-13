@@ -284,3 +284,39 @@ promotion doubles the dwell. Below the hard floor even the light path holds (HEL
 - Logging: fixed rotating log `%LOCALAPPDATA%\rave-mate\logs\rave-mate.log` (5 x 50 MB, ISO-dated lines,
   `RAVE_MATE_LOG_DIR` override; non-Windows `$XDG_STATE_HOME/rave-mate/logs`) + `gpumem.csv` beside it
   (adapter + per-process rows every gpumem sample = 1/min, 2 x 20 MB).
+
+## GPU verification 2026-11-13 (card 1.4/12.3 GB after the Arena restart; gates env-gated)
+
+`RAVE_MATE_SWDEC_GPU=1 RAVE_MATE_ENC_EXE=<zigenc>/zig-out/bin/rave-mate-enc.exe go test -tags spout ./internal/mfenc -run 'TestSWDecode|TestKeeperGPU' -v`
+(SpoutLibrary.dll on PATH: `scripts/fetch-spout.ps1`).
+
+Software vs HW decode, H.264 band pattern, 120 frames paced 60 fps, destination nominal 3840x2160,
+`cpuDecodeThreads` 4. VRAM = decode child over its 39 MB device baseline. Capacity = frames / child
+decode+publish busy time (synthetic static content: real content decodes slower in software).
+
+| coded | HW: busy / VRAM | CPU: busy / capacity / child CPU / VRAM | picture (child read-back) |
+|---|---|---|---|
+| 3840x2160 | 0.58 ms / +84 MB | 7.2 ms / 139 fps / 66 % / +14 MB | correct both |
+| 1920x1080 | 0.53 ms / +23 MB | 2.2 ms / 457 fps / 18 % / +5 MB | correct both |
+| 1280x720 | 0.55 ms / +12 MB | 1.3 ms / 754 fps / 19 % / +3 MB | correct both |
+
+Defects found + fixed by the gate (f1686bc1): plain-buffer output had no IMF2DBuffer (pitch derived),
+the NV12 upload texture needs `BIND_DECODER` for a VP input view on this driver, the reused output
+buffer must be emptied before each ProcessOutput. `CPUDecodeCostMB` recalibrated (8 MB + coded NV12).
+
+Mode switching, 1080p coded live stream, 5 x HW->CPU->HW on one session: switch call 50-70 ms, first
+new publish 94-117 ms after the switch, ~1 AU gated per switch (keyframe requested each time, decoder
+fed from the requested IDR), no restart, no decode error, destination handle unchanged, child VRAM
+114 (HW) <-> 96 (CPU) MB, back to baseline after 10 switches. HEVC not covered: the encode session the
+gates use is H.264-only (HEVC software decode = HEVC Video Extension 2.5.48 installed; unverified).
+
+Keeper: idle 0 MB VRAM / 6 MB RAM; with a 1080p sender 16 MB VRAM, + 4K sender 48 MB total, 33 MB RAM.
+Spout SDK lists it with identical handle/size/format; decode child publishes into it (named access
+mutex); a SpoutLibrary receiver reads the correct picture; client restart adopts the same handle; keeper
+death -> one re-create, second -> hold. Found + fixed: keeper handles must be sign-extended like Spout's
+LongToHandle (7ba128a0). The media child was not part of this gate: on the keeper path it creates no
+sender, so it holds no GPU allocation for the destination (its 74 MB in the incident was the GL sender).
+
+Native receive gate `TestNetRXDecodeLive4K`: acceptance now max <= 1.5 frame periods, p99 <= 20 ms
+(bucket upper edge), zero > 25 ms; re-run PASS (p50/p99/max 17.0/18.0/17.2 ms, 0 > 25 ms, 10 resizes,
+0 restarts).

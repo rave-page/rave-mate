@@ -291,6 +291,8 @@ pub const swdec = struct {
     pub const vt_ui4 = VT_UI4;
     pub const fmt_nv12 = DXGI_FORMAT_NV12;
     pub const bind_srv = D3D11_BIND_SHADER_RESOURCE;
+    pub const bind_rt: u32 = 0x20; // D3D11_BIND_RENDER_TARGET
+    pub const bind_decoder: u32 = 0x200; // D3D11_BIND_DECODER
     // CODECAPI_AVDecNumWorkerThreads {9561C3E8-EA9E-4435-9B1E-A93E691894D8}
     pub const AVDecNumWorkerThreads = g(0x9561c3e8, 0xea9e, 0x4435, .{ 0x9b, 0x1e, 0xa9, 0x3e, 0x69, 0x18, 0x94, 0xd8 });
 };
