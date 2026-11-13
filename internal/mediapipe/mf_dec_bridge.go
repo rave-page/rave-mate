@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -38,6 +39,9 @@ type mfDecoder struct {
 	dropped atomic.Uint64 // AUs dropped awaiting a keyframe
 	closed  atomic.Bool
 	opened  time.Time
+
+	netMu sync.Mutex
+	net   *mfNetRX // attached network source (mf_dec_netrx.go); nil = Go feeds Write
 }
 
 // newMFDecoder opens the native decode session for spec, publishing into sink's shared texture.
@@ -126,7 +130,12 @@ func (m *mfDecoder) Write(f *medialink.Frame) error {
 // destination sender - it must outlive the child's last publish).
 func (m *mfDecoder) Close() error {
 	m.closed.Store(true)
-	m.dec.Close()
+	m.dec.Close() // child: RX thread joined -> decoder closed -> session closed
+	m.netMu.Lock()
+	if m.net != nil {
+		m.net.close()
+	}
+	m.netMu.Unlock()
 	return m.sink.Close()
 }
 

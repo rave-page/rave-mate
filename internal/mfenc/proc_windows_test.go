@@ -7,6 +7,7 @@ package mfenc
 // crash-containment tests run anywhere the exe builds.
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -31,8 +32,12 @@ func statsAfterRateWindow(s *ProcSession) ProcStats {
 
 func requireEncExe(t *testing.T) {
 	t.Helper()
-	if _, err := encExePath(); err != nil {
+	p, err := encExePath()
+	if err != nil {
 		t.Skip("rave-mate-enc.exe not built: ", err)
+	}
+	if _, err := os.Stat(p); err != nil { // RAVE_MATE_ENC_EXE pointing nowhere = child hidden (GPU-busy gate)
+		t.Skip("rave-mate-enc.exe not present: ", err)
 	}
 }
 

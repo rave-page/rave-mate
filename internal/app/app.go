@@ -759,6 +759,7 @@ func run(parent context.Context, serviceMode bool) error {
 		BudgetUserCeilKbps: func() int { return mediaLinkCfg().UserBitrateCeilKbps() },
 		BudgetLinkFracPct:  func() int { return mediaLinkCfg().LinkFractionPct() },
 		PlayoutPreset:      func() string { return mediaLinkCfg().PlayoutPreset() },
+		RecvImpl:           func() string { return mediaLinkCfg().RecvImplPref() },
 	})
 	// #44: the media plane (medialink+mediaroute+webcam) runs isolated in a memory-capped featurehost
 	// child by DEFAULT (MediaLink.Subprocess tri-state; explicit false = legacy in-proc). TCPlane +

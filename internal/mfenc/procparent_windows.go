@@ -253,6 +253,10 @@ type openedEv struct {
 	RC    int32  `json:"rc"`
 	Stage uint32 `json:"stage"`
 	Fails uint32 `json:"fails"`
+	// meta (proto v5): one sender->receiver meta frame forwarded by a network-source session; At =
+	// arrival on the child's QPC clock.
+	At int64  `json:"at"`
+	M  string `json:"m"`
 }
 
 // swEncoderKey is the ledger row for "the software tier on this adapter". The concrete MFT name
@@ -285,6 +289,7 @@ type procChild struct {
 	decs       map[uint32]*ProcDecSession // dir:"dec" sessions, same child, same supervisor
 	openWait   map[uint32]chan openedEv
 	closeWait  map[uint32]chan struct{}
+	netWait    map[uint32]chan openedEv // "netrx" attach verdicts (proto v5)
 	dead       bool
 	protoVer   uint32        // child hello.ver (0 = not seen yet); >= 2 may be asked for zero-copy
 	helloCh    chan struct{} // closed when this incarnation's hello lands (re-armed per spawn)
@@ -503,7 +508,7 @@ func getChild(luid int64) (*procChild, error) {
 		return c, nil
 	}
 	c := &procChild{luid: luid, sessions: map[uint32]*ProcSession{}, decs: map[uint32]*ProcDecSession{},
-		openWait:  map[uint32]chan openedEv{},
+		openWait: map[uint32]chan openedEv{}, netWait: map[uint32]chan openedEv{},
 		closeWait: map[uint32]chan struct{}{}, stateCh: make(chan struct{})}
 	if err := c.spawn(); err != nil {
 		return nil, err
@@ -677,6 +682,21 @@ func (c *procChild) readEvents(r io.Reader) {
 			if d != nil {
 				d.onDstGone(ev.Reason)
 			}
+		case "netrx":
+			c.mu.Lock()
+			ch := c.netWait[ev.SID]
+			delete(c.netWait, ev.SID)
+			c.mu.Unlock()
+			if ch != nil {
+				ch <- ev
+			}
+		case "meta":
+			c.mu.Lock()
+			d := c.decs[ev.SID]
+			c.mu.Unlock()
+			if d != nil {
+				d.onNetMeta(ev)
+			}
 		case "closed":
 			c.mu.Lock()
 			ch := c.closeWait[ev.SID]
@@ -740,6 +760,10 @@ func (c *procChild) wait(cmd *exec.Cmd) {
 	for sid, ch := range c.openWait {
 		delete(c.openWait, sid)
 		ch <- openedEv{SID: sid, OK: false, Err: "encoder child died during open"}
+	}
+	for sid, ch := range c.netWait {
+		delete(c.netWait, sid)
+		ch <- openedEv{SID: sid, OK: false, Err: "encoder child died during netrx attach"}
 	}
 	live := make([]*ProcSession, 0, len(c.sessions))
 	died := make([]SessionInfo, 0, len(c.sessions)+len(c.decs))
@@ -852,6 +876,7 @@ func (c *procChild) wait(cmd *exec.Cmd) {
 			d.fail("mfenc: decode session reopen after crash failed")
 			continue
 		}
+		d.reattachNet() // network source: fresh duplicate into the NEW child, control seq continued
 		d.recovering.Store(false)
 	}
 }
@@ -884,6 +909,10 @@ type openCmd struct {
 	DFmt     uint32 `json:"dfmt,omitempty"`
 	DName    string `json:"dname,omitempty"`
 	InRingKB int    `json:"in_ring_kb,omitempty"`
+	// proto v5: NullDec = no decoder/destination (GPU-free tests); NetBlk = telemetry block after the
+	// ring (the session may take a network source).
+	NullDec bool `json:"null_dec,omitempty"`
+	NetBlk  bool `json:"net_blk,omitempty"`
 	// SW: take the SOFTWARE encoder tier for this session (our ledger poisoned the hardware MFT
 	// on this adapter). Per-session, so one bad adapter never forces software on the others.
 	SW bool `json:"sw,omitempty"`
@@ -945,7 +974,8 @@ func (c *procChild) openDecSession(d *ProcDecSession) (openedEv, error) {
 	}
 	cmd := openCmd{Op: "open", SID: d.sid, Shm: d.shm.name, InW: d.inW, InH: d.inH,
 		OutW: d.outW, OutH: d.outH, FpsN: fpsN, FpsD: fpsD,
-		Dir: "dec", Codec: codec, DSh: h, DFmt: dfmt, DName: name, InRingKB: d.ringKB}
+		Dir: "dec", Codec: codec, DSh: h, DFmt: dfmt, DName: name, InRingKB: d.ringKB,
+		NullDec: d.nullDec, NetBlk: d.netBlk}
 	if err := c.send(cmd); err != nil {
 		return openedEv{}, err
 	}

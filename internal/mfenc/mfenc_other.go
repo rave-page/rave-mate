@@ -144,6 +144,7 @@ type ProcDecOpts struct {
 	HEVC       bool
 	KbpsHint   int
 	Dest       *DecodeDest
+	NullDecode bool
 }
 
 type ProcDecStats struct {
@@ -189,3 +190,11 @@ func (d *ProcDecSession) Close()                                 {}
 
 // NoteDecodeResizeGrace: no native decode destination to protect off Windows.
 func NoteDecodeResizeGrace() {}
+
+// Network source (child proto v5): Windows-only.
+func (d *ProcDecSession) NetCapable() bool             { return false }
+func (d *ProcDecSession) AttachNet(NetRXParams) error  { return ErrNetRXUnsupported }
+func (d *ProcDecSession) SendMeta([]byte) error        { return ErrNetRXUnsupported }
+func (d *ProcDecSession) NetStats() (NetRXStats, bool) { return NetRXStats{}, false }
+func (d *ProcDecSession) NetMeta() <-chan NetMeta      { return nil }
+func (d *ProcDecSession) Err() error                   { return nil }
