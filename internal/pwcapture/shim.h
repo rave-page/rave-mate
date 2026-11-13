@@ -88,6 +88,17 @@ typedef struct {
 /* rpw_native_stages: enc = AUs leaving the encoder, tx = AUs queued to the native sender. */
 void rpw_native_stages(struct rpw_capture *c, rpw_stage_snap *enc, rpw_stage_snap *tx);
 long rpw_enc_keyframes(struct rpw_capture *c);
+/* per-step encode-thread durations (step = RVA_ST_* from vaenc.h, or RVA_NSTEP = whole real frame). */
+void rpw_step_stats(struct rpw_capture *c, int step, rpw_stage_snap *out);
+long long rpw_busy_us(struct rpw_capture *c); /* encode-thread busy time (us, cumulative) */
+long rpw_pts_gaps(struct rpw_capture *c);     /* emitted AUs whose PTS jumped > 1.5 period */
+long rpw_pts_skipped(struct rpw_capture *c);  /* source frames those jumps skipped */
+/* auto coded-size controller state: level (0 = native), active coded height (0 = native), change
+ * generation, last reason (e.g. "auto: encoder overload (1.2% capture drops over 5 s) -> coded 3200x1800"). */
+/* source-static ("frozen picture") detector: see shim.c fz_au. */
+void rpw_source_freezes(struct rpw_capture *c, long *count, long long *last_ms, long long *longest_ms,
+                        long long *last_wall_ms, int *delivered, int *repeats);
+void rpw_autocap(struct rpw_capture *c, int *level, int *coded_h, int *gen, char *reason, int n);
 long long rpw_enc_bytes(struct rpw_capture *c);
 int rpw_import_ok(struct rpw_capture *c);
 int rpw_coded_w(struct rpw_capture *c);

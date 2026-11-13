@@ -177,6 +177,10 @@ type PipelineStats struct {
 	// only healthy value. A route that degraded silently while every counter read fine is the
 	// worst failure shape there is, so this is rendered wherever the engine name is.
 	DegradeReason string
+	// SourceNote reports what the SOURCE did, not the pipeline: e.g. the sender's frozen-picture detector
+	// ("source picture froze 3x, last 520 ms at 14:51:02 (frames delivered: source-side hitch)") so a
+	// visible hang can be attributed to the producer (VRChat) instead of the link. Empty = nothing seen.
+	SourceNote string
 	// Drive is the encoder MFT's resolved drive mode ("async"/"sync") on the native engine, taken
 	// from the MFT's own MF_TRANSFORM_ASYNC attribute rather than assumed per vendor.
 	Drive string

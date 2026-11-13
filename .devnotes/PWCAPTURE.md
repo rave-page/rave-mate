@@ -480,3 +480,32 @@ a default, too flat for a user-facing slider (follow-up if exposed).
     2>&1' </dev/null >/dev/null 2>&1 &`
   Verified with the same pipelines as children (w/ a histogram consumer, 10 s): DJ present max
   17.0-18.2 ms, consumer 60.01 fps max 18.8 ms; bar present max 16.7-17.8 ms, consumer 60.00 fps.
+
+## Encode under game load + source-freeze detector (d302da94, 2026-11-13)
+Live finding: owner route (4K HEVC CBR 50M, VRChat + WoW, GFX busy 81 %) capDrops rising ~1/s in
+episodes, each a repeated frame at the receiver. Measured (read-only second consumers + bar producer):
+- Per-step (ms p50/p99/max, live node, 4K HEVC): import 0.25/0.25/0.07, vpp submit 0.25/0.25/6.6,
+  submit 0.25/0.25/0.8, sync 0.25/2-3/6-39, copy 0.25/0.25/0.5, whole frame 0.25/2-10/16-50. VPP GPU
+  latency alone (RPW_VPP_SYNC) 2-3/8-10/10 ms - it runs on the shader queue the games saturate.
+  VCN encode is not the bottleneck (sync p50 0.25 for HEVC and H.264; HEVC vs H.264 no measurable
+  headroom difference; quality-level preset no measurable change). Mean cost ~0.3 ms CPU, ~3 ms GPU per
+  frame: drops are TRANSIENT spikes, not throughput -> capture hand-off FIFO (3 deep) instead of the
+  single newest-wins slot. The drop episode the lead saw at 14:33-14:36 coincided with this agent's
+  extra 4K test encodes (2-4 concurrent) - GPU contention, as measured.
+- CPU is not starving the encode thread: schedstat avg run-queue wait 1.8 us/slice (encode thread,
+  nice -5), cgroup nr_throttled 0; CPUWeight=50 only bites under full CPU saturation (16 cores, games
+  ~3). Recommendation: keep the unit as is.
+- VA caps (radeonsi, mesa 26.2): encoder RTFormat has no RGB32 (VPP colour convert stays), quality range
+  32 (bitfield presets; RPW_ENC_QL knob), no context priority. VPP filter: HQ kept at 1:1 (measured not
+  slower than FAST), FAST for the overload downscale (1440p: 0.40 vs 2.22 ms GPU mean).
+- Telemetry inconsistency: capDrops are real lost SOURCE frames, but the encode thread then runs
+  back-to-back, so wall-clock emission intervals stay ~17 ms (enc stage shows no 33 ms gap); only the
+  PTS shows the skip -> new `ptsSkipped`. The 392 ms enc max at start = the Go pump's first TCP write
+  blocking while the receiver opens; the start-up hold now lasts until the consumer returns for the 2nd
+  AU (live start had ringHiwater 11 + ringSkips 19 = a stale burst).
+- Auto coded-size controller (default on, env-tunable): see commit; reason in `ctl routes` degraded:.
+  The receiver sees the smaller coded size; the REASON on the receiver needs a sender->receiver meta
+  (medialink wire) - follow-up.
+- Source-freeze detector: telemetry `sourceFreezes`, `ctl routes` "source:" line, log "source picture
+  froze" (>= 250 ms, 1 / 10 s). delivered=true = VRChat's own picture froze; false = source stopped
+  delivering and cadence repeats filled.

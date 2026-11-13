@@ -56,8 +56,29 @@ pub const Stats = struct {
     owd_jitter_ns: i64 = 0, // |transit delta| EWMA
     rtt_ns: i64 = 0, // keepalive ping -> pong
     metas_sent: u64 = 0,
+    // route lifecycle + accounting the supervising parent needs (zigenc net session -> Go):
+    bye: bool = false, // the sender ended the route cleanly (dg_type_bye)
+    last_rx_ns: i64 = 0, // monotonic time of the last authenticated datagram (0 = none yet)
+    rebinds: u64 = 0, // authenticated remote rebinds (strictly-newer datagram from a new address)
+    media_bytes: u64 = 0, // delivered video payload bytes
+    keyframes: u64 = 0, // delivered keyframes
+    nack_recovered: u64 = 0, // NACKed frames completed by a retransmit
+    nack_expired: u64 = 0, // NACKed frames that never completed (evicted / given up)
+    ctl_seq: u64 = 0, // next control datagram seq (a re-attach continues ABOVE it: one nonce space)
+    meta_in_drops: u64 = 0, // inbound meta dropped (mailbox full / oversized)
+    rx_errors: u64 = 0, // socket receive errors other than would-block (a deaf socket is visible)
     playout: playout_mod.Stats = undefined,
 };
+
+/// IdleCb runs on the receiver thread once per worker iteration (<= poll interval, 2 ms): the decode
+/// session pumps its async decoder output here so the decoder stays single-threaded.
+pub const IdleCb = *const fn (user: ?*anyopaque) callconv(.c) void;
+
+/// meta_in_cap bounds the inbound meta mailbox (sender -> receiver stream-0 control: sync pongs,
+/// reports). Drop-newest when full; the parent drains it at <= 20 ms.
+pub const meta_in_cap = 16;
+pub const meta_in_max = 512;
+const rebind_min_ns: i64 = 1_000_000_000; // = medialink udpRebindMin
 
 pub const FrameCb = *const fn (user: ?*anyopaque, ptr: [*]const u8, len: usize, pts: i64, key: bool) callconv(.c) void;
 
@@ -102,6 +123,21 @@ pub const Receiver = struct {
     metas_sent: std.atomic.Value(u64) = .init(0),
     last_ping: i64 = 0,
     last_pli: i64 = 0,
+    // inbound meta mailbox (worker -> parent session thread), bounded: meta_in_cap x meta_in_max.
+    min_mu: std.atomic.Mutex = .unlocked,
+    min_buf: [meta_in_cap][meta_in_max]u8 = undefined,
+    min_len: [meta_in_cap]usize = [_]usize{0} ** meta_in_cap,
+    min_at: [meta_in_cap]i64 = [_]i64{0} ** meta_in_cap,
+    min_n: usize = 0,
+    meta_in_drops: std.atomic.Value(u64) = .init(0),
+    bye: std.atomic.Value(bool) = .init(false),
+    last_rx: std.atomic.Value(i64) = .init(0),
+    rebinds: std.atomic.Value(u64) = .init(0),
+    last_rebind: i64 = 0,
+    media_bytes: std.atomic.Value(u64) = .init(0),
+    keyframes: std.atomic.Value(u64) = .init(0),
+    seq_pub: std.atomic.Value(u64) = .init(0),
+    rx_errors: std.atomic.Value(u64) = .init(0),
     rx_buf: []u8,
     dg_buf: []u8,
 
@@ -118,6 +154,7 @@ pub const Receiver = struct {
 
     on_frame: ?FrameCb = null,
     user: ?*anyopaque = null,
+    on_idle: ?IdleCb = null, // set before the worker starts (openPeerIdle)
 
     // test hooks: drop the datagram (drop_frame, drop_frag) ONCE (NIC loss; the retransmit passes);
     // stall_at_frame: the worker sleeps stall_ns once after reassembling that frame (host stall).
@@ -136,6 +173,11 @@ pub const Receiver = struct {
 
     /// openPeer is open with the sender's address known up front (control can flow before media).
     pub fn openPeer(alloc: std.mem.Allocator, fd: sock.Fd, cfg: RxConfig, peer: ?sock.Addr4, cb: ?FrameCb, user: ?*anyopaque) !*Receiver {
+        return openPeerIdle(alloc, fd, cfg, peer, cb, null, user);
+    }
+
+    /// openPeerIdle is openPeer plus an idle hook (same user pointer) run on the receiver thread.
+    pub fn openPeerIdle(alloc: std.mem.Allocator, fd: sock.Fd, cfg: RxConfig, peer: ?sock.Addr4, cb: ?FrameCb, idle: ?IdleCb, user: ?*anyopaque) !*Receiver {
         const r = try alloc.create(Receiver);
         errdefer alloc.destroy(r);
         const pbuf = try alloc.alloc(playout_mod.Item, n_slots);
@@ -161,7 +203,9 @@ pub const Receiver = struct {
             .rx_buf = try alloc.alloc(u8, 2048),
             .dg_buf = try alloc.alloc(u8, 2 + nack_max * 8 + wire.header_len + 128), // fits a full NACK / PLI
             .on_frame = cb,
+            .on_idle = idle,
             .user = user,
+            .seq_pub = .init(cfg.initial_seq),
         };
         if (peer) |pa| {
             r.peer = pa;
@@ -172,9 +216,16 @@ pub const Receiver = struct {
         return r;
     }
 
-    pub fn close(r: *Receiver) void {
+    /// halt stops + joins the worker (no callback after it returns) without freeing: stats() stays
+    /// readable (the final snapshot carries the final control seq). close() after it frees.
+    pub fn halt(r: *Receiver) void {
         r.stop.store(true, .release);
         if (r.thread) |t| t.join();
+        r.thread = null;
+    }
+
+    pub fn close(r: *Receiver) void {
+        r.halt();
         r.reasm.deinit();
         for (r.slot_buf) |s| r.alloc.free(s);
         r.alloc.free(r.slot_buf);
@@ -206,6 +257,7 @@ pub const Receiver = struct {
             r.drainPlayout();
             r.keepalive(now);
             r.drainMailbox(now);
+            if (r.on_idle) |ic| ic(r.user);
             if (now - last_stats >= 250 * std.time.ns_per_ms) {
                 last_stats = now;
                 r.publishStats(now);
@@ -232,6 +284,16 @@ pub const Receiver = struct {
             .owd_jitter_ns = r.owd_jit,
             .rtt_ns = r.rtt_ns,
             .metas_sent = r.metas_sent.load(.monotonic),
+            .bye = r.bye.load(.acquire),
+            .last_rx_ns = r.last_rx.load(.monotonic),
+            .rebinds = r.rebinds.load(.monotonic),
+            .media_bytes = r.media_bytes.load(.monotonic),
+            .keyframes = r.keyframes.load(.monotonic),
+            .nack_recovered = r.reasm.nack_recovered,
+            .nack_expired = r.reasm.nack_expired,
+            .ctl_seq = r.seq_pub.load(.monotonic),
+            .meta_in_drops = r.meta_in_drops.load(.monotonic),
+            .rx_errors = r.rx_errors.load(.monotonic),
             .playout = r.playout.stats(now),
         };
         spinLock(&r.stats_mu);
@@ -245,28 +307,47 @@ pub const Receiver = struct {
         var k: usize = 0;
         while (k < rx_batch) : (k += 1) {
             var src: sock.Addr4 = .{};
-            const n = sock.recvFrom(r.fd, r.rx_buf, &src) catch return false;
+            const n = sock.recvFrom(r.fd, r.rx_buf, &src) catch |e| {
+                if (e != error.WouldBlock) _ = r.rx_errors.fetchAdd(1, .monotonic);
+                return false;
+            };
             const t = hrtimer.nowMono(); // first bytes of this datagram off the socket
             _ = r.net_marks.fetchAdd(1, .monotonic);
             if (!r.have_peer) {
                 r.peer = src;
                 r.have_peer = true;
             }
-            r.handleDatagram(r.rx_buf[0..n], t);
+            r.handleDatagram(r.rx_buf[0..n], t, &src);
         }
         return true;
     }
 
-    fn handleDatagram(r: *Receiver, dg: []const u8, now: i64) void {
+    fn handleDatagram(r: *Receiver, dg: []const u8, now: i64, src: *const sock.Addr4) void {
         const h = wire.Header.decode(dg) catch return;
         if (h.token != r.cfg.token) return;
         if (r.cfg.encrypt) {
             var pt: [2048]u8 = undefined;
             const n = aead.open(&pt, dg[wire.header_len..], dg[0..wire.header_len], keys.nonce(r.cfg.open_prefix, h.seq), r.cfg.open_key) catch return;
+            r.authenticated(h, src, now);
             r.handleBody(h, pt[0..n], now);
         } else {
+            r.authenticated(h, src, now);
             r.handleBody(h, dg[wire.header_len..], now);
         }
+    }
+
+    // authenticated runs for every datagram that passed token + AEAD: liveness, and the medialink
+    // rebind rule - a STRICTLY-NEWER datagram from a new address moves the control target there (a
+    // native sender opens its own socket and continues the Go conn's seq space), rate-limited.
+    fn authenticated(r: *Receiver, h: wire.Header, src: *const sock.Addr4, now: i64) void {
+        r.last_rx.store(now, .monotonic);
+        if (!r.have_peer) return; // learned in drainSocket
+        const same = src.port_be == r.peer.port_be and std.mem.eql(u8, &src.addr, &r.peer.addr);
+        if (same or (r.dg_have and h.seq <= r.dg_hi)) return;
+        if (r.last_rebind != 0 and now - r.last_rebind < rebind_min_ns) return;
+        r.peer = src.*;
+        r.last_rebind = now;
+        _ = r.rebinds.fetchAdd(1, .monotonic);
     }
 
     fn handleBody(r: *Receiver, h: wire.Header, body: []const u8, now: i64) void {
@@ -280,6 +361,7 @@ pub const Receiver = struct {
                 r.reasm.now_hint = now;
                 const whole = r.reasm.accept(h.stream, h.frame_seq, h.frag_idx, h.frag_count, body) orelse return;
                 const f = wire.parseFrameForTest(whole) catch return;
+                if (f.kind == 0 and f.stream == 0) return r.pushMetaIn(f.payload, now); // sender control
                 if (f.kind != 1) return; // video only
                 r.noteTransit(now - f.pts, now);
                 if (r.stall_at_frame >= 0 and f.seq == @as(u32, @intCast(r.stall_at_frame))) {
@@ -293,9 +375,12 @@ pub const Receiver = struct {
                 @memcpy(r.slot_buf[si][0..f.payload.len], f.payload);
                 r.slot_len[si] = f.payload.len;
                 r.slot_free[si] = false;
+                _ = r.media_bytes.fetchAdd(f.payload.len, .monotonic);
+                if ((f.flags & 0x01) != 0) _ = r.keyframes.fetchAdd(1, .monotonic);
                 if (!r.playout.push(f.seq, f.pts, (f.flags & 0x01) != 0, si, now)) r.slot_free[si] = true;
             },
             wire.dg_type_ping => r.sendCtrl(wire.dg_type_pong, 0, 0, body),
+            wire.dg_type_bye => r.bye.store(true, .release), // clean end-of-stream from the sender
             wire.dg_type_pong => if (body.len >= 8) { // our keepalive echoed: RTT
                 const sent: i64 = @bitCast(std.mem.readInt(u64, body[0..8], .big));
                 const rtt = hrtimer.nowMono() - sent;
@@ -449,6 +534,42 @@ pub const Receiver = struct {
         }
     }
 
+    fn pushMetaIn(r: *Receiver, payload: []const u8, now: i64) void {
+        if (payload.len > meta_in_max) {
+            _ = r.meta_in_drops.fetchAdd(1, .monotonic);
+            return;
+        }
+        spinLock(&r.min_mu);
+        defer r.min_mu.unlock();
+        if (r.min_n == meta_in_cap) {
+            _ = r.meta_in_drops.fetchAdd(1, .monotonic); // drop newest: bounded
+            return;
+        }
+        @memcpy(r.min_buf[r.min_n][0..payload.len], payload);
+        r.min_len[r.min_n] = payload.len;
+        r.min_at[r.min_n] = now;
+        r.min_n += 1;
+    }
+
+    /// takeMetaIn pops the OLDEST inbound sender meta payload (JSON) into out; returns its length +
+    /// arrival time (monotonic ns), null when empty. Any thread (the parent's session thread).
+    pub fn takeMetaIn(r: *Receiver, out: *[meta_in_max]u8, at: *i64) ?usize {
+        spinLock(&r.min_mu);
+        defer r.min_mu.unlock();
+        if (r.min_n == 0) return null;
+        const n = r.min_len[0];
+        @memcpy(out[0..n], r.min_buf[0][0..n]);
+        at.* = r.min_at[0];
+        var i: usize = 1;
+        while (i < r.min_n) : (i += 1) {
+            @memcpy(r.min_buf[i - 1][0..r.min_len[i]], r.min_buf[i][0..r.min_len[i]]);
+            r.min_len[i - 1] = r.min_len[i];
+            r.min_at[i - 1] = r.min_at[i];
+        }
+        r.min_n -= 1;
+        return n;
+    }
+
     fn keepalive(r: *Receiver, now: i64) void {
         if (!r.have_peer or now - r.last_ping < keepalive_ns) return;
         r.last_ping = now;
@@ -476,6 +597,7 @@ pub const Receiver = struct {
             total += payload.len;
         }
         r.seq +%= 1;
+        r.seq_pub.store(r.seq, .monotonic);
         _ = sock.sendTo(r.fd, r.dg_buf[0..total], &r.peer);
     }
 };

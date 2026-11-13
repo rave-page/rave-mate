@@ -25,6 +25,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"rave.page/mate/internal/decmode"
 )
 
 const (
@@ -77,6 +79,12 @@ type ProcDecOpts struct {
 	HEVC       bool
 	KbpsHint   int // sizes the inbound ring (bitrate-derived, geometry-independent)
 	Dest       *DecodeDest
+	// NullDecode: no decoder, no destination (child proto v5 null_dec) - GPU-free tests of the network
+	// source. Never set by production callers.
+	NullDecode bool
+	// Software forces SOFTWARE decode mode (child proto v6): no DXVA, upload into the same destination.
+	// Normally chosen adaptively (DecCPUFallback); explicit for tests.
+	Software bool
 }
 
 // ProcDecStats is one decode session's live telemetry.
@@ -98,6 +106,10 @@ type ProcDecStats struct {
 	DecResizes  uint64 // in-band coded-resizes the decoder handled in place (cap engaged/lifted)
 	DecCodedW   int    // current decoder coded size - confirms the cap engaged at the right size
 	DecCodedH   int    // (no 16-row-alignment squash: 1080 not 1088)
+	// Mode is the adaptive decode mode ("hw"/"cpu"; "" = adaptive off) and ModeText the visible
+	// why/VRAM/cap/last-switch line (decmode.Status.Text + numbers).
+	Mode     string
+	ModeText string
 }
 
 // ProcDecSession is one decode+publish session (medialink-facing surface).
@@ -137,12 +149,31 @@ type ProcDecSession struct {
 
 	failMu  sync.Mutex
 	failErr error
+
+	// network source (procnet_windows.go, child proto v5)
+	nullDec bool
+	netBlk  bool    // the mapping carries the netrx telemetry block (child v5)
+	netOff  uintptr // block offset (header + ring)
+	netMu   sync.Mutex
+	netP    *NetRXParams // attached (owns the parked socket); nil = shm-ring source
+	netMeta chan NetMeta
+
+	// adaptive decode mode (decmode_windows.go): software = current pipeline is the SOFTWARE mode;
+	// keygate = the next (re)open feeds from the first keyframe; mode = the HW/CPU/HELD controller
+	// (nil = adaptive mode off). modeSt is touched only by watchDest's goroutine.
+	software atomic.Bool
+	keygate  atomic.Bool
+	threads  int
+	mode     *decmode.Controller
+	modeSt   modeState
+	capH     atomic.Int32           // CPU-mode coded-height cap for this route's sender (0 = none)
+	kfReq    atomic.Pointer[func()] // route keyframe request (PLI), set by medialink
 }
 
 // OpenProcDecSession opens a native decode session. Errors are CLEAN: ErrDecodeRefused (or any
 // other error) means the caller runs the ffmpeg decode child instead.
 func OpenProcDecSession(o ProcDecOpts) (*ProcDecSession, error) {
-	if o.Dest == nil || o.Dest.Resolve == nil {
+	if !o.NullDecode && (o.Dest == nil || o.Dest.Resolve == nil) {
 		return nil, fmt.Errorf("%w: no destination texture", ErrDecodeRefused)
 	}
 	if os.Getenv("RAVE_MATE_MFDEC_OPEN_FAIL") != "" {
@@ -152,9 +183,24 @@ func OpenProcDecSession(o ProcDecOpts) (*ProcDecSession, error) {
 	// on a saturated card the open fails AND the ffmpeg fallback is heavier (readback + a fresh Spout
 	// interop registration that crashes Resolume). Refuse with ErrDecodeHeldVRAM so the caller HOLDS
 	// instead of demoting. Only reached for GPU-destination routes (Dest.Resolve != nil). Fails open.
-	if DecAdmit != nil {
+	// Adaptive mode (1e): a refused HW pipeline opens in SOFTWARE mode instead of holding, when enabled.
+	software := o.Software
+	adaptive, threads, mcfg := false, 0, decmode.Config{}
+	if DecCPUFallback != nil && !o.NullDecode {
+		adaptive, threads, mcfg = DecCPUFallback()
+	}
+	why := "HW decode admitted"
+	if DecAdmit != nil && !o.NullDecode && !software {
 		if v := DecAdmit(o.InW, o.InH, o.OutW, o.OutH, int(o.FPS), o.HEVC); !v.Allow {
-			return nil, fmt.Errorf("%w: %s", ErrDecodeHeldVRAM, v.Reason)
+			if !adaptive {
+				return nil, fmt.Errorf("%w: %s", ErrDecodeHeldVRAM, v.Reason)
+			}
+			software, why = true, "HW decode refused at open: "+v.Reason
+		}
+	}
+	if software && DecAdmitCPU != nil {
+		if v := DecAdmitCPU(o.InW, o.InH, o.OutW, o.OutH, int(o.FPS)); !v.Allow {
+			return nil, fmt.Errorf("%w: software decode: %s", ErrDecodeHeldVRAM, v.Reason)
 		}
 	}
 	fps := o.FPS
@@ -181,18 +227,44 @@ func OpenProcDecSession(o ProcDecOpts) (*ProcDecSession, error) {
 		if v := child.waitProtoVer(2 * time.Second); v < protoVerDecode {
 			return nil, fmt.Errorf("%w: encoder child protocol v%d (need v%d)", ErrDecodeRefused, v, protoVerDecode)
 		}
+		if software && child.waitProtoVer(0) < protoVerSWDec {
+			return nil, fmt.Errorf("%w: software decode needs child proto v%d", ErrDecodeHeldVRAM, protoVerSWDec)
+		}
+		// Proto v5: a telemetry block after the ring so the session can later take a network source.
+		netBlk := child.waitProtoVer(0) >= protoVerNetRX
+		if o.NullDecode && !netBlk {
+			return nil, fmt.Errorf("%w: null decode needs child proto v%d", ErrDecodeRefused, protoVerNetRX)
+		}
+		size := shmHdrSize + ringSize
+		if netBlk {
+			size += netBlkSize
+		}
 		sid := sidSeq.Add(1)
-		shm, err := createShm(fmt.Sprintf(`Local\rvmfenc-%d-%d`, os.Getpid(), sid), shmHdrSize+ringSize)
+		shm, err := createShm(fmt.Sprintf(`Local\rvmfenc-%d-%d`, os.Getpid(), sid), size)
 		if err != nil {
 			return nil, err
 		}
 		d := &ProcDecSession{
 			child: child, sid: sid, shm: shm,
 			inW: o.InW, inH: o.InH, outW: o.OutW, outH: o.OutH, fps: fps, hevc: o.HEVC,
-			ringKB: ringKB, ringSize: uint64(ringSize), ringOff: shmHdrSize,
-			dstName: o.Dest.Name, resolve: o.Dest.Resolve, done: make(chan struct{}),
+			ringKB: ringKB, ringSize: uint64(ringSize), ringOff: shmHdrSize, done: make(chan struct{}),
+			nullDec: o.NullDecode, netBlk: netBlk, netOff: uintptr(shmHdrSize + ringSize),
+			netMeta: make(chan NetMeta, netMetaQueue),
+		}
+		if o.Dest != nil {
+			d.dstName, d.resolve = o.Dest.Name, o.Dest.Resolve
 		}
 		d.recycle = d.recycleDest
+		d.software.Store(software)
+		d.keygate.Store(software)
+		d.threads = threads
+		if adaptive {
+			m := decmode.HW
+			if software {
+				m = decmode.CPU
+			}
+			d.mode = decmode.New(mcfg, m, time.Now(), why)
+		}
 		ev, err := child.openDecSession(d)
 		if err != nil {
 			shm.close()
@@ -211,8 +283,9 @@ func OpenProcDecSession(o ProcDecOpts) (*ProcDecSession, error) {
 		child.decs[sid] = d
 		child.mu.Unlock()
 		d.watchDone = make(chan struct{})
+		d.publishModeStatus(0, 0, 0)
 		go d.watchDest()
-		if DecObserve != nil {
+		if DecObserve != nil && !software { // a software open allocates no DXVA pipeline: not a HW cost sample
 			observeCost(beforeH, func(mb float64) { DecObserve(o.InW, o.InH, int(o.FPS), o.HEVC, mb) })
 		}
 		return d, nil
@@ -341,6 +414,10 @@ func (d *ProcDecSession) Stats() ProcDecStats {
 	st.Restarts = d.child.restarts
 	d.child.mu.Unlock()
 	st.ChildCPUPct = d.child.cpuPercent()
+	if d.mode != nil {
+		st.Mode = modeName(d.software.Load())
+		st.ModeText = modeText(d.dstName)
+	}
 	return st
 }
 
@@ -404,6 +481,9 @@ func (d *ProcDecSession) watchDest() {
 		d.dstMu.Unlock()
 		frames := atomic.LoadUint64(d.shm.u64(offDecFrames))
 		appended := d.appended.Load()
+		if n, ok := d.netDelivered(); ok {
+			appended = n // network source: frames the child's playout released into the decoder
+		}
 		mtx := atomic.LoadUint64(d.shm.u64(offDecMtxTimeo))
 		v, why := decCheck(decProbe{curHandle: cur, newHandle: newH, resolved: ok,
 			decFrames: frames, prevFrames: prevFrames,
@@ -424,6 +504,7 @@ func (d *ProcDecSession) watchDest() {
 		default:
 			held = false
 		}
+		d.modeTick() // adaptive HW/CPU decode mode (policy only; nil controller = no-op)
 	}
 }
 
@@ -493,6 +574,13 @@ func (d *ProcDecSession) onDstGone(reason string) {
 // admitRebuild reports whether a decode close()+reopen may run, with the numbers behind it. Uses the
 // unified gpubudget policy when wired (geometry-aware reserve), else the static floor. Fails open.
 func (d *ProcDecSession) admitRebuild() (allow bool, freeMB uint64, reason string) {
+	if d.software.Load() { // a software pipeline rebuild allocates only the small upload texture + VP
+		if DecAdmitCPU == nil {
+			return true, 0, "software decode"
+		}
+		v := DecAdmitCPU(d.inW, d.inH, d.outW, d.outH, int(d.fps))
+		return v.Allow, v.FreeMB, "software decode: " + v.Reason
+	}
 	if DecAdmit != nil {
 		v := DecAdmit(d.inW, d.inH, d.outW, d.outH, int(d.fps), d.hevc)
 		r := v.Reason
@@ -544,24 +632,9 @@ func (d *ProcDecSession) recycleDest(why string) {
 	d.dstMu.Unlock()
 	d.downgrades.Add(1)
 	Warnf("mfenc: native decode destination %q recycling (%s)", d.dstName, why)
-	d.recovering.Store(true)
-	defer d.recovering.Store(false)
-	closedCh := make(chan struct{})
-	d.child.mu.Lock()
-	d.child.closeWait[d.sid] = closedCh
-	d.child.mu.Unlock()
-	if d.child.send(map[string]any{"op": "close", "sid": d.sid}) == nil {
-		select {
-		case <-closedCh:
-		case <-time.After(3 * time.Second):
-		}
-	}
-	// The ring survives the reopen but its contents are stale bitstream the new decoder cannot use
-	// without a keyframe: reset both heads so the session starts clean.
-	atomic.StoreUint64(d.shm.u64(offInRead), 0)
-	atomic.StoreUint64(d.shm.u64(offInWrite), 0)
-	ev, err := d.child.openDecSession(d)
+	ev, err := d.reopenPipeline()
 	if err == nil && ev.OK {
+		d.requestKeyframe()
 		// Reopen succeeded: the pipeline is healthy again, clear the failure budget.
 		d.dstMu.Lock()
 		d.dstRecycles = 0
@@ -594,6 +667,35 @@ func (d *ProcDecSession) recycleDest(why string) {
 		return
 	}
 	Warnf("mfenc: native decode destination %q reopen failed (%s), attempt %d/%d", d.dstName, msg, n, decMaxRecycles)
+}
+
+// reopenPipeline closes the child session and reopens it (same sid, same shm) in the CURRENT mode
+// (software flag) with a fresh destination handle. A fresh decoder is keyframe-gated (child proto v6),
+// and the ring heads are reset: stale bitstream without a keyframe is useless to a new decoder. A
+// network source rides the reopen. Caller decides what a failure means.
+func (d *ProcDecSession) reopenPipeline() (openedEv, error) {
+	d.recovering.Store(true)
+	defer d.recovering.Store(false)
+	closedCh := make(chan struct{})
+	d.child.mu.Lock()
+	d.child.closeWait[d.sid] = closedCh
+	d.child.mu.Unlock()
+	if d.child.send(map[string]any{"op": "close", "sid": d.sid}) == nil {
+		select {
+		case <-closedCh:
+		case <-time.After(3 * time.Second):
+		}
+	}
+	atomic.StoreUint64(d.shm.u64(offInRead), 0)
+	atomic.StoreUint64(d.shm.u64(offInWrite), 0)
+	if d.child.waitProtoVer(0) >= protoVerSWDec {
+		d.keygate.Store(true)
+	}
+	ev, err := d.child.openDecSession(d)
+	if err == nil && ev.OK {
+		d.reattachNet() // a network source rides the reopen (fresh duplicate, seq continued)
+	}
+	return ev, err
 }
 
 // ── frame-path pinning: senders whose native decode proved unusable ──
@@ -638,6 +740,7 @@ func (d *ProcDecSession) Close() {
 	if !d.closed.CompareAndSwap(false, true) {
 		return
 	}
+	dropMode(d.dstName) // visible mode + any CPU-mode sender cap go with the session
 	closedCh := make(chan struct{})
 	d.child.mu.Lock()
 	d.child.closeWait[d.sid] = closedCh
@@ -653,5 +756,6 @@ func (d *ProcDecSession) Close() {
 	if d.watchDone != nil {
 		<-d.watchDone // the watchdog reads the shm header: it must be gone before unmap
 	}
+	d.closeNet() // child closed its duplicate (RX thread joined first); now release ours
 	d.shm.close()
 }

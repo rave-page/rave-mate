@@ -68,9 +68,13 @@ type Options struct {
 	// AdmitSender gates a NEW Spout sender through the UNIFIED VRAM budget (geometry-aware cost +
 	// reserve + self-cap). nil => the static-floor senderCreateGate below. allow=false => the sender
 	// is not created (the source waits for VRAM), so one policy governs decode, sender and encode.
-	AdmitSender func(w, h int) (allow bool, reason string, freeMB, reserveMB uint64)
-	// AdmitReceive is the pre-offer gate (new sender + decoder). nil => AdmitSender / static floor.
-	AdmitReceive func(w, h, fps int) (allow bool, reason string, freeMB, reserveMB uint64)
+	AdmitSender func(w, h int) Admission
+	// AdmitReceive is the pre-offer gate: the decoder, plus a new sender + its receiver follow cost when
+	// newSender (a kept destination costs nothing new). nil => AdmitSender / static floor.
+	AdmitReceive func(w, h, fps int, newSender bool) Admission
+	// Keeper hosts GPU destinations outside this process (rave-mate-keeper, 1b) when
+	// MediaLink.SenderKeeper is on; nil or unreachable => the in-process SpoutLibrary sender.
+	Keeper Keeper
 
 	// Test seams (default: videoshare Spout backend).
 	ListSenders func() []string
@@ -123,9 +127,16 @@ type Manager struct {
 	cfg       func() config.MediaLinkFeature
 	sameHost  func(string) bool
 	headroom  func() gpumem.Headroom
-	admitSndr func(w, h int) (allow bool, reason string, freeMB, reserveMB uint64)
-	held      map[string]time.Time // sender name -> last hold log (mu); pre-offer VRAM holds
-	admitRecv func(w, h, fps int) (allow bool, reason string, freeMB, reserveMB uint64)
+	admitSndr func(w, h int) Admission
+	admitRecv func(w, h, fps int, newSender bool) Admission
+	keeper    Keeper
+	// VRAM hold + verified-attempt state (mu). All keyed by receive sender name; bounded by the number
+	// of distinct receives (remembered set / medialink route cap), pruned by reapParked.
+	holds    map[string]Hold          // current holds (visible state)
+	holdLog  map[string]time.Time     // last hold log line per sender (rate limit)
+	attempts map[string]*attemptState // failed verified attempts
+	pending  map[string]Admission     // NEW destination admitted pre-offer (tier + attempt), consumed at sink open
+	claimAt  map[string]time.Time     // last claim try per remembered destination (bounded by the remembered set)
 
 	listSenders  func() []string
 	senderSize   func(string) (int, int, bool)
@@ -163,6 +174,8 @@ func New(o Options) *Manager {
 		newSharedSnd: o.NewSharedSender, openSource: o.OpenSource, openSink: o.OpenSink,
 		shared: map[string]medialink.SourceDesc{}, receives: map[string]Receive{},
 		parked: map[string]*parkedSink{}, stopping: map[string]bool{}, now: time.Now,
+		holds: map[string]Hold{}, holdLog: map[string]time.Time{}, attempts: map[string]*attemptState{},
+		pending: map[string]Admission{}, claimAt: map[string]time.Time{}, keeper: o.Keeper,
 	}
 	m.hub = newCaptureHub(o.Log, o.OpenReceiver, o.PutPix)
 	if m.listSenders == nil {
@@ -202,6 +215,7 @@ func (m *Manager) Start(ctx context.Context) {
 		t := time.NewTicker(scanEvery)
 		defer t.Stop()
 		defer m.destroyAllParked() // release every held sender on shutdown
+		m.claimRemembered()        // 1a: remembered destinations exist before any peer/advert
 		for {
 			select {
 			case <-ctx.Done():
@@ -210,6 +224,7 @@ func (m *Manager) Start(ctx context.Context) {
 				m.scan()
 				m.cleanup()
 				m.reapParked()
+				m.claimRemembered()
 			}
 		}
 	})
@@ -427,17 +442,28 @@ func (m *Manager) StartReceive(peer, sourceID string) (string, error) {
 	// VRAM hold: admit BEFORE offering. Refusing only at sink open (after the answer) made the sender
 	// open capture + encoder every re-offer cycle for nothing (live: `vaapi-native encode engaged` then
 	// `broken pipe` every ~9 s per source on the gaming PC). A parked sender is reused, never gated.
+	// A parked (kept) destination costs nothing new and triggers nothing in Resolume; only its decoder
+	// is gated. A NEW destination is gated with its receiver follow cost.
 	m.mu.Lock()
 	_, parked := m.parked[sender]
 	m.mu.Unlock()
-	if !parked {
-		if reason, freeMB, reserveMB, blocked := m.receiveGate(w, h, int(desc.FPS)); blocked {
-			m.noteHeld(sender, reason, freeMB, reserveMB)
-			return "", fmt.Errorf("%s %q: VRAM budget refuses a new Spout sender (%s, free %d MB, reserve %d MB) - no offer sent",
-				heldPrefix, desc.Name, reason, freeMB, reserveMB)
-		}
-		m.clearHeld(sender)
+	parked = parked || m.keeperHas(sender) // keeper-hosted: adopted after a restart, nothing new
+	a := m.receiveGate(w, h, int(desc.FPS), !parked)
+	now = m.now()
+	m.mu.Lock()
+	a = m.gateAttempt(sender, a, now)
+	if !a.Allow {
+		hold := m.holdFor(sender, peer, sourceID, a, now)
+		m.holds[sender] = hold
+		m.mu.Unlock()
+		m.logHeld(hold)
+		return "", heldError(desc.Name, hold)
 	}
+	if !parked {
+		m.pending[sender] = a // the answer-time open honours THIS decision (tier, verified attempt)
+	}
+	m.mu.Unlock()
+	m.clearHeld(sender, a)
 	m.router.RegisterSink(medialink.SinkDesc{ID: sinkID, Name: sender, Kind: medialink.KindVideo},
 		func(context.Context, medialink.Answer) (medialink.Sink, error) {
 			return m.openReceiveSink(sender, w, h)
@@ -475,33 +501,33 @@ const heldPrefix = "mediaroute: held:"
 // IsHeld reports whether a StartReceive error is a pre-offer VRAM hold (retry cheaply, no backoff).
 func IsHeld(err error) bool { return err != nil && strings.Contains(err.Error(), heldPrefix) }
 
-// noteHeld logs a VRAM hold on entry and at most once a minute while it lasts.
-func (m *Manager) noteHeld(sender, reason string, freeMB, reserveMB uint64) {
-	now := time.Now()
+// logHeld logs a VRAM hold on entry and at most once a minute while it lasts.
+func (m *Manager) logHeld(h Hold) {
+	now := m.now()
 	m.mu.Lock()
-	if m.held == nil {
-		m.held = map[string]time.Time{}
-	}
-	last, was := m.held[sender]
+	last, was := m.holdLog[h.Sender]
 	logIt := !was || now.Sub(last) >= time.Minute
 	if logIt {
-		m.held[sender] = now
+		m.holdLog[h.Sender] = now
 	}
 	m.mu.Unlock()
 	if logIt {
-		m.log.Warn(source, "receive HELD - VRAM budget refuses a new Spout sender; no offer sent (the sender does not start capture/encode). Resumes automatically when the budget admits it.",
-			map[string]any{"sender": sender, "freeMB": freeMB, "reserveMB": reserveMB, "reason": reason})
+		m.log.Warn(source, "receive HELD - VRAM budget refuses the receive; no offer sent (the sender does not start capture/encode). Re-checked every 2s; resumes when it fits.",
+			map[string]any{"sender": h.Sender, "freeMB": h.FreeMB, "needMB": h.NeedMB, "requiredMB": h.RequiredMB,
+				"policy": h.Policy, "reason": h.Reason, "failedAttempts": h.Attempts})
 	}
 }
 
-// clearHeld logs the end of a VRAM hold.
-func (m *Manager) clearHeld(sender string) {
+// clearHeld ends a VRAM hold (logs the release with the admitting numbers).
+func (m *Manager) clearHeld(sender string, a Admission) {
 	m.mu.Lock()
-	_, was := m.held[sender]
-	delete(m.held, sender)
+	_, was := m.holds[sender]
+	delete(m.holds, sender)
+	delete(m.holdLog, sender)
 	m.mu.Unlock()
 	if was {
-		m.log.Info(source, "receive hold released - VRAM budget admits the sender; offering", map[string]any{"sender": sender})
+		m.log.Info(source, "receive hold released - VRAM budget admits the receive; offering", map[string]any{
+			"sender": sender, "freeMB": a.FreeMB, "needMB": a.NeedMB, "attempt": a.Attempt, "policy": a.Policy})
 	}
 }
 
@@ -528,7 +554,7 @@ func (m *Manager) StopReceive(session string) {
 		m.router.UnregisterSink(r.SinkID)
 	}
 	if destroyNow != nil {
-		_ = destroyNow.Close()
+		closeOrDestroy(destroyNow)
 		m.log.Info(source, "receive stopped - kept-alive sender destroyed", map[string]any{"session": session})
 	}
 }
@@ -633,6 +659,9 @@ type parkedSink struct {
 	w, h  int
 	since time.Time
 	blank []byte
+	// claimed: the destination of a REMEMBERED receive (claimed at start or kept for it): no idle TTL
+	// and last in line for cap eviction - it lives until the receive is forgotten or the app exits.
+	claimed bool
 }
 
 // openReceiveSink is the route sink open path: reuse a parked sender (same dims) so its shared
@@ -666,26 +695,70 @@ func (m *Manager) openReceiveSink(name string, w, h int) (medialink.Sink, error)
 	// On a saturated card that registration FAILS and can wedge Resolume. Under low free VRAM refuse
 	// the new sender - the source does not appear (missing beats a crash) and the route retries when
 	// headroom returns. Existing routes (the parked-reuse path above) are never gated.
-	if reason, freeMB, floorMB, blocked := m.senderCreateGate(w, h); blocked {
-		m.log.Warn(source, "receive sink NOT opened - VRAM budget refuses a new Spout sender (a fresh GL/DX interop registration would fail on a full card and can crash Resolume). Source appears when VRAM recovers.",
-			map[string]any{"sender": name, "freeMB": freeMB, "reserveMB": floorMB, "reason": reason})
-		return nil, fmt.Errorf("mediaroute: refusing new sender %q under VRAM pressure (%s)", name, reason)
+	if m.keeperHas(name) { // adopt the keeper-hosted destination: no admission, no new sender
+		inner, err := m.openSink(name, w, h)
+		if err != nil {
+			return nil, err
+		}
+		return &keptSink{m: m, inner: inner, name: name, w: w, h: h}, nil
 	}
-	inner, err := m.openSink(name, w, h)
+	m.mu.Lock()
+	a, preAdmitted := m.pending[name]
+	delete(m.pending, name)
+	if !preAdmitted {
+		// No pre-offer decision (a route not started by StartReceive): the full new-sender gate.
+		a = m.gateAttempt(name, m.senderCreateGate(w, h), m.now())
+	}
+	m.mu.Unlock()
+	if !a.Allow {
+		m.log.Warn(source, "receive sink NOT opened - VRAM budget refuses a new destination sender (Resolume would register a new interop on a full card). Source appears when VRAM recovers.",
+			map[string]any{"sender": name, "freeMB": a.FreeMB, "needMB": a.NeedMB, "requiredMB": a.RequiredMB, "policy": a.Policy, "reason": a.Reason})
+		return nil, fmt.Errorf("mediaroute: refusing new sender %q under VRAM pressure (%s)", name, a.Reason)
+	}
+	inner, err := m.openNewSender(name, w, h, a.Attempt, a.FreeMB)
 	if err != nil {
 		return nil, err
 	}
 	return &keptSink{m: m, inner: inner, name: name, w: w, h: h}, nil
 }
 
-// receiveGate is the pre-offer admission: the unified receive gate (sender + decoder) when wired,
-// else the sender gate. Same fail-open rules as senderCreateGate.
-func (m *Manager) receiveGate(w, h, fps int) (reason string, freeMB, reserveMB uint64, blocked bool) {
+// openNewSender opens a NEW destination sender (already admitted). attempt = admitted only as a
+// verified attempt: the allocation happened in THIS media child (GL path behind the survivable interop
+// probe) - re-read headroom; a collapse backs the sender out at once, before a decoder or Resolume
+// builds on it, and the caller holds under the attempt bounds.
+func (m *Manager) openNewSender(name string, w, h int, attempt bool, freeBefore uint64) (medialink.Sink, error) {
+	inner, err := m.openSink(name, w, h)
+	if err != nil {
+		if attempt {
+			m.noteAttempt(name, false, freeBefore, "open failed: "+err.Error())
+		}
+		return nil, err
+	}
+	if !attempt {
+		return inner, nil
+	}
+	ok, free, why := m.verifyAttempt()
+	m.noteAttempt(name, ok, free, why)
+	if !ok {
+		closeOrDestroy(inner)
+		m.log.Warn(source, "receive sink attempt BACKED OUT - free VRAM collapsed after creating the destination; holding",
+			map[string]any{"sender": name, "freeMB": free, "why": why})
+		return nil, fmt.Errorf("mediaroute: sender %q backed out after a verified attempt (%s)", name, why)
+	}
+	m.log.Info(source, "receive sink opened as a verified attempt on a tight card", map[string]any{"sender": name, "freeMB": free, "why": why})
+	return inner, nil
+}
+
+// receiveGate is the pre-offer admission: the unified receive gate (decoder + new sender + follow)
+// when wired, else the sender gate (only for a new sender). Same fail-open rules as senderCreateGate.
+func (m *Manager) receiveGate(w, h, fps int, newSender bool) Admission {
 	if m.admitRecv == nil || m.cfg == nil || !m.cfg().VramGovernorEnabled() {
+		if !newSender {
+			return Admission{Allow: true, Reason: "kept destination"}
+		}
 		return m.senderCreateGate(w, h)
 	}
-	allow, reason, free, reserve := m.admitRecv(w, h, fps)
-	return reason, free, reserve, !allow
+	return m.admitRecv(w, h, fps, newSender)
 }
 
 // senderCreateFloorMB is the free-VRAM floor below which a NEW sender (a fresh interop registration)
@@ -697,24 +770,23 @@ const senderCreateFloorMB = 768
 // with the reason + numbers. Prefers the UNIFIED budget seam (geometry-aware cost + reserve +
 // self-cap); falls back to the static floor when the budget is not wired. Fails open: governor
 // disabled, no seam, or headroom unknown => never blocks.
-func (m *Manager) senderCreateGate(w, h int) (reason string, freeMB, reserveMB uint64, blocked bool) {
+func (m *Manager) senderCreateGate(w, h int) Admission {
 	if m.cfg == nil || !m.cfg().VramGovernorEnabled() {
-		return "", 0, 0, false
+		return Admission{Allow: true, Reason: "governor off"}
 	}
 	if m.admitSndr != nil {
-		allow, reason, free, reserve := m.admitSndr(w, h)
-		return reason, free, reserve, !allow
+		return m.admitSndr(w, h)
 	}
 	if m.headroom == nil {
-		return "", 0, 0, false
+		return Admission{Allow: true, Reason: "no headroom source"}
 	}
 	floor := uint64(senderCreateFloorMB)
 	if r := m.cfg().ResolvedVramReserveMB(); r > 0 {
 		floor = uint64(r)
 	}
 	hr := m.headroom()
-	blocked = hr.Present && hr.FreeMB < floor
-	return fmt.Sprintf("free %d MB < floor %d MB", hr.FreeMB, floor), hr.FreeMB, floor, blocked
+	return Admission{Allow: !hr.Present || hr.FreeMB >= floor, Policy: "static-floor",
+		Reason: fmt.Sprintf("free %d MB vs floor %d MB", hr.FreeMB, floor), FreeMB: hr.FreeMB, RequiredMB: floor}
 }
 
 // closeKept is keptSink.Close: destroy on an explicit stop, else publish ONE transparent frame and
@@ -727,7 +799,14 @@ func (m *Manager) closeKept(k *keptSink) error {
 	}
 	m.mu.Unlock()
 	if destroy {
-		_ = k.inner.Close()
+		closeOrDestroy(k.inner)
+		return nil
+	}
+	if ks, ok := k.inner.(*keeperSink); ok { // keeper destination: park = keeper clear, no host blank
+		if err := ks.k.Clear(ks.s.Name); err != nil {
+			m.log.Debug(source, "kept-alive park: keeper clear failed", map[string]any{"sender": k.name, "err": err.Error()})
+		}
+		m.parkKept(k)
 		return nil
 	}
 	if k.blank == nil {
@@ -742,26 +821,37 @@ func (m *Manager) closeKept(k *keptSink) error {
 
 // parkKept adds k to the parked cache under the cap (drop-oldest; evicted inner closed outside mu).
 func (m *Manager) parkKept(k *keptSink) {
-	entry := &parkedSink{inner: k.inner, w: k.w, h: k.h, since: m.now(), blank: k.blank}
+	m.parkInner(k.name, k.inner, k.w, k.h, k.blank, m.isRemembered(k.name))
+}
+
+// parkInner adds a sender to the parked cache under the cap. Eviction is drop-oldest among UNCLAIMED
+// entries first; a claimed (remembered) destination is evicted only when every entry is claimed.
+func (m *Manager) parkInner(name string, inner medialink.Sink, w, h int, blank []byte, claimed bool) {
+	entry := &parkedSink{inner: inner, w: w, h: h, since: m.now(), blank: blank, claimed: claimed}
 	m.mu.Lock()
 	var evName string
 	var evicted medialink.Sink
-	if old, exists := m.parked[k.name]; exists {
-		evName, evicted = k.name, old.inner // stale duplicate under one name: close it, don't leak
+	if old, exists := m.parked[name]; exists {
+		if old.inner != inner {
+			evName, evicted = name, old.inner // stale duplicate under one name: close it, don't leak
+		}
 	} else if len(m.parked) >= parkCap {
 		var oldest time.Time
+		oldestClaimed := true
 		for n, p := range m.parked {
-			if evName == "" || p.since.Before(oldest) {
-				evName, oldest = n, p.since
+			better := evName == "" || (oldestClaimed && !p.claimed) ||
+				(p.claimed == oldestClaimed && p.since.Before(oldest))
+			if better {
+				evName, oldest, oldestClaimed = n, p.since, p.claimed
 			}
 		}
 		evicted = m.parked[evName].inner
 		delete(m.parked, evName)
 	}
-	m.parked[k.name] = entry
+	m.parked[name] = entry
 	m.mu.Unlock()
 	if evicted != nil {
-		_ = evicted.Close()
+		closeOrDestroy(evicted)
 		m.log.Info(source, "kept-alive sender evicted - cache full (drop-oldest)", map[string]any{"sender": evName})
 	}
 }
@@ -775,6 +865,9 @@ func (m *Manager) reapParked() {
 		inner medialink.Sink
 	}
 	for n, p := range m.parked {
+		if p.claimed && m.rememberedLocked(n) {
+			continue // a remembered receive's destination is kept for the whole session
+		}
 		if now.Sub(p.since) > parkTTL {
 			expired = append(expired, struct {
 				name  string
@@ -785,8 +878,85 @@ func (m *Manager) reapParked() {
 	}
 	m.mu.Unlock()
 	for _, e := range expired {
-		_ = e.inner.Close()
+		closeOrDestroy(e.inner)
 		m.log.Info(source, "kept-alive sender released after idle TTL", map[string]any{"sender": e.name})
+	}
+}
+
+// isRemembered reports whether sender name is the destination of a remembered receive.
+func (m *Manager) isRemembered(name string) bool {
+	if m.cfg == nil {
+		return false
+	}
+	for _, r := range m.cfg().RememberedReceives {
+		if r.Name != "" && linkPrefix+r.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// rememberedLocked is isRemembered for callers holding m.mu (cfg is a pure snapshot read).
+func (m *Manager) rememberedLocked(name string) bool { return m.isRemembered(name) }
+
+// claimRetry bounds how often an unclaimed remembered destination is re-tried (admission is cheap,
+// but a refused claim must not log/allocate every scan).
+const claimRetry = 10 * time.Second
+
+// claimRemembered (1a "claim early, keep forever") opens the destination of every remembered receive
+// whose nominal geometry is known BEFORE its route exists - at media-plane start and then on the scan
+// cadence while unclaimed - and parks it as claimed (no TTL). A later route reuses it (same handle:
+// Resolume registers once). Admission-gated like any new sender (verified attempt on a tight card).
+// GPU destinations only (ZeroCopyDecode): the frame path has nothing to pre-claim.
+func (m *Manager) claimRemembered() {
+	if m.cfg == nil {
+		return
+	}
+	cfg := m.cfg()
+	if !cfg.ZeroCopyDecode() {
+		return
+	}
+	now := m.now()
+	for _, r := range cfg.RememberedReceives {
+		if r.Name == "" || r.W <= 0 || r.H <= 0 {
+			continue
+		}
+		name := linkPrefix + r.Name
+		m.mu.Lock()
+		_, parked := m.parked[name]
+		busy := false
+		for _, rc := range m.receives {
+			if rc.Name == r.Name && rc.Peer == r.Peer {
+				busy = true // a route owns (or is opening) this destination
+				break
+			}
+		}
+		last, tried := m.claimAt[name]
+		if parked || busy || (tried && now.Sub(last) < claimRetry) {
+			m.mu.Unlock()
+			continue
+		}
+		m.claimAt[name] = now
+		m.mu.Unlock()
+		a := Admission{Allow: true, Reason: "adopt keeper-hosted destination"}
+		if !m.keeperHas(name) {
+			m.mu.Lock()
+			a = m.gateAttempt(name, m.senderCreateGate(r.W, r.H), now)
+			m.mu.Unlock()
+		}
+		if !a.Allow {
+			m.log.Debug(source, "remembered destination not claimed yet - VRAM budget", map[string]any{
+				"sender": name, "freeMB": a.FreeMB, "requiredMB": a.RequiredMB, "reason": a.Reason})
+			continue
+		}
+		inner, err := m.openNewSender(name, r.W, r.H, a.Attempt, a.FreeMB)
+		if err != nil {
+			m.log.Debug(source, "remembered destination claim failed", map[string]any{"sender": name, "err": err.Error()})
+			continue
+		}
+		m.parkInner(name, inner, r.W, r.H, nil, true)
+		m.log.Info(source, "remembered destination claimed at start - kept for the session (Resolume sees one sender, once)",
+			map[string]any{"sender": name, "w": r.W, "h": r.H, "attempt": a.Attempt})
 	}
 }
 
@@ -797,7 +967,7 @@ func (m *Manager) destroyAllParked() {
 	m.parked = map[string]*parkedSink{}
 	m.mu.Unlock()
 	for _, p := range all {
-		_ = p.inner.Close()
+		_ = p.inner.Close() // a keeper destination only DETACHES here: it outlives this process (1b)
 	}
 	if len(all) > 0 {
 		m.log.Info(source, "kept-alive senders released on shutdown", map[string]any{"count": len(all)})
@@ -968,11 +1138,29 @@ func (m *Manager) openSpoutSink(name string, w, h int) (medialink.Sink, error) {
 	// Native decode wanted → open the sender EAGERLY so its destination texture exists before the
 	// decode engine is chosen (a decoder cannot create one). A failure here is not fatal: fall
 	// straight through to the lazy frame sender, i.e. today's path byte for byte.
+	if m.cfg().ZeroCopyDecode() && m.keeper != nil && m.cfg().SenderKeeperEnabled() {
+		// 1b: the destination lives in rave-mate-keeper - ADOPTED when it already exists (restart /
+		// update: same handle, nothing new in Resolume), created otherwise (admitted by the caller).
+		s, created, err := m.keeper.Ensure(name, w, h)
+		if err == nil {
+			m.log.Info(source, "receive sink open (keeper-hosted GPU destination)", map[string]any{
+				"sender": name, "w": s.W, "h": s.H, "adopted": !created})
+			return &keeperSink{k: m.keeper, s: s}, nil
+		}
+		m.log.Warn(source, "sender keeper unavailable - using the in-process sender", map[string]any{
+			"sender": name, "err": err.Error()})
+	}
 	if m.cfg().ZeroCopyDecode() && m.newSharedSnd != nil {
 		if ss, err := m.newSharedSnd(name, w, h); err == nil {
 			m.log.Info(source, "receive sink open (GPU destination texture)", map[string]any{
 				"sender": name, "w": w, "h": h, "fmt": ss.Format()})
 			return &spoutSink{log: m.log, fs: ss, shared: ss, name: name, w: w, h: h}, nil
+		} else if why, hold := m.noFramePathFallback(err, w, h); hold {
+			// The frame path is HEAVIER on a full card (CPU upload + a fresh GL/DX interop + 2x 33 MB host
+			// buffers at 4K): never step down to it under VRAM pressure - hold instead.
+			m.log.Warn(source, "no GPU destination texture under VRAM pressure - holding (no CPU frame-path fallback)",
+				map[string]any{"sender": name, "err": err.Error(), "why": why})
+			return nil, fmt.Errorf("mediaroute: GPU destination for %q unavailable under VRAM pressure (%s): %w", name, why, err)
 		} else {
 			m.log.Warn(source, "no GPU destination texture for this receive sink - using the frame path",
 				map[string]any{"sender": name, "err": err.Error()})
@@ -984,6 +1172,22 @@ func (m *Manager) openSpoutSink(name string, w, h int) (medialink.Sink, error) {
 	}
 	m.log.Info(source, "receive sink open", map[string]any{"sender": name, "w": w, "h": h})
 	return &spoutSink{log: m.log, fs: fs, name: name, w: w, h: h}, nil
+}
+
+// noFramePathFallback decides whether a failed GPU-destination open may fall back to the CPU frame
+// path. hold=true when the failure is VRAM/interop-shaped or the budget would not fully admit a new
+// sender now (an attempt band counts as pressure).
+func (m *Manager) noFramePathFallback(err error, w, h int) (why string, hold bool) {
+	msg := strings.ToLower(err.Error())
+	for _, sig := range []string{"interop", "0x8876017c", "outofvideomemory", "did not initialise"} {
+		if strings.Contains(msg, sig) {
+			return "interop/VRAM-shaped failure: " + sig, true
+		}
+	}
+	if a := m.senderCreateGate(w, h); !a.Allow || a.Attempt {
+		return "budget: " + a.Reason, true
+	}
+	return "", false
 }
 
 // SharedTexture implements medialink.ZeroCopySink: the local sender's destination texture. Pure

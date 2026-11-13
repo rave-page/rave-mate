@@ -341,6 +341,47 @@ static void rpw_hist_snap(struct rpw_hist *h, rpw_stage_snap *o) {
 	o->p99_ms = rpw_hist_pct(h, n, 0.99);
 }
 
+/* ---- per-step duration histograms (encode thread writes; Go samples): where a frame's time goes ---- */
+#define RPW_UH_NB 22
+static const long long rpw_uh_ub_us[RPW_UH_NB] = {250, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000, 6000,
+	8000, 10000, 12000, 14000, 16000, 18000, 20000, 25000, 33000, 50000, 100000, 1LL << 62};
+struct rpw_uhist {
+	_Atomic unsigned long long n, sum_us, max_us, b[RPW_UH_NB];
+};
+static void rpw_uhist_add(struct rpw_uhist *h, long long us) {
+	if (us < 0)
+		return;
+	atomic_fetch_add_explicit(&h->n, 1, memory_order_relaxed);
+	atomic_fetch_add_explicit(&h->sum_us, (unsigned long long)us, memory_order_relaxed);
+	if ((unsigned long long)us > atomic_load_explicit(&h->max_us, memory_order_relaxed))
+		atomic_store_explicit(&h->max_us, (unsigned long long)us, memory_order_relaxed);
+	for (int i = 0; i < RPW_UH_NB; i++)
+		if (us <= rpw_uh_ub_us[i]) {
+			atomic_fetch_add_explicit(&h->b[i], 1, memory_order_relaxed);
+			break;
+		}
+}
+static double rpw_uhist_pct(struct rpw_uhist *h, unsigned long long n, double q) {
+	unsigned long long target = (unsigned long long)(q * (double)n), cum = 0;
+	for (int i = 0; i < RPW_UH_NB; i++) {
+		cum += atomic_load_explicit(&h->b[i], memory_order_relaxed);
+		if (cum >= target)
+			return (double)rpw_uh_ub_us[i] / 1000.0;
+	}
+	return (double)rpw_uh_ub_us[RPW_UH_NB - 1] / 1000.0;
+}
+static void rpw_uhist_snap(struct rpw_uhist *h, rpw_stage_snap *o) {
+	memset(o, 0, sizeof(*o));
+	unsigned long long n = atomic_load_explicit(&h->n, memory_order_relaxed);
+	o->count = n;
+	o->max_ms = (double)atomic_load_explicit(&h->max_us, memory_order_relaxed) / 1000.0;
+	if (!n)
+		return;
+	o->mean_ms = (double)atomic_load_explicit(&h->sum_us, memory_order_relaxed) / 1000.0 / (double)n;
+	o->p50_ms = rpw_uhist_pct(h, n, 0.50);
+	o->p99_ms = rpw_uhist_pct(h, n, 0.99);
+}
+
 /* ---- capture state -------------------------------------------------------------------------- */
 struct rpw_capture {
 	struct pw_thread_loop *loop;
@@ -408,6 +449,7 @@ struct rpw_capture {
 	_Atomic unsigned ring_head; /* consumer-owned read index (monotonic; %N on access) */
 	_Atomic unsigned ring_tail; /* producer-owned write index (monotonic) */
 	_Atomic long ring_bytes;    /* queued AU bytes (producer +=, consumer -=) */
+	_Atomic int consumer_back;  /* consumer asked for an AU after taking the first one (start-up hold end) */
 	int ring_hiwater;           /* max fill seen (producer-only) */
 	long ring_overflow;         /* AUs dropped because the consumer fell behind the ring (producer-only) */
 
@@ -421,7 +463,36 @@ struct rpw_capture {
 	int enc_stop;                  /* shutdown signal (set under enc_mu) */
 	pthread_mutex_t enc_mu;        /* guards the pending slot */
 	pthread_cond_t enc_cv;         /* wakes the encode thread */
-	struct pw_buffer *enc_pending; /* the held pw buffer handed to the thread; NULL = none */
+	/* capture hand-off FIFO (callback -> encode thread), bounded RPW_HQ_MAX deep (RPW_CAP_QUEUE, default
+	 * 3): a TRANSIENT encode spike (GFX contention: VPP 10 ms + sync 13 ms on the live rig) no longer
+	 * overwrites a frame - the thread catches up (mean cost ~0.3 ms CPU / ~3.5 ms GPU per 4K frame). Only a
+	 * sustained overload overflows: drop the OLDEST (counted as cap_drops). Holds <= depth pw buffers. */
+	struct rpw_pend {
+		struct pw_buffer *buf;
+		int np, fds[RPW_MAX_PLANES];
+		unsigned off[RPW_MAX_PLANES], str[RPW_MAX_PLANES];
+		uint32_t fourcc;
+		uint64_t mod;
+		int w, h, flip;
+		long long pts;
+	} hq[4];
+	int hq_head, hq_n, hq_max, hq_hiwater, hq_win_peak;
+	/* auto coded-size controller state (encode thread; see ac_tick). rx_maxh = the receiver/router cap. */
+	int rx_maxh;
+	int ac_on, ac_down_pmille, ac_win_s, ac_up_base_s, ac_up_s, ac_level, ac_nwin, ac_probe, ac_settle;
+	long ac_drops[30], ac_arr[30], ac_cap0, ac_drop0;
+	long long ac_sec_start, ac_ok_since, ac_last_up, ac_last_down;
+	char ac_reason[160]; /* guarded by mu */
+	_Atomic int ac_gen;
+	/* source-static detector (encode thread; results under mu) */
+	int fz_hist[64], fz_hn, fz_med, fz_n_since_med, fz_run, fz_run_repeats;
+	long long fz_first_pts, fz_last_pts, fz_run_wall;
+	long fz_count;
+	long long fz_last_ms, fz_longest_ms, fz_last_wall; /* wall = unix ms at the freeze start */
+	int fz_last_delivered, fz_last_repeats;
+	int fz_dbg; /* RPW_FZ_DEBUG */
+	int fz_prev_len, fz_flat, fz_flat_max;
+	struct pw_buffer *enc_pending; /* non-NULL while hq_n > 0 (wait-loop predicate) */
 	long cap_drops;                /* buffers dropped at the capture hand-off (encoder behind) */
 	/* B.3 PTS-grid frame selection: when the source runs faster than the negotiated rate (VRChat 120 ->
 	 * 60), emit the newest frame per 1/fps grid slot by capture PTS, so the output is evenly spaced in
@@ -437,10 +508,16 @@ struct rpw_capture {
 	long ring_skips;         /* frames skipped PRE-encode because the AU ring was full (no ref break) */
 	long start_holds;        /* frames skipped pre-encode while the route's first AU was unconsumed */
 	long forced_idrs;        /* IDRs forced by a post-encode drop (byte cap) - at most one per episode */
+	int slow_us;             /* RPW_ENC_SLOW_US test hook: simulated encode cost at native size */
 	int enc_sync;            /* RPW_ENC_SYNC: emit every frame synchronously (no 1-frame pipeline) */
 	/* native-path telemetry (encode thread writes; Go samples <= 1 Hz): per-AU interval histograms of
 	 * the encoder output (enc) and the native-sender hand-off (tx), keyframes, AU bytes. */
 	struct rpw_hist h_enc, h_tx;
+	struct rpw_uhist h_step[RVA_NSTEP + 1]; /* RVA_ST_* steps + [RVA_NSTEP] = whole real frame */
+	_Atomic long long busy_us;              /* encode-thread busy time (headroom: busy/wall) */
+	long pts_gaps;                          /* emitted AUs whose PTS jumped > 1.5 period (content skip) */
+	long pts_skipped;                       /* source frames those jumps skipped (output-visible loss) */
+	long long last_emit_pts;
 	long enc_keyframes;
 	long long enc_bytes;
 
@@ -450,12 +527,6 @@ struct rpw_capture {
 	rm_sender *native_tx;
 	/* pending-frame metadata (captured from the buffer in the callback; the buffer stays valid while
 	 * held, but copying keeps the thread off the spa_buffer). */
-	int enc_p_np, enc_p_fds[RPW_MAX_PLANES];
-	unsigned enc_p_off[RPW_MAX_PLANES], enc_p_str[RPW_MAX_PLANES];
-	uint32_t enc_p_fourcc;
-	uint64_t enc_p_mod;
-	int enc_p_w, enc_p_h, enc_p_flip;
-	long long enc_p_pts;
 
 	/* EGL (dmabuf import) - display/context built in rpw_start (no current); made current lazily
 	 * on the loop thread in on_process. */
@@ -492,6 +563,7 @@ static void au_ring_init(struct rpw_capture *c) {
 	atomic_store(&c->ring_head, 0);
 	atomic_store(&c->ring_tail, 0);
 	atomic_store(&c->ring_bytes, 0);
+	atomic_store(&c->consumer_back, 0);
 	c->ring_hiwater = 0;
 }
 
@@ -559,8 +631,11 @@ static int au_ring_room(struct rpw_capture *c) {
  * stale frames (latency burst) or overflow (drop burst + IDR storm, the live "36 drops in the first
  * second"). Hold - skip pre-encode - until it is read; the next encoded frame is then fresh. */
 static int au_ring_first_unconsumed(struct rpw_capture *c) {
-	return atomic_load_explicit(&c->ring_head, memory_order_acquire) == 0 &&
-	       atomic_load_explicit(&c->ring_tail, memory_order_relaxed) > 0;
+	/* "consumed" = the consumer came BACK for the next AU after taking the IDR: the Go pump pops the IDR
+	 * then blocks in its first socket write while the receiver opens (live: 390 ms) - releasing the hold
+	 * at the pop queued 11 stale AUs and skipped 19 (ringHiwater 11, ringSkips 19 on the live route). */
+	return atomic_load_explicit(&c->ring_tail, memory_order_relaxed) > 0 &&
+	       !atomic_load_explicit(&c->consumer_back, memory_order_acquire);
 }
 
 /* egl_setup_display: open the render node, GBM device, EGL display + GLES context (NOT current),
@@ -941,6 +1016,19 @@ static void request_buffers(struct rpw_capture *c, int dmabuf) {
 	PW.stream_update_params(c->stream, params, 1);
 }
 
+/* hq_flush requeues every queued (not yet taken) hand-off buffer. Loop thread: before the pool is
+ * renegotiated/removed (format change, stream leaving STREAMING), so no stale pw_buffer stays queued. */
+static void hq_flush(struct rpw_capture *c) {
+	pthread_mutex_lock(&c->enc_mu);
+	while (c->hq_n > 0) {
+		PW.stream_queue(c->stream, c->hq[c->hq_head].buf);
+		c->hq_head = (c->hq_head + 1) % 4;
+		c->hq_n--;
+	}
+	c->enc_pending = NULL;
+	pthread_mutex_unlock(&c->enc_mu);
+}
+
 static void on_param_changed(void *data, uint32_t id, const struct spa_pod *param) {
 	struct rpw_capture *c = data;
 	if (param == NULL || id != SPA_PARAM_Format)
@@ -1004,6 +1092,7 @@ static void on_param_changed(void *data, uint32_t id, const struct spa_pod *para
 		return;
 	}
 
+	hq_flush(c);
 	pthread_mutex_lock(&c->mu);
 	c->width = raw.size.width;
 	c->height = raw.size.height;
@@ -1049,6 +1138,8 @@ static int enc_ensure(struct rpw_capture *c) {
 			c->enc_src_h = c->height;
 		}
 	}
+	if (c->enc)
+		rva_enc_set_fast_scale(c->enc, c->ac_level > 0); /* auto overload step: cheap VPP downscale */
 	if (c->enc && (c->width != c->enc_src_w || c->height != c->enc_src_h)) {
 		/* producer came back at another size: rebuild at the new coded size (fresh encoder => IDR) */
 		rva_enc_free(c->enc);
@@ -1095,6 +1186,7 @@ static int enc_ensure(struct rpw_capture *c) {
 				c->enc_src_w = c->width;
 				c->enc_src_h = c->height;
 				c->enc_maxh = want_maxh;
+				rva_enc_set_fast_scale(c->enc, c->ac_level > 0);
 			}
 		}
 	}
@@ -1104,8 +1196,251 @@ static int enc_ensure(struct rpw_capture *c) {
 /* enc_emit_au hands one encoded AU downstream: the native sender (non-blocking; it owns its bounded
  * queue + drop + IDR callback) or the Go AU ring. A post-encode ring miss (byte cap only - room was
  * checked pre-encode) drops the AU and forces ONE IDR. Encode thread. */
-static void enc_emit_au(struct rpw_capture *c, rm_sender *tx, unsigned char *au, int aulen, int kf, long long pts) {
+/* ---- auto coded-size controller (encode thread; native) ----------------------------------------------
+ * When the GPU cannot sustain the encode next to the games, an evenly paced lower CODED size beats 4K
+ * with random repeated frames. Signal: capture hand-off drops (the encoder fell behind past the FIFO).
+ * Down: drop rate > down_pmille over the last win_s seconds -> next level (h, 5/6 h, 2/3 h, 1/2 h; the
+ * nominal geometry is unchanged, the receiver upscales). Up: no drop and the hand-off FIFO never filled
+ * for up_s seconds -> one level up. Anti-flap: a step-down within 60 s of a step-up doubles up_s (cap
+ * 600 s); 10 min stable resets it. Windows restart after every step (encoder rebuild = IDR transient).
+ * Env: RPW_AUTOCAP=0 disables; RPW_AUTOCAP_DOWN_PCT (0.5), RPW_AUTOCAP_WIN_S (5), RPW_AUTOCAP_UP_S (30). */
+#define AC_LEVELS 4
+#define AC_WIN_MAX 30
+
+static int ac_level_h(int src_h, int level) {
+	static const int num[AC_LEVELS] = {6, 5, 4, 3}; /* x/6: 1, 5/6, 2/3, 1/2 */
+	if (level <= 0 || src_h <= 0)
+		return 0; /* 0 = native */
+	return (src_h * num[level] / 6) & ~1;
+}
+
+/* ac_apply_cap: effective coded-height cap = the tighter of the receiver's (rx_maxh) and auto's. Under mu. */
+static void ac_apply_cap_locked(struct rpw_capture *c) {
+	int a = ac_level_h(c->height, c->ac_level), r = c->rx_maxh, eff = r;
+	if (a > 0 && (eff <= 0 || a < eff))
+		eff = a;
+	c->pending_maxh = eff;
+}
+
+static void ac_init(struct rpw_capture *c) {
+	const char *e = getenv("RPW_AUTOCAP");
+	c->ac_on = !(e && !strcmp(e, "0"));
+	e = getenv("RPW_AUTOCAP_DOWN_PCT");
+	c->ac_down_pmille = e ? (int)(atof(e) * 10 + 0.5) : 5;
+	e = getenv("RPW_AUTOCAP_WIN_S");
+	c->ac_win_s = e ? atoi(e) : 5;
+	if (c->ac_win_s < 1)
+		c->ac_win_s = 1;
+	if (c->ac_win_s > AC_WIN_MAX)
+		c->ac_win_s = AC_WIN_MAX;
+	e = getenv("RPW_AUTOCAP_UP_S");
+	c->ac_up_base_s = e ? atoi(e) : 30;
+	if (c->ac_up_base_s < 5)
+		c->ac_up_base_s = 5;
+	c->ac_up_s = c->ac_up_base_s;
+}
+
+static void ac_reset_windows(struct rpw_capture *c, long long now) {
+	memset(c->ac_drops, 0, sizeof(c->ac_drops));
+	memset(c->ac_arr, 0, sizeof(c->ac_arr));
+	c->ac_nwin = 0;
+	c->ac_sec_start = now;
+	c->ac_cap0 = c->cap_frames;
+	c->ac_drop0 = c->cap_drops;
+	c->ac_ok_since = now;
+}
+
+static void ac_step(struct rpw_capture *c, long long now, int dir, const char *why) {
+	int nl = c->ac_level + dir;
+	if (nl < 0 || nl >= AC_LEVELS)
+		return;
+	c->ac_level = nl;
+	int h = ac_level_h(c->height, nl);
+	int w = h > 0 && c->height > 0 ? (c->width * h / c->height) & ~1 : c->width;
+	pthread_mutex_lock(&c->mu);
+	ac_apply_cap_locked(c);
+	snprintf(c->ac_reason, sizeof(c->ac_reason), "%s -> coded %dx%d", why, w, h > 0 ? h : c->height);
+	pthread_mutex_unlock(&c->mu);
+	if (dir < 0) {
+		c->ac_last_up = now;
+		c->ac_probe = 1; /* judged on a short window until it has held for win_s */
+	} else {
+		c->ac_probe = 0;
+		if (c->ac_last_up && now - c->ac_last_up < 60000000000LL) { /* stepped up into overload: back off */
+			c->ac_up_s *= 2;
+			if (c->ac_up_s > 600)
+				c->ac_up_s = 600;
+		}
+		c->ac_last_down = now;
+	}
+	atomic_fetch_add_explicit(&c->ac_gen, 1, memory_order_release);
+	ac_reset_windows(c, now);
+	c->ac_settle = 2; /* skip the encoder-rebuild transient (IDR, first frames) */
+}
+
+/* ac_tick runs once per real frame on the encode thread; evaluates once per second. */
+static void ac_tick(struct rpw_capture *c, long long now) {
+	if (!c->ac_on || c->height <= 0)
+		return;
+	if (!c->ac_sec_start) {
+		ac_reset_windows(c, now);
+		return;
+	}
+	if (now - c->ac_sec_start < 1000000000LL)
+		return;
+	long dr = c->cap_drops - c->ac_drop0, cf = c->cap_frames - c->ac_cap0;
+	pthread_mutex_lock(&c->enc_mu);
+	int peak = c->hq_win_peak;
+	c->hq_win_peak = c->hq_n;
+	pthread_mutex_unlock(&c->enc_mu);
+	if (c->ac_settle > 0) { /* post-step settle second: not judged */
+		c->ac_settle--;
+		c->ac_sec_start = now;
+		c->ac_cap0 = c->cap_frames;
+		c->ac_drop0 = c->cap_drops;
+		c->ac_ok_since = now;
+		return;
+	}
+	int i = c->ac_nwin % AC_WIN_MAX;
+	c->ac_drops[i] = dr;
+	c->ac_arr[i] = cf + dr;
+	c->ac_nwin++;
+	c->ac_sec_start = now;
+	c->ac_cap0 = c->cap_frames;
+	c->ac_drop0 = c->cap_drops;
+	if (dr > 0 || peak >= c->hq_max)
+		c->ac_ok_since = now;
+	if (c->ac_last_down && now - c->ac_last_down > 600000000000LL)
+		c->ac_up_s = c->ac_up_base_s; /* 10 min without a step-down: forget the back-off */
+	/* right after a step-up the probe judges on a 2 s window: an up-probe into overload costs ~2 s of
+	 * drops, not win_s (the dwell then doubles) */
+	int win = (c->ac_probe && c->ac_win_s > 2) ? 2 : c->ac_win_s;
+	if (c->ac_probe && c->ac_nwin >= c->ac_win_s)
+		c->ac_probe = 0; /* the up-step held a full window: normal judging */
+	if (c->ac_nwin >= win) {
+		long sd = 0, sa = 0;
+		for (int k = 0; k < win; k++) {
+			int j = (c->ac_nwin - 1 - k) % AC_WIN_MAX;
+			sd += c->ac_drops[j];
+			sa += c->ac_arr[j];
+		}
+		if (sa > 0 && sd * 1000 > (long)c->ac_down_pmille * sa && c->ac_level + 1 < AC_LEVELS) {
+			char why[96];
+			snprintf(why, sizeof(why), "auto: encoder overload (%.1f%% capture drops over %d s)",
+				100.0 * (double)sd / (double)sa, win);
+			ac_step(c, now, +1, why);
+			return;
+		}
+	}
+	if (c->ac_level > 0 && now - c->ac_ok_since >= (long long)c->ac_up_s * 1000000000LL) {
+		char why[96];
+		snprintf(why, sizeof(why), "auto: headroom back (no drops for %d s)", c->ac_up_s);
+		ac_step(c, now, -1, why);
+	}
+}
+
+/* ---- source-static ("frozen picture") detector: native, no pixel reads ---------------------------------
+ * A source that keeps delivering the SAME picture (VRChat hitching on a world/avatar load while
+ * Spout2PW keeps publishing at 60 fps) encodes as a run of near-empty P-frames. A run of >= FZ_MIN_RUN
+ * non-key AUs each below max(64, p75/12) bytes (p75 of the last 64 non-key AUs, real
+ * frames only) is one freeze event: count, duration (PTS span), wall time, and whether the source
+ * DELIVERED frames throughout (every AU from a new buffer = the picture itself froze) or our cadence
+ * repeats filled in (the source stopped delivering). Keyframes inside a run are ignored (GOP IDRs). */
+#define FZ_MIN_RUN 12
+#define FZ_HIST 64
+
+static int fz_median(struct rpw_capture *c) {
+	int n = c->fz_hn < FZ_HIST ? c->fz_hn : FZ_HIST, t[FZ_HIST];
+	if (n < 16)
+		return 0;
+	memcpy(t, c->fz_hist, sizeof(int) * n);
+	for (int i = 1; i < n; i++) { /* insertion sort, 64 ints, once per 16 AUs */
+		int v = t[i], j = i - 1;
+		while (j >= 0 && t[j] > v) {
+			t[j + 1] = t[j];
+			j--;
+		}
+		t[j + 1] = v;
+	}
+	return t[n * 3 / 4]; /* p75: a 30 fps source doubled to 60 makes half the AUs near-empty duplicates */
+}
+
+static void fz_end_run(struct rpw_capture *c) {
+	/* qualifies: >= FZ_MIN_RUN small AUs incl. >= 8 consecutive near-equal sizes (CBR keeps refining a
+	 * static picture for a few frames, then emits the same few-KB skip frame; real low motion varies) */
+	if (c->fz_run >= FZ_MIN_RUN && c->fz_flat_max >= 8 && c->enc_fps > 0) {
+		long long ms = (c->fz_last_pts - c->fz_first_pts) / 1000000 + 1000 / c->enc_fps;
+		pthread_mutex_lock(&c->mu);
+		c->fz_count++;
+		c->fz_last_ms = ms;
+		if (ms > c->fz_longest_ms)
+			c->fz_longest_ms = ms;
+		c->fz_last_wall = c->fz_run_wall;
+		c->fz_last_delivered = c->fz_run_repeats == 0;
+		c->fz_last_repeats = c->fz_run_repeats;
+		pthread_mutex_unlock(&c->mu);
+	}
+	c->fz_run = 0;
+	c->fz_run_repeats = 0;
+	c->fz_flat = 0;
+	c->fz_flat_max = 0;
+}
+
+static void fz_au(struct rpw_capture *c, int aulen, int kf, long long pts, int real) {
+	if (kf)
+		return;
+	if (c->fz_n_since_med++ >= 16) {
+		c->fz_med = fz_median(c);
+		c->fz_n_since_med = 0;
+	}
+	int thr = c->fz_med / 12;
+	if (thr < 64)
+		thr = 64;
+	if (c->fz_dbg && aulen < thr * 2)
+		fprintf(stderr, "FZDBG len=%d thr=%d p75=%d real=%d run=%d\n", aulen, thr, c->fz_med, real, c->fz_run);
+	if (c->fz_med > 0 && aulen < thr) {
+		if (c->fz_run++ == 0) {
+			struct timespec w;
+			clock_gettime(CLOCK_REALTIME, &w);
+			c->fz_run_wall = (long long)w.tv_sec * 1000 + w.tv_nsec / 1000000;
+			c->fz_first_pts = pts;
+		}
+		c->fz_last_pts = pts;
+		c->fz_run_repeats += !real;
+		int tol = aulen / 50 > 32 ? aulen / 50 : 32; /* a frozen picture converges to a FLAT size series */
+		int dlen = aulen > c->fz_prev_len ? aulen - c->fz_prev_len : c->fz_prev_len - aulen;
+		c->fz_flat = (c->fz_run > 1 && dlen <= tol) ? c->fz_flat + 1 : 0;
+		if (c->fz_flat > c->fz_flat_max)
+			c->fz_flat_max = c->fz_flat;
+		c->fz_prev_len = aulen;
+		return;
+	}
+	fz_end_run(c);
+	if (real) { /* median of real content only */
+		c->fz_hist[c->fz_hn % FZ_HIST] = aulen;
+		c->fz_hn++;
+	}
+}
+
+/* enc_mark_steps folds the encoder's last-call step timings into the step histograms. */
+static void enc_mark_steps(struct rpw_capture *c) {
+	long long st[RVA_NSTEP];
+	rva_enc_last_steps(c->enc, st);
+	for (int i = 0; i < RVA_NSTEP; i++)
+		rpw_uhist_add(&c->h_step[i], st[i]);
+}
+
+static void enc_emit_au(struct rpw_capture *c, rm_sender *tx, unsigned char *au, int aulen, int kf, long long pts, int real) {
 	rpw_hist_mark(&c->h_enc, mono_ns());
+	fz_au(c, aulen, kf, pts, real);
+	if (c->last_emit_pts > 0 && c->enc_fps > 0) { /* wall cadence hides a skipped source frame; PTS does not */
+		long long period = 1000000000LL / c->enc_fps, d = pts - c->last_emit_pts;
+		if (d > period * 3 / 2) {
+			c->pts_gaps++;
+			c->pts_skipped += (d + period / 2) / period - 1;
+		}
+	}
+	c->last_emit_pts = pts;
 	c->enc_bytes += aulen;
 	if (kf)
 		c->enc_keyframes++;
@@ -1184,20 +1519,27 @@ static void *enc_thread_main(void *arg) {
 			if (pthread_cond_timedwait(&c->enc_cv, &c->enc_mu, &ts) != 0 && !c->enc_pending)
 				break; /* deadline */
 		}
-		struct pw_buffer *buf = c->enc_pending;
-		c->enc_pending = NULL;
+		struct rpw_pend pe;
+		memset(&pe, 0, sizeof(pe));
+		if (c->hq_n > 0) { /* pop the OLDEST queued frame */
+			pe = c->hq[c->hq_head];
+			c->hq_head = (c->hq_head + 1) % 4;
+			c->hq_n--;
+		}
+		c->enc_pending = c->hq_n > 0 ? c->hq[c->hq_head].buf : NULL;
+		struct pw_buffer *buf = pe.buf;
 		int stop = c->enc_stop;
-		int np = c->enc_p_np, fds[RPW_MAX_PLANES];
+		int np = pe.np, fds[RPW_MAX_PLANES];
 		unsigned off[RPW_MAX_PLANES], str[RPW_MAX_PLANES];
 		for (int p = 0; p < np; p++) {
-			fds[p] = c->enc_p_fds[p];
-			off[p] = c->enc_p_off[p];
-			str[p] = c->enc_p_str[p];
+			fds[p] = pe.fds[p];
+			off[p] = pe.off[p];
+			str[p] = pe.str[p];
 		}
-		uint32_t fourcc = c->enc_p_fourcc;
-		uint64_t mod = c->enc_p_mod;
-		int w = c->enc_p_w, h = c->enc_p_h, flip = c->enc_p_flip;
-		long long pts = c->enc_p_pts;
+		uint32_t fourcc = pe.fourcc;
+		uint64_t mod = pe.mod;
+		int w = pe.w, h = pe.h, flip = pe.flip;
+		long long pts = pe.pts;
 		rm_sender *tx = c->native_tx; /* native-TX switch, read under enc_mu */
 		pthread_mutex_unlock(&c->enc_mu);
 
@@ -1220,6 +1562,7 @@ static void *enc_thread_main(void *arg) {
 				continue;
 			int was_pend = enc_pend;
 			int rc = was_pend ? rva_enc_flush(c->enc, &au, &aulen, &kf) : rva_enc_repeat(c->enc, idr, &au, &aulen, &kf);
+			enc_mark_steps(c);
 			enc_pend = 0;
 			long long tn = mono_ns();
 			t_emit = (dl && tn - dl < period) ? dl : tn; /* stay on the ideal grid (no encode-time drift) */
@@ -1230,7 +1573,7 @@ static void *enc_thread_main(void *arg) {
 				last_pts = apts;
 				if (!was_pend)
 					c->repeats++;
-				enc_emit_au(c, tx, au, aulen, kf, apts);
+				enc_emit_au(c, tx, au, aulen, kf, apts, was_pend);
 			}
 			continue;
 		}
@@ -1261,6 +1604,12 @@ static void *enc_thread_main(void *arg) {
 				if (pts <= 0)
 					pts = now;
 				int rc = rva_enc_frame(c->enc, fourcc, mod, w, h, np, fds, off, str, flip, idr, &au, &aulen, &kf);
+				enc_mark_steps(c);
+				if (c->slow_us > 0 && c->height > 0) { /* test hook: encode cost ~ coded pixels (overload sim) */
+					long long d = (long long)c->slow_us * c->coded_h / c->height * c->coded_h / c->height;
+					struct timespec sl = {(time_t)(d / 1000000), (long)(d % 1000000) * 1000};
+					nanosleep(&sl, NULL);
+				}
 				if (rc == 0) {
 					c->import_ok = 1;
 					rva_enc_feedback(c->enc, &c->fb_present, &c->fb_avg_qp, &c->fb_rate_limited);
@@ -1272,15 +1621,17 @@ static void *enc_thread_main(void *arg) {
 						long long apts = prev_pts > last_pts ? prev_pts : last_pts + 1;
 						last_pts = apts;
 						t_emit = now;
-						enc_emit_au(c, tx, au, aulen, kf, apts);
+						enc_emit_au(c, tx, au, aulen, kf, apts, 1);
 					}
 					if (sync_now) {
 						/* first frame / after a gap: emit THIS frame now, not one period later */
-						if (rva_enc_flush(c->enc, &au, &aulen, &kf) == 0 && aulen > 0) {
+						int frc = rva_enc_flush(c->enc, &au, &aulen, &kf);
+						enc_mark_steps(c);
+						if (frc == 0 && aulen > 0) {
 							long long apts = pend_pts > last_pts ? pend_pts : last_pts + 1;
 							last_pts = apts;
 							t_emit = mono_ns();
-							enc_emit_au(c, tx, au, aulen, kf, apts);
+							enc_emit_au(c, tx, au, aulen, kf, apts, 1);
 						}
 						enc_pend = 0;
 					}
@@ -1294,6 +1645,10 @@ static void *enc_thread_main(void *arg) {
 		PW.tl_lock(c->loop);
 		PW.stream_queue(c->stream, buf);
 		PW.tl_unlock(c->loop);
+		long long fr_us = (mono_ns() - now) / 1000;
+		rpw_uhist_add(&c->h_step[RVA_NSTEP], fr_us);
+		atomic_fetch_add_explicit(&c->busy_us, fr_us, memory_order_relaxed);
+		ac_tick(c, now);
 	}
 	return NULL;
 }
@@ -1400,24 +1755,33 @@ static void on_process(void *data) {
 					int np = sb->n_datas < RPW_MAX_PLANES ? (int)sb->n_datas : RPW_MAX_PLANES;
 					c->cap_frames++; /* captured frames handed to the encoder stage (CapFPS) */
 					pthread_mutex_lock(&c->enc_mu);
-					if (c->enc_pending) {
-						PW.stream_queue(c->stream, c->enc_pending);
+					if (c->hq_n >= c->hq_max) { /* sustained overload: drop the OLDEST queued frame */
+						PW.stream_queue(c->stream, c->hq[c->hq_head].buf);
+						c->hq_head = (c->hq_head + 1) % 4;
+						c->hq_n--;
 						c->cap_drops++;
 						c->dropped++;
 					}
-					c->enc_p_np = np;
+					struct rpw_pend *pe = &c->hq[(c->hq_head + c->hq_n) % 4];
+					pe->np = np;
 					for (int p = 0; p < np; p++) {
-						c->enc_p_fds[p] = sb->datas[p].fd;
-						c->enc_p_off[p] = sb->datas[p].chunk ? sb->datas[p].chunk->offset : 0;
-						c->enc_p_str[p] = sb->datas[p].chunk ? sb->datas[p].chunk->stride : 0;
+						pe->fds[p] = sb->datas[p].fd;
+						pe->off[p] = sb->datas[p].chunk ? sb->datas[p].chunk->offset : 0;
+						pe->str[p] = sb->datas[p].chunk ? sb->datas[p].chunk->stride : 0;
 					}
-					c->enc_p_fourcc = spa_to_drm_fourcc(c->fmt);
-					c->enc_p_mod = c->modifier;
-					c->enc_p_w = c->width;
-					c->enc_p_h = c->height;
-					c->enc_p_flip = want_flip(c, sb);
-					c->enc_p_pts = gpts; /* capture PTS, else arrival (monotonic) - never 0 */
-					c->enc_pending = last; /* handed off; the thread requeues it */
+					pe->fourcc = spa_to_drm_fourcc(c->fmt);
+					pe->mod = c->modifier;
+					pe->w = c->width;
+					pe->h = c->height;
+					pe->flip = want_flip(c, sb);
+					pe->pts = gpts; /* capture PTS, else arrival (monotonic) - never 0 */
+					pe->buf = last;  /* handed off; the thread requeues it */
+					c->hq_n++;
+					if (c->hq_n > c->hq_hiwater)
+						c->hq_hiwater = c->hq_n;
+					if (c->hq_n > c->hq_win_peak)
+						c->hq_win_peak = c->hq_n;
+					c->enc_pending = c->hq[c->hq_head].buf;
 					pthread_cond_signal(&c->enc_cv);
 					pthread_mutex_unlock(&c->enc_mu);
 					return;
@@ -1442,6 +1806,8 @@ static void on_state_changed(void *data, enum pw_stream_state old, enum pw_strea
 	struct rpw_capture *c = data;
 	DBG("state: %d%s%s\n", state, error ? " err=" : "", error ? error : "");
 	atomic_store_explicit(&c->streaming, state == PW_STREAM_STATE_STREAMING, memory_order_relaxed);
+	if (state != PW_STREAM_STATE_STREAMING && c->stream)
+		hq_flush(c);
 	/* ERROR means the producer vanished mid-stream (VRChat/producer restart) and AUTOCONNECT does
 	 * NOT recover from ERROR - flag a reconnect; rpw_wait_frame (Go thread) re-arms the stream. */
 	if (state == PW_STREAM_STATE_ERROR) {
@@ -1530,6 +1896,16 @@ struct rpw_capture *rpw_start(const char *target_node) {
 	c->flip_default = getenv("RPW_FLIP_V") != NULL; /* default no-flip (Spout2PW/DX, PipeWire convention) */
 	c->pending_maxh = -1;                           /* -1 = no live coded-height cap pending */
 	c->enc_sync = getenv("RPW_ENC_SYNC") != NULL;
+	c->fz_dbg = getenv("RPW_FZ_DEBUG") != NULL;
+	c->slow_us = getenv("RPW_ENC_SLOW_US") ? atoi(getenv("RPW_ENC_SLOW_US")) : 0;
+	{
+		const char *q = getenv("RPW_CAP_QUEUE"); /* 1 = the old single newest-wins slot */
+		c->hq_max = q ? atoi(q) : 3;
+		if (c->hq_max < 1)
+			c->hq_max = 1;
+		if (c->hq_max > 4)
+			c->hq_max = 4;
+	}
 
 	const char *rn = getenv("RPW_EGL_DEVICE");
 	egl_setup_display(c, rn && *rn ? rn : "/dev/dri/renderD128");
@@ -1636,6 +2012,8 @@ int rpw_set_encode(struct rpw_capture *c, int codec, int kbps, int max_h, int fp
 	c->enc_codec = codec;
 	c->enc_kbps = kbps;
 	c->enc_maxh = max_h;
+	c->rx_maxh = max_h;
+	ac_init(c);
 	c->enc_quality_qp = quality_qp > 0 ? quality_qp : 0;
 	c->enc_fps = fps > 0 ? fps : 60;
 	if (node && *node) {
@@ -1687,6 +2065,8 @@ int rpw_wait_au(struct rpw_capture *c, unsigned char *dst, int cap, int *w, int 
 		ts.tv_sec++;
 		ts.tv_nsec -= 1000000000L;
 	}
+	if (atomic_load_explicit(&c->ring_head, memory_order_acquire) > 0)
+		atomic_store_explicit(&c->consumer_back, 1, memory_order_release);
 	for (;;) {
 		int n = au_ring_pop(c, dst, cap, w, h, keyframe, pts); /* lock-free fast path */
 		if (n != -3)
@@ -1768,7 +2148,42 @@ void rpw_set_cap_height(struct rpw_capture *c, int max_h) {
 	if (!c || max_h < 0)
 		return;
 	pthread_mutex_lock(&c->mu);
-	c->pending_maxh = max_h;
+	c->rx_maxh = max_h;
+	ac_apply_cap_locked(c); /* the tighter of the receiver's cap and the auto controller's */
+	pthread_mutex_unlock(&c->mu);
+}
+
+/* rpw_source_freezes reports the source-static detector: event count, last + longest duration (ms), the
+ * last one's wall-clock start (unix ms), whether the source delivered new buffers throughout (1 = the
+ * PICTURE froze, e.g. VRChat hitch) and how many cadence repeats filled it (> 0 = the source stalled). */
+void rpw_source_freezes(struct rpw_capture *c, long *count, long long *last_ms, long long *longest_ms,
+                        long long *last_wall_ms, int *delivered, int *repeats) {
+	if (!c)
+		return;
+	pthread_mutex_lock(&c->mu);
+	*count = c->fz_count;
+	*last_ms = c->fz_last_ms;
+	*longest_ms = c->fz_longest_ms;
+	*last_wall_ms = c->fz_last_wall;
+	*delivered = c->fz_last_delivered;
+	*repeats = c->fz_last_repeats;
+	pthread_mutex_unlock(&c->mu);
+}
+
+/* rpw_autocap reports the auto coded-size controller: level (0 = native), active coded height (0 =
+ * native), change generation, last reason. */
+void rpw_autocap(struct rpw_capture *c, int *level, int *coded_h, int *gen, char *reason, int n) {
+	if (!c)
+		return;
+	pthread_mutex_lock(&c->mu);
+	if (level)
+		*level = c->ac_level;
+	if (coded_h)
+		*coded_h = ac_level_h(c->height, c->ac_level);
+	if (gen)
+		*gen = atomic_load(&c->ac_gen);
+	if (reason && n > 0)
+		snprintf(reason, (size_t)n, "%s", c->ac_reason);
 	pthread_mutex_unlock(&c->mu);
 }
 
@@ -1783,6 +2198,18 @@ long rpw_ring_skips(struct rpw_capture *c) { return c ? c->ring_skips : 0; }
 long rpw_start_holds(struct rpw_capture *c) { return c ? c->start_holds : 0; }
 long rpw_forced_idrs(struct rpw_capture *c) { return c ? c->forced_idrs : 0; }
 long rpw_enc_keyframes(struct rpw_capture *c) { return c ? c->enc_keyframes : 0; }
+void rpw_step_stats(struct rpw_capture *c, int step, rpw_stage_snap *out) {
+	if (!out)
+		return;
+	if (!c || step < 0 || step > RVA_NSTEP) {
+		memset(out, 0, sizeof(*out));
+		return;
+	}
+	rpw_uhist_snap(&c->h_step[step], out);
+}
+long long rpw_busy_us(struct rpw_capture *c) { return c ? atomic_load(&c->busy_us) : 0; }
+long rpw_pts_gaps(struct rpw_capture *c) { return c ? c->pts_gaps : 0; }
+long rpw_pts_skipped(struct rpw_capture *c) { return c ? c->pts_skipped : 0; }
 long long rpw_enc_bytes(struct rpw_capture *c) { return c ? c->enc_bytes : 0; }
 void rpw_native_stages(struct rpw_capture *c, rpw_stage_snap *enc, rpw_stage_snap *tx) {
 	if (!c) {

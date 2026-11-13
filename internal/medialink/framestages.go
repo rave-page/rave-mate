@@ -137,6 +137,9 @@ type StageStats struct {
 	DecSubmit  StageSnapshot `json:"dec,omitempty"`
 	EncDone    StageSnapshot `json:"enc,omitempty"`
 	TxQueue    StageSnapshot `json:"tx,omitempty"`
+	// Publish: native receive route - decoded frame landed in the destination (measured in the child,
+	// the acceptance metric: p99 <= 18 ms, zero > 25 ms on a clean 4K60 run).
+	Publish StageSnapshot `json:"pub,omitempty"`
 }
 
 // Snapshot captures all stages off the realtime thread.

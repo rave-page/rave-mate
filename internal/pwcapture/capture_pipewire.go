@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -355,7 +356,47 @@ func (s *pwSource) PipeStats() medialink.PipelineStats {
 		QualityTarget: quality, BudgetKbps: kbps,
 		Feedback: medialink.EncoderFeedback{
 			Present: present != 0, AvgQP: float64(avgQP), RateLimited: rateLimited != 0},
+		DegradeReason: s.autocapReason(),
+		SourceNote:    s.freezeNote(),
 	}
+}
+
+// freezeStats reads the native source-static detector.
+func (s *pwSource) freezeStats() (count int64, lastMs, longestMs int64, lastAt time.Time, delivered bool, repeats int) {
+	var n C.long
+	var lm, lg, lw C.longlong
+	var dv, rp C.int
+	C.rpw_source_freezes(s.h, &n, &lm, &lg, &lw, &dv, &rp)
+	return int64(n), int64(lm), int64(lg), time.UnixMilli(int64(lw)), dv != 0, int(rp)
+}
+
+// freezeNote renders the frozen-picture detector for ctl ("source:" line); "" while none seen.
+func (s *pwSource) freezeNote() string {
+	n, last, longest, at, delivered, rep := s.freezeStats()
+	if n == 0 {
+		return ""
+	}
+	cause := "frames delivered, picture static: the SOURCE hitched (e.g. VRChat loading)"
+	if !delivered {
+		cause = fmt.Sprintf("source stopped delivering (%d cadence repeats filled it)", rep)
+	}
+	return fmt.Sprintf("picture froze %dx, last %d ms at %s (%s), longest %d ms", n, last, at.Format("15:04:05"), cause, longest)
+}
+
+// autocapState reads the native auto coded-size controller (level 0 = native).
+func (s *pwSource) autocapState() (level, codedH, gen int, reason string) {
+	var l, h, g C.int
+	var buf [160]C.char
+	C.rpw_autocap(s.h, &l, &h, &g, &buf[0], C.int(len(buf)))
+	return int(l), int(h), int(g), C.GoString(&buf[0])
+}
+
+// autocapReason is the ctl "degraded:" line while the auto controller holds a lower coded size.
+func (s *pwSource) autocapReason() string {
+	if lvl, _, _, why := s.autocapState(); lvl > 0 {
+		return why
+	}
+	return ""
 }
 
 // AttachNativeTX implements medialink.NativeTXSource: hand the encode thread's AU stream to the native
@@ -510,15 +551,41 @@ func (t *pwNativeTX) watch() {
 // encTelemetry logs one line per interval with the engine, coded size, capture/encode fps, dropped,
 // import path and render node - the log-only diagnosis channel (item 7), complete on a HEALTHY route.
 func (s *pwSource) encTelemetry() {
-	t := time.NewTicker(10 * time.Second)
+	t := time.NewTicker(time.Second) // 1 Hz: auto-cap step events; the full line every 10 s
 	defer t.Stop()
+	lastBusy, lastT := int64(C.rpw_busy_us(s.h)), time.Now()
+	lastGen, tick := 0, 0
+	var lastFz int64
+	var lastFzLog time.Time
 	for {
 		select {
 		case <-s.done:
 			return
 		case <-t.C:
 		}
+		if n, last, _, at, delivered, rep := s.freezeStats(); n != lastFz {
+			if last >= 250 && s.log != nil && time.Since(lastFzLog) >= 10*time.Second { // rate-limited: 1 line / 10 s
+				lastFzLog = time.Now()
+				s.log.Info(source, "source picture froze", map[string]any{
+					"node": s.node, "ms": last, "at": at.Format("15:04:05.000"), "count": n,
+					"sourceDelivered": delivered, "cadenceRepeats": rep, "unloggedSince": n - lastFz - 1})
+			}
+			lastFz = n
+		}
+		if lvl, h, gen, why := s.autocapState(); gen != lastGen {
+			lastGen = gen
+			if s.log != nil {
+				s.log.Info(source, "encoder coded size stepped (auto)", map[string]any{
+					"node": s.node, "level": lvl, "codedH": h, "reason": why})
+			}
+		}
+		if tick++; tick%10 != 0 {
+			continue
+		}
 		st := s.PipeStats()
+		busy, now := int64(C.rpw_busy_us(s.h)), time.Now()
+		busyPct := float64(busy-lastBusy) / 10 / float64(now.Sub(lastT).Microseconds()) * 1000
+		lastBusy, lastT = busy, now
 		cw, ch := int(C.rpw_coded_w(s.h)), int(C.rpw_coded_h(s.h))
 		importPath := "egl-readback"
 		if C.rpw_import_ok(s.h) != 0 {
@@ -535,9 +602,52 @@ func (s *pwSource) encTelemetry() {
 				"reconnects": int64(C.rpw_reconnects(s.h)), "node": s.node,
 				"repeats": int64(C.rpw_repeats(s.h)), "ringSkips": int64(C.rpw_ring_skips(s.h)),
 				"startHolds": int64(C.rpw_start_holds(s.h)), "forcedIDRs": int64(C.rpw_forced_idrs(s.h)),
-				"dmabufOffer": s.eglReady()}) // false = SHM-only offer: a dmabuf producer cannot link
+				"dmabufOffer": s.eglReady(), // false = SHM-only offer: a dmabuf producer cannot link
+				// output-visible loss (a skipped source frame keeps the wall cadence, only PTS shows it)
+				"ptsSkipped": int64(C.rpw_pts_skipped(s.h)),
+				"encBusyPct": fmtf(busyPct), "steps": s.stepSummary(), "sourceFreezes": s.freezeNote()})
 		}
 	}
+}
+
+// stepNames labels rpw_step_stats indices (RVA_ST_* order, then the whole real frame).
+var stepNames = [...]string{"import", "vpp", "submit", "sync", "copy", "vppgpu", "frame"}
+
+// stepStats snapshots the encode-thread per-step durations (ms).
+func (s *pwSource) stepStats() []medialink.StageSnapshot {
+	out := make([]medialink.StageSnapshot, len(stepNames))
+	for i := range stepNames {
+		var c C.rpw_stage_snap
+		C.rpw_step_stats(s.h, C.int(i), &c)
+		out[i] = stageSnap(&c)
+	}
+	return out
+}
+
+// stepSummary renders the per-step p50/p99/max (ms) for the telemetry line.
+func (s *pwSource) stepSummary() string {
+	var b strings.Builder
+	for i, st := range s.stepStats() {
+		if st.Count == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "%s=%.1f/%.1f/%.1f ", stepNames[i], st.P50Ms, st.P99Ms, st.MaxMs)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// capFramesCount / ptsSkipped expose the capture + output-loss counters to in-package tests.
+func (s *pwSource) capFramesCount() int64 { return int64(C.rpw_cap_frames(s.h)) }
+func (s *pwSource) ptsSkipped() int64     { return int64(C.rpw_pts_skipped(s.h)) }
+
+// capDropsCount exposes the capture hand-off drop counter to in-package tests.
+func (s *pwSource) capDropsCount() int64 { return int64(C.rpw_cap_drops(s.h)) }
+
+// logVACaps prints the VA encode/VPP capabilities (RGB input, quality range, context priority).
+func logVACaps(node string) {
+	cn := C.CString(node)
+	defer C.free(unsafe.Pointer(cn))
+	C.rva_log_enc_caps(cn)
 }
 
 // fmtf is a tiny one-decimal formatter (avoids pulling fmt into the hot path).

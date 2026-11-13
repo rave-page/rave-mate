@@ -144,6 +144,7 @@ type ProcDecOpts struct {
 	HEVC       bool
 	KbpsHint   int
 	Dest       *DecodeDest
+	NullDecode bool
 }
 
 type ProcDecStats struct {
@@ -164,6 +165,8 @@ type ProcDecStats struct {
 	DecResizes  uint64
 	DecCodedW   int
 	DecCodedH   int
+	Mode        string
+	ModeText    string
 }
 
 // ProcDecSession is unavailable on this platform (no Zig MF decode child).
@@ -187,5 +190,19 @@ func (d *ProcDecSession) Name() string                           { return "" }
 func (d *ProcDecSession) IsHardware() bool                       { return false }
 func (d *ProcDecSession) Close()                                 {}
 
+// CodedCapHeight is always 0 here (no native decode).
+func (d *ProcDecSession) CodedCapHeight() int { return 0 }
+
+// SetKeyframeRequester is a no-op here.
+func (d *ProcDecSession) SetKeyframeRequester(func()) {}
+
 // NoteDecodeResizeGrace: no native decode destination to protect off Windows.
 func NoteDecodeResizeGrace() {}
+
+// Network source (child proto v5): Windows-only.
+func (d *ProcDecSession) NetCapable() bool             { return false }
+func (d *ProcDecSession) AttachNet(NetRXParams) error  { return ErrNetRXUnsupported }
+func (d *ProcDecSession) SendMeta([]byte) error        { return ErrNetRXUnsupported }
+func (d *ProcDecSession) NetStats() (NetRXStats, bool) { return NetRXStats{}, false }
+func (d *ProcDecSession) NetMeta() <-chan NetMeta      { return nil }
+func (d *ProcDecSession) Err() error                   { return nil }

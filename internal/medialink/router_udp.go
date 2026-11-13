@@ -136,7 +136,13 @@ func (rm *RouteManager) dialUDP(ctx context.Context, peer string, ans Answer, sa
 	if err != nil {
 		return nil, false
 	}
-	pc, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0}) // dedicated dialer socket
+	// Dedicated dialer socket. An IPv4 remote gets an AF_INET socket ("udp" + 0.0.0.0 is a dual-stack
+	// AF_INET6 socket on Windows): the native receiver it may be handed to speaks sockaddr_in only.
+	network := "udp"
+	if raddr.IP.To4() != nil {
+		network = "udp4"
+	}
+	pc, err := net.ListenUDP(network, &net.UDPAddr{IP: net.IPv4zero, Port: 0})
 	if err != nil {
 		return nil, false
 	}

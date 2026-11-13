@@ -81,12 +81,13 @@ func TestAdmitFailOpenWhenHeadroomAbsent(t *testing.T) {
 func TestAdmitReserveGate(t *testing.T) {
 	g := Geom{W: 3840, H: 2160, Codec: "h264"}
 	cost := Cost{MB: 300}
+	strict := Policy{Mode: ModeStrict}
 	// free 1200, reserve for 4K = 1152: 1200-300=900 < 1152 => deny.
-	if d := Admit(Inputs{Headroom: hr(1200, 12000)}, OpDecode, g, cost, Policy{}); d.Admit {
+	if d := Admit(Inputs{Headroom: hr(1200, 12000)}, OpDecode, g, cost, strict); d.Admit {
 		t.Fatalf("expected deny on tight headroom: %s", d.Reason)
 	}
 	// free 2000: 2000-300=1700 >= 1152 => admit (self unknown, cap axis skipped).
-	if d := Admit(Inputs{Headroom: hr(2000, 12000)}, OpDecode, g, cost, Policy{}); !d.Admit {
+	if d := Admit(Inputs{Headroom: hr(2000, 12000)}, OpDecode, g, cost, strict); !d.Admit {
 		t.Fatalf("expected admit on ample headroom: %s", d.Reason)
 	}
 }
@@ -216,8 +217,9 @@ func TestBudgetWiring(t *testing.T) {
 		Self:     func() (uint64, bool) { return selfMB, true },
 		Adapter:  func() Adapter { return Adapter{Vendor: "nvidia", Driver: "x"} },
 		Store:    NewCostStore("", nil),
+		Policy:   Policy{Mode: ModeStrict},
 	})
-	// 4K decode on 900 free => deny (reserve 1152).
+	// 4K decode on 900 free => deny (strict reserve 1152).
 	if d := b.AdmitDecode(3840, 2160, 60, "h264"); d.Admit {
 		t.Fatalf("expected deny at 900 free: %s", d.Reason)
 	}

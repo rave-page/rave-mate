@@ -470,6 +470,12 @@ func formatRoutes(stats []medialink.RouteStat) string {
 			sw = " (SOFTWARE - CPU)"
 		}
 		fmt.Fprintf(&b, "    codec=%s tier=%d engine=%s%s\n", engine, s.Tier, eng, sw)
+		if s.Pipe != nil && s.Pipe.DegradeReason != "" {
+			fmt.Fprintf(&b, "    degraded: %s\n", s.Pipe.DegradeReason) // incl. the adaptive decode mode (hw/cpu, VRAM, cap, last switch)
+		}
+		if s.Pipe != nil && s.Pipe.SourceNote != "" {
+			fmt.Fprintf(&b, "    source: %s\n", s.Pipe.SourceNote) // e.g. the sender's frozen-picture detector
+		}
 		// Geometry (coded vs nominal) + fps in/out.
 		if s.Pipe != nil {
 			fmt.Fprintf(&b, "    fps wire=%.0f out=%.0f  dropped=%d (rate-capped=%d) restarts=%d\n",
@@ -515,6 +521,11 @@ func formatRoutes(stats []medialink.RouteStat) string {
 				u.LossPct, float64(u.RTTns)/1e6, float64(u.OwdNs)/1e6, float64(u.OwdJitterNs)/1e6,
 				u.NacksSent, u.NacksRecv, u.Retransmits, u.ReasmDrops, u.PacerDepth, u.PacerDrops)
 		}
+		// Native receive path (socket -> playout -> decode -> publish inside the decode child).
+		if n := s.NativeRX; n != nil {
+			fmt.Fprintf(&b, "    native rx delivered=%d published=%d keyWaits=%d nack(recovered/expired)=%d/%d gapDrops=%d rebinds=%d decErrors=%d rxErrors=%d\n",
+				n.Delivered, n.Published, n.KeyWaits, n.NackRecovered, n.NackExpired, n.GapDrops, n.Rebinds, n.DecErrors, n.RxErrors)
+		}
 		// Jitter buffer (recv video).
 		if jb := s.JB; jb != nil {
 			fmt.Fprintf(&b, "    jitterbuf depth=%d buffered=%d lateRate=%.2f policyDrops=%d\n",
@@ -530,6 +541,7 @@ func formatRoutes(stats []medialink.RouteStat) string {
 			writeStage(&b, "dec", st.DecSubmit)  // decode submit (backpressure)
 			writeStage(&b, "enc", st.EncDone)    // encoded AU available (send)
 			writeStage(&b, "tx ", st.TxQueue)    // packetized + queued (send)
+			writeStage(&b, "pub", st.Publish)    // decoded frame published (native receive, in-child)
 		}
 	}
 	return b.String()
@@ -540,7 +552,15 @@ func (c *appControl) Routes() string {
 	if c.mediaCtl == nil {
 		return "media plane unavailable\n"
 	}
-	return formatRoutes(c.mediaCtl.Stats())
+	return formatRoutes(c.mediaCtl.Stats()) + c.holdsText()
+}
+
+// holdsText renders VRAM-held receives (empty when none or unsupported).
+func (c *appControl) holdsText() string {
+	if hr, ok := c.mediaRoutes.(mediaroute.HoldReporter); ok {
+		return mediaroute.FormatHolds(hr.Holds(), time.Now())
+	}
+	return ""
 }
 
 // MediaPerf reports the media-plane process's Go GC/scheduler pauses (STEP-0: whether the Go runtime

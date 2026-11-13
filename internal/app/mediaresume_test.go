@@ -34,7 +34,7 @@ func (f *fakeRecv) Testcard(string, int, int, int) (testcard.Report, error) {
 func (f *fakeRecv) StartReceive(peer, src string) (string, error) {
 	f.starts++
 	if f.held {
-		return "", errors.New("mediaroute: held: \"VRC\": VRAM budget refuses a new Spout sender - no offer sent")
+		return "", errors.New(`mediaroute: held: "VRC": VRAM budget refuses the receive - no offer sent |hold={"sender":"rave-mate link VRC","since":"2026-11-13T20:00:00Z","freeMB":140,"needMB":226,"requiredMB":290,"policy":"balanced","reason":"insufficient VRAM","nextRetry":"2026-11-13T20:00:02Z"}`)
 	}
 	// Models an in-flight offer: a receive entry exists immediately (Since now), not yet live/up.
 	f.recvs = append(f.recvs, mediaroute.Receive{Session: "sess", Peer: peer, SourceID: src, Since: time.Now()})
@@ -159,6 +159,9 @@ func TestReconcileHeldRechecksWithoutBackoff(t *testing.T) {
 	if f.starts != 1 || b.interval != reoffBase || time.Until(b.next) > reoffHeldRecheck {
 		t.Fatalf("held: starts=%d interval=%v next in %v", f.starts, b.interval, time.Until(b.next))
 	}
+	if hs := rr.Holds(); len(hs) != 1 || hs[0].FreeMB != 140 || hs[0].RequiredMB != 290 || hs[0].Policy != "balanced" {
+		t.Fatalf("hold numbers not surfaced daemon-side: %+v", hs)
+	}
 	rr.reconcile() // inside the recheck window: no call at all
 	if f.starts != 1 {
 		t.Fatalf("held recheck hammered: starts=%d", f.starts)
@@ -168,6 +171,9 @@ func TestReconcileHeldRechecksWithoutBackoff(t *testing.T) {
 	rr.reconcile()
 	if f.starts != 2 || len(f.recvs) != 1 {
 		t.Fatalf("admitted source not offered: starts=%d recvs=%d", f.starts, len(f.recvs))
+	}
+	if hs := rr.Holds(); len(hs) != 0 {
+		t.Fatalf("admitted source must clear its hold: %+v", hs)
 	}
 }
 

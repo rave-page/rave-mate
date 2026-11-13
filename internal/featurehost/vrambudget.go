@@ -6,11 +6,13 @@ import (
 	"time"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/decmode"
 	"rave.page/mate/internal/encoderscan"
 	"rave.page/mate/internal/gpubench"
 	"rave.page/mate/internal/gpubudget"
 	"rave.page/mate/internal/gpumem"
 	"rave.page/mate/internal/logbus"
+	"rave.page/mate/internal/mediaroute"
 	"rave.page/mate/internal/mfenc"
 	"rave.page/mate/internal/sysactivity"
 )
@@ -19,10 +21,34 @@ import (
 // mediaroute manager consumes. Decode + encode admission are installed directly into the mfenc seams.
 type VramBudget struct {
 	Budget      *gpubudget.Budget
-	AdmitSender func(w, h int) (allow bool, reason string, freeMB, reserveMB uint64)
-	// AdmitReceive is the pre-offer receive gate: a new sender AND its decoder must both fit, else the
-	// receive is held without offering (no capture/encode on the source PC).
-	AdmitReceive func(w, h, fps int) (allow bool, reason string, freeMB, reserveMB uint64)
+	AdmitSender func(w, h int) mediaroute.Admission
+	// AdmitReceive is the pre-offer receive gate: the decoder, plus a new sender and the receiver follow
+	// it triggers, judged as ONE need; refused => held without offering (no capture/encode on the source).
+	AdmitReceive func(w, h, fps int, newSender bool) mediaroute.Admission
+	// GovernorFloorMB is the receive rate-ladder floor for the active policy (gpubudget.GovernorFloorMB).
+	GovernorFloorMB uint64
+}
+
+// admission converts a budget decision for mediaroute.
+func admission(d gpubudget.Decision) mediaroute.Admission {
+	return mediaroute.Admission{Allow: d.Admit, Attempt: d.Attempt, Reason: d.Reason, Policy: string(d.Mode),
+		FreeMB: d.FreeMB, NeedMB: uint64(d.NeedMB + 0.5), RequiredMB: d.ReserveMB, Mode: d.DecodeMode}
+}
+
+// systemFloor is the live system headroom floor for the configured policy (strict: the balanced
+// default - strict only changes admission, the yield rule protects other apps the same way).
+func systemFloor(c config.MediaLinkFeature) uint64 {
+	pol, _ := PolicyFromConfig(c)
+	return gpubudget.SystemFloorMB(pol)
+}
+
+// PolicyFromConfig resolves the gpubudget policy from MediaLink config (unknown preset => balanced,
+// ok=false so the caller logs it once).
+func PolicyFromConfig(c config.MediaLinkFeature) (gpubudget.Policy, bool) {
+	mode, ok := gpubudget.ParseMode(c.VramPolicyName())
+	return gpubudget.Policy{Mode: mode, MarginMinMB: uint64(c.ResolvedVramMarginMB()),
+		ReserveCfgMB:  uint64(c.ResolvedVramReserveMB()),
+		SystemFloorMB: uint64(max(c.VramSystemHeadroomMB, 0)), HardFloorMB: uint64(max(c.VramHardFloorMB, 0))}, ok
 }
 
 // WireVramBudget builds the shared VRAM budget for whichever process opens GPU sessions (the media
@@ -50,7 +76,10 @@ func WireVramBudget(liveCfg func() config.MediaLinkFeature, sampler gpumem.Sampl
 		})
 		return adp
 	}
-	pol := gpubudget.Policy{ReserveCfgMB: uint64(liveCfg().ResolvedVramReserveMB())}
+	pol, polOK := PolicyFromConfig(liveCfg())
+	if !polOK && log != nil {
+		log.Warn("gpubudget", "unknown mediaLink.vramPolicy - using balanced", map[string]any{"value": liveCfg().VramPolicyName()})
+	}
 	store := gpubudget.NewCostStore(costPath, func(m string) {
 		if log != nil {
 			log.Warn("gpubudget", m, nil)
@@ -64,6 +93,19 @@ func WireVramBudget(liveCfg func() config.MediaLinkFeature, sampler gpumem.Sampl
 		return mfenc.DecVerdict{Allow: d.Admit, Present: d.Present, FreeMB: d.FreeMB,
 			CostMB: d.CostMB, ReserveMB: d.ReserveMB, Reason: d.Reason}
 	}
+	// Adaptive HW/CPU decode (1e): software mode admitted on its own small cost; config read live.
+	mfenc.DecAdmitCPU = func(inW, inH, _, _, fps int) mfenc.DecVerdict {
+		d := b.AdmitLightCost(gpubudget.OpDecodeSW, gpubudget.Geom{W: inW, H: inH, FPS: fps}, mfenc.CPUDecodeCostMB(inW, inH))
+		return mfenc.DecVerdict{Allow: d.Admit, Present: d.Present, FreeMB: d.FreeMB, CostMB: d.CostMB, ReserveMB: d.ReserveMB, Reason: d.Reason}
+	}
+	mfenc.DecCPUFallback = func() (bool, int, decmode.Config) {
+		c := liveCfg()
+		return c.CPUDecodeFallbackEnabled(), decmode.Threads(c.CPUDecodeThreads, 0), decmode.Config{
+			PromoteBufferMB: uint64(max(c.HWPromoteBufferMB, 0)),
+			Dwell:           time.Duration(max(c.HWPromoteDwellSec, 0)) * time.Second,
+			SystemFloorMB:   systemFloor(c), // a running HW decoder yields below it (starvation demotion)
+		}
+	}
 	mfenc.DecObserve = func(inW, inH, fps int, hevc bool, mb float64) {
 		b.Observe(gpubudget.OpDecode, gpubudget.Geom{W: inW, H: inH, FPS: fps, Codec: decCodec(hevc)}, mb)
 	}
@@ -75,21 +117,30 @@ func WireVramBudget(liveCfg func() config.MediaLinkFeature, sampler gpumem.Sampl
 		b.Observe(gpubudget.OpEncode, gpubudget.Geom{W: outW, H: outH, FPS: fps, Codec: codec}, mb)
 	}
 	return &VramBudget{
-		Budget: b,
-		AdmitSender: func(w, h int) (bool, string, uint64, uint64) {
-			d := b.AdmitSender(w, h)
-			return d.Admit, d.Reason, d.FreeMB, d.ReserveMB
+		Budget:      b,
+		AdmitSender: func(w, h int) mediaroute.Admission { return admission(b.AdmitSender(w, h)) },
+		// Codec unknown pre-offer: HEVC is the costlier learned 4K decode on the rig (114 vs 56 MB).
+		AdmitReceive: func(w, h, fps int, newSender bool) mediaroute.Admission {
+			// HW decode only above the SYSTEM floor; below it the lightest path (CPU decode into the
+			// destination) down to the hard floor; below that HELD (incident 2026-11-13). The coded size
+			// here is the nominal worst case - the CPU-mode cap shrinks the upload texture later.
+			return admission(b.AdmitReceiveTiered(w, h, fps, "hevc", newSender,
+				liveCfg().CPUDecodeFallbackEnabled(), mfenc.CPUDecodeCostMB(w, h)))
 		},
-		AdmitReceive: func(w, h, fps int) (bool, string, uint64, uint64) {
-			if d := b.AdmitSender(w, h); !d.Admit {
-				return false, "sender: " + d.Reason, d.FreeMB, d.ReserveMB
-			}
-			d := b.AdmitDecode(w, h, fps, "hevc") // codec unknown pre-offer; HEVC/H.264 decode cost is comparable
-			if !d.Admit {
-				return false, "decode: " + d.Reason, d.FreeMB, d.ReserveMB
-			}
-			return true, "", d.FreeMB, d.ReserveMB
-		},
+		GovernorFloorMB: gpubudget.GovernorFloorMB(pol.Mode, uint64(liveCfg().ResolvedVramReserveMB())),
+	}
+}
+
+// SmoothedFree is the receive rate governors' VRAM input: the primary adapter's free VRAM averaged over
+// 10 s, so a card whose free VRAM oscillates every second does not flip the bitrate tier every second.
+func SmoothedFree(sampler gpumem.Sampler) func() (uint64, bool) {
+	avg := gpubudget.NewFreeAverager(10 * time.Second)
+	return func() (uint64, bool) {
+		h := gpumem.ReadHeadroom(sampler)
+		if !h.Present {
+			return 0, false
+		}
+		return avg.Add(time.Now(), h.FreeMB), true
 	}
 }
 

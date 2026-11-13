@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -38,6 +39,9 @@ type mfDecoder struct {
 	dropped atomic.Uint64 // AUs dropped awaiting a keyframe
 	closed  atomic.Bool
 	opened  time.Time
+
+	netMu sync.Mutex
+	net   *mfNetRX // attached network source (mf_dec_netrx.go); nil = Go feeds Write
 }
 
 // newMFDecoder opens the native decode session for spec, publishing into sink's shared texture.
@@ -126,7 +130,12 @@ func (m *mfDecoder) Write(f *medialink.Frame) error {
 // destination sender - it must outlive the child's last publish).
 func (m *mfDecoder) Close() error {
 	m.closed.Store(true)
-	m.dec.Close()
+	m.dec.Close() // child: RX thread joined -> decoder closed -> session closed
+	m.netMu.Lock()
+	if m.net != nil {
+		m.net.close()
+	}
+	m.netMu.Unlock()
 	return m.sink.Close()
 }
 
@@ -136,6 +145,10 @@ func (m *mfDecoder) PipeStats() medialink.PipelineStats {
 	accel := "d3d11"
 	if !m.dec.IsHardware() {
 		accel = "d3d11-dxva" // the MS D3D11-aware decoder MFT, still GPU-resident
+	}
+	degrade := ""
+	if st.Mode == "cpu" { // adaptive VRAM fallback: software decode into the same destination
+		accel, degrade = "software (cpu mode)", "VRAM: "+st.ModeText
 	}
 	// Published volume: on THIS path the child writes the destination texture, so DecFrames is the
 	// delivered count (the inner sink's Write is never called for this codec). Bytes are the
@@ -153,5 +166,13 @@ func (m *mfDecoder) PipeStats() medialink.PipelineStats {
 		ZeroDecode: st.DecFlags&1 != 0, DecFPS: st.DecFPS, DecBusyMs: st.DecBusyMs,
 		InDropped: st.InDropped, DecDropped: st.DecDropped, DecErrors: st.DecErrors,
 		DecStaleMs: st.DecStaleMs, DecMtxTimeo: st.MtxTimeouts, Downgrades: st.Downgrades,
+		DegradeReason: degrade,
 	}
 }
+
+// CodedCapHeight implements medialink.CodedCapper: THIS route's CPU-decode-mode coded-height cap.
+func (m *mfDecoder) CodedCapHeight() int { return m.dec.CodedCapHeight() }
+
+// SetKeyframeRequester implements medialink.KeyframeRequestable: a decode-mode switch asks the
+// route's sender for an IDR at once.
+func (m *mfDecoder) SetKeyframeRequester(f func()) { m.dec.SetKeyframeRequester(f) }

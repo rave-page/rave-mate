@@ -79,6 +79,7 @@ import (
 	"rave.page/mate/internal/pwcapture"
 	"rave.page/mate/internal/remotectl"
 	"rave.page/mate/internal/rtspserve"
+	"rave.page/mate/internal/senderkeeper"
 	"rave.page/mate/internal/session"
 	"rave.page/mate/internal/session/aggregator"
 	"rave.page/mate/internal/session/sinks/filesink"
@@ -744,6 +745,19 @@ func run(parent context.Context, serviceMode bool) error {
 	// own budget; here it governs the legacy in-proc path and backs `ctl encoder-scan`'s budget panel
 	// (live headroom/cap/reserve + the shared learned-cost file).
 	vramBudget := featurehost.WireVramBudget(mediaLinkCfg, gpuGovSampler, featurehost.VramCostPath(), log)
+	// 1b sender keeper: the DAEMON (not in any job) is the only process that starts rave-mate-keeper, so
+	// the keeper outlives daemon/media-child restarts and self-updates. Off unless
+	// mediaLink.senderKeeper; started once at boot (adoption happens in whichever process opens sinks).
+	keeperSup := senderkeeper.NewSupervisor(senderkeeper.Options{Dial: senderkeeper.DialPipe, Start: senderkeeper.StartDetached})
+	if mediaLinkCfg().SenderKeeperEnabled() {
+		debuglog.Go(log, "sender-keeper", func() {
+			if err := keeperSup.Ping(); err != nil {
+				log.Warn("mediaroute", "sender keeper not available - destinations stay in-process", map[string]any{"err": err.Error()})
+				return
+			}
+			log.Info("mediaroute", "sender keeper up - receive destinations survive restarts/updates", map[string]any{"pipe": senderkeeper.PipeName()})
+		})
+	}
 	medialink.OnResolutionCapChange = mfenc.NoteDecodeResizeGrace // decoder re-init grace on a cap change
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,
@@ -751,14 +765,15 @@ func run(parent context.Context, serviceMode bool) error {
 		EncodeMaxHeight:    cfg.Features.MediaLink.MaxHeight,
 		EncodePolicy:       mediaEncodePolicy(mediaLinkCfg),
 		EncodeDevice:       featurehost.NewEncodeDeviceResolver(mediaLinkCfg, vramBudget.Budget, nil, log),
-		Headroom:           func() (uint64, bool) { h := gpumem.ReadHeadroom(gpuGovSampler); return h.FreeMB, h.Present },
+		Headroom:           featurehost.SmoothedFree(gpuGovSampler), // 10 s mean (incident 2026-11-13)
 		GovernorEnabled:    func() bool { return mediaLinkCfg().VramGovernorEnabled() },
-		GovernorFloorMB:    uint64(mediaLinkCfg().ResolvedVramReserveMB()),
+		GovernorFloorMB:    vramBudget.GovernorFloorMB, // policy-derived: a full card is normal; trimming frees no VRAM
 		GovernorBaseKbps:   func() int { return mediaLinkCfg().Bitrate() },
 		BudgetMode:         func() string { return mediaLinkCfg().BitrateModeString() },
 		BudgetUserCeilKbps: func() int { return mediaLinkCfg().UserBitrateCeilKbps() },
 		BudgetLinkFracPct:  func() int { return mediaLinkCfg().LinkFractionPct() },
 		PlayoutPreset:      func() string { return mediaLinkCfg().PlayoutPreset() },
+		RecvImpl:           func() string { return mediaLinkCfg().RecvImplPref() },
 	})
 	// #44: the media plane (medialink+mediaroute+webcam) runs isolated in a memory-capped featurehost
 	// child by DEFAULT (MediaLink.Subprocess tri-state; explicit false = legacy in-proc). TCPlane +
@@ -858,6 +873,7 @@ func run(parent context.Context, serviceMode bool) error {
 		},
 		AdmitSender:  vramBudget.AdmitSender,
 		AdmitReceive: vramBudget.AdmitReceive,
+		Keeper:       keeperSup, // in-proc legacy path: same keeper (the daemon may start it)
 	})
 
 	// medialink P3: timecode plane. Elects one TC master across paired instances (media.tc
@@ -2115,6 +2131,7 @@ func run(parent context.Context, serviceMode bool) error {
 			SampleInterval:  time.Duration(gm.SampleIntervalSeconds) * time.Second,
 			ProcessInterval: time.Duration(gm.ProcessIntervalSeconds) * time.Second,
 			WarnFreeMB:      warnFree,
+			CSVPath:         gpuCSVPath(), // per-minute VRAM history beside the log (incident 2026-11-13)
 		})
 		gpuMon = mon // wire the cached sample into Services (Live VRAM meter)
 		perfmon.RegisterProbe("gpu memory", mon.Probe)
@@ -3601,6 +3618,7 @@ func (c *appControl) EncoderScan() string {
 
 	var b strings.Builder
 	b.WriteString(rep.String())
+	b.WriteString(c.holdsText())
 	fmt.Fprintf(&b, "cpu=%.0f%%  advertised-encoders=%d  policy=%s\n", cpu, len(devices), policy)
 	if len(advertised) > 0 {
 		fmt.Fprintf(&b, "advertised order: [%s]\n", strings.Join(advertised, " "))
