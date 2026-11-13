@@ -103,9 +103,79 @@ Native decode destination (`native/zigenc/src/dec.zig` `openDest`):
 4. **Claim early, keep forever**: remembered receives persist nominal geometry (w,h,fps); on media-route
    start the destination is claimed for each (admission-gated) and parked with NO TTL; only an explicit
    Stop (which forgets the remembered receive) destroys it.
-5. **Sender keeper** (`native/zigkeeper`, `rave-mate-keeper.exe`): pure-D3D11 Spout sender host
+5. **Adaptive decode mode HW <-> CPU <-> HELD (1e, owner directive 2026-11-13: "fallback to cpu
+   decoding if we don't have enough vram and return back to hw decoding once we got enough vram with a
+   buffer")** - see section 1e below.
+6. **Sender keeper** (`native/zigkeeper`, `rave-mate-keeper.exe`): pure-D3D11 Spout sender host
    (protocol above), single instance per session (named mutex), named-pipe newline-JSON protocol
    (`hello` -> proto/version, `ensure{name,w,h}`, `list`, `clear{name}`, `release{name}`), started
    detached from the job object so it outlives daemon/media child/self-update; app adopts existing
    senders (same handle -> Resolume sees nothing new). Keeper death -> one guarded re-create through
    admission. Opt-in until rig-verified.
+
+## 1e - adaptive decode mode (design, 2026-11-13)
+
+Supersedes "never fall to the ffmpeg/CPU path under VRAM pressure". That rule targeted the OLD
+fallback (ffmpeg child -> 33 MB RGBA/frame through Go -> SpoutLibrary GL SendImage = a NEW GL/DX
+interop registration + host buffers): heavier on the GPU, not lighter. It stays forbidden. The new CPU
+mode is a different path that is genuinely lighter.
+
+### CPU mode = software decode in the EXISTING decode child, into the EXISTING destination
+
+- Where: `native/zigenc` decode child, `sw` open flag. MF software H.264 decoder (Microsoft H264 Video
+  Decoder MFT, in-box on every Windows 10/11 - no new dependency; HEVC software MFT only when the HEVC
+  extension is installed, else the route renegotiates to H.264). NO D3D manager handed to it => no DXVA
+  decoder, no GPU DPB/surface pool. Worker threads bounded via ICodecAPI
+  `CODECAPI_AVDecNumWorkerThreads` (default 4 = conservative on the DJ PC; config
+  `mediaLink.cpuDecodeThreads`).
+- Upload: decoded NV12 (system memory, CODED size) -> ONE `UpdateSubresource` into a coded-size NV12
+  DEFAULT texture on the child's device -> the existing video processor scales + colour-converts it into
+  the nominal-size destination (opened by handle, as today). Doing the BGRA conversion + 4K upscale on
+  the CPU would cost a 33 MB write per frame (2 GB/s at 60 fps) - the GPU VP does it for ~nothing.
+  Per-frame work never enters Go (AU ring in, texture out - same as HW mode).
+- VRAM per 4K route (estimates; HW learned on the rig):
+  | mode | ours | notes |
+  |---|---|---|
+  | HW (DXVA HEVC 4K) | 114 MB learned (estimate 343) | DPB + VP + device |
+  | CPU, coded 1080p | ~16 MB est: NV12 1080p 3 MB + VP intermediates + device | destination exists anyway |
+  | CPU, coded 720p | ~10 MB est | |
+  Destination (31.6 MiB at 4K) is shared by both modes and is not re-counted.
+  Target "CPU mode ~ destination only": met to within the coded-size NV12 upload texture + VP; a pure CPU
+  BGRA path would save those ~10 MB but cost ~2 GB/s memory bandwidth - rejected.
+
+### Sustainable CPU decode
+
+- Entering CPU mode sends the sender a cheaper stream through the existing receiver rate hint:
+  `RateHint.MaxHeight` = the largest coded height the MEASURED software decode sustains at the route fps
+  with 25 % margin (default before measurement: 720p - the historical 13.5 fps 4K ffmpeg decode
+  extrapolates to ~120 fps at 720p single-thread-ish, unmeasured), and the route re-offers preferring
+  H.264 (software HEVC is 2-3x costlier; no live codec switch exists in the encoder, so the codec change
+  rides a re-offer - the destination is a kept sender, so Resolume sees no new sender; the park keeps
+  the LAST picture, not a transparent frame, for a mode switch).
+- Software decode throughput: bounded micro-benchmark (synthetic H.264 AUs from the existing encode
+  bench pipeline is GPU work - so instead: time the first N decoded frames of the live CPU route and
+  fold them into the gpubudget throughput store under op `decode-sw`, keyed per codec+bucket). The cap
+  is lowered/raised one bucket at a time from that data (1080p <-> 720p <-> 540p).
+
+### State machine (Go, policy only, <= 1 Hz) - `internal/decmode`
+
+States per route: `hw`, `cpu`, `held`. Inputs per tick: headroom, HW need (learned decode cost), CPU
+need, destination exists, CPU decode fps vs route fps, keyframe seen.
+- hw -> cpu: HW admission refuses (or a verified attempt / HW open fails for VRAM) AND the CPU need fits.
+- cpu -> hw (promotion): free >= HW need + buffer (default max(512 MB, 2 x HW need), config
+  `mediaLink.hwPromoteBufferMB`) continuously for dwell (default 45 s); min residency 30 s in any mode;
+  a failed promotion doubles the dwell (cap 10 min), a stable HW minute resets it.
+- any -> held: only when even the destination cannot exist (new destination refused and none kept).
+- held -> cpu/hw: re-checked on the existing 2 s cadence.
+- Swap protocol: request IDR (existing PLI), start the new decoder, feed it only from the next keyframe
+  (never a P-frame on a fresh decoder), first published frame swaps the source feeding the destination,
+  then release the old decoder. Cap lifted on promotion (MaxHeight cleared in the hint).
+- Visible: mode, why, VRAM numbers, coded cap/codec, CPU decode fps, CPU %, last switch + reason in
+  `ctl routes` / `ctl encoder-scan`.
+
+### Delivery order + honest scope
+
+1e-1 the Go state machine + tests (pure, GPU-free); 1e-2 the `sw` mode in the decode child; 1e-3 wiring
+(admission fallback to CPU need instead of HELD, rate-hint cap, H.264 re-offer, telemetry). GPU-free
+tests cover transitions/hysteresis/flapping/keyframe alignment/cap/CPU budget; the native sw path needs a
+rig run (card full now - not run).
