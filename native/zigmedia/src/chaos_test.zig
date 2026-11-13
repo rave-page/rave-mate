@@ -171,6 +171,7 @@ fn run(alloc: std.mem.Allocator, prof: Profile, seed: u64, converge_ns: i64) !Re
 }
 
 fn report(prof: Profile, seed: u64, r: Result) void {
+    if (!@import("build_options").chaos_report) return;
     std.debug.print("chaos {s} seed {d}: frames={d} released={d} senderDrops={d} badGaps={d} maxGap={d:.1}ms PLIs={d} maxMargin={d:.1}ms playout={d:.1}ms misses={d} repeats={d} rebases={d} gapDrops={d} added p50/p99={d:.1}/{d:.1}ms\n", .{
         prof.name,                                          seed,                r.frames,           r.released,          r.sender_drops,
         r.bad_gaps,                                         ms(r.max_gap_ns),    r.plis,             ms(r.max_margin),    r.stats.playout_ms,

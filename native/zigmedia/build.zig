@@ -15,6 +15,12 @@ pub fn build(b: *std.Build) void {
         .link_libc = true, // c_allocator + the shim's final link
     });
 
+    // Chaos/e2e numbers go to stderr only on request: the build runner flags ANY test stderr output with a
+    // "failed command" line even on success, and a gate must not print a failure while passing.
+    const opts = b.addOptions();
+    opts.addOption(bool, "chaos_report", b.option(bool, "chaos-report", "print chaos/e2e acceptance numbers") orelse false);
+    mod.addOptions("build_options", opts);
+
     if (target.result.os.tag == .windows) mod.linkSystemLibrary("ws2_32", .{}); // Winsock (sock.zig)
 
     const lib = b.addLibrary(.{

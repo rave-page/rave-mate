@@ -83,14 +83,16 @@ test "sleepUntil returns promptly when past" {
 }
 
 test "sleepUntil waits to the deadline with sub-ms precision" {
-    var worst: i64 = 0;
-    var i: usize = 0;
-    while (i < 20) : (i += 1) {
+    // Median overshoot (a loaded shared PC can preempt a few samples; the coarse ~15.6 ms timer
+    // this replaces would put the MEDIAN far above 2 ms).
+    var over: [21]i64 = undefined;
+    for (&over) |*o| {
         const t0 = nowMono();
         sleepUntil(t0 + 5_000_000); // 5 ms
         const slept = nowMono() - t0;
         try std.testing.expect(slept >= 5_000_000);
-        worst = @max(worst, slept - 5_000_000);
+        o.* = slept - 5_000_000;
     }
-    try std.testing.expect(worst < 4_000_000); // high-res, not the ~15.6 ms coarse timer (slack: shared dev PC)
+    std.mem.sort(i64, &over, {}, std.sort.asc(i64));
+    try std.testing.expect(over[over.len / 2] < 2_000_000);
 }
