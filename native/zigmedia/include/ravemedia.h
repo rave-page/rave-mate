@@ -11,6 +11,8 @@
  * ABI v4 (2026-11-13): rm_tx_rate_hint - the receiver's MetaRate (congestion AIMD + VRAM governor +
  *   adaptive budget) reaches the encoder on a native route; the sender also answers MetaSync and PLI
  *   natively. Callers recompile; poll rm_tx_rate_hint (~10 Hz) and apply on a gen change.
+ * ABI v5 (2026-11-13): RECEIVER rm_rx_* (native UDP receive: reassembly, NACK, adaptive PTS-locked
+ *   playout, PLI; frames delivered in cadence via callback). Sender API unchanged.
  *
  * Ownership split: Go negotiates the route (Offer/Answer), derives the per-route keys + token, then
  * opens a native sender and hands it the derived material. The encode thread (Linux VA shim /
@@ -50,7 +52,7 @@
 extern "C" {
 #endif
 
-#define RM_ABI_VERSION 4u
+#define RM_ABI_VERSION 5u
 
 uint32_t rm_abi_version(void);
 int rm_wire_selftest(void); /* 0 = wire core matches its goldens (integration sanity) */
@@ -165,6 +167,51 @@ void rm_tx_rate_hint(rm_sender *s, rm_rate_hint *out);
 /* rm_tx_close stops the TX thread(s), sends a clean bye, and frees the sender. No callback fires
  * after it returns. */
 void rm_tx_close(rm_sender *s);
+
+/* ── receiver (ABI v5) ─────────────────────────────────────────────────────────────────────────────
+ * Go negotiates + runs the reachability handshake on its UDP socket, then hands a DUPLICATE of that
+ * socket (socket_fd; Windows: WSADuplicateSocket -> WSASocket FROM_PROTOCOL_INFO in the target
+ * process) and the derived keys; the native receiver owns the RX path from then on. Control the
+ * receiver sends (NACK/PLI/ping/meta) continues initial_seq (the Go conn's send seq). Go-originated
+ * meta (MetaRate, reports, sync) goes through rm_rx_send_meta so ONE seq/nonce counter seals it. */
+typedef struct rm_receiver rm_receiver; /* opaque */
+
+typedef struct {
+    uint32_t abi_version;     /* = RM_ABI_VERSION */
+    uint32_t struct_size;     /* = sizeof(rm_rx_params) */
+    int64_t socket_fd;        /* bound UDP socket; native takes ownership */
+    const uint8_t *peer_addr; /* sender sockaddr_in (optional, NULL = learn from the first datagram) */
+    int32_t peer_addr_len;
+    rm_keys keys;             /* send_* seals OUR control; recv_* opens the sender's media */
+    int32_t body_max;         /* fragment body cap (0 -> 1200) */
+    int32_t fps;              /* nominal frame rate (0 -> 60) */
+    int32_t preset;           /* playout: 0 balanced, 1 low-latency, 2 smooth */
+    uint16_t stream;          /* media stream id (PLI target) */
+    uint64_t initial_seq;     /* first control datagram seq */
+    int32_t max_frame_bytes;  /* largest AU (0 -> 4 MiB) */
+} rm_rx_params;
+
+/* rm_rx_frame_cb delivers ONE frame at its playout deadline on the receiver thread; au is valid only
+ * during the call (copy or consume synchronously). key = decodable alone. */
+typedef void (*rm_rx_frame_cb)(void *user, const uint8_t *au, size_t len, int64_t pts_ns, int32_t key);
+
+typedef struct {
+    uint64_t datagrams, delivered, nacks_sent, plis_sent, reasm_drops, slot_drops, metas_sent;
+    double loss_pct;          /* congestion inputs, = medialink.UDPStats semantics */
+    int64_t owd_ns, owd_jitter_ns, rtt_ns;
+    double playout_ms, target_ms, max_ms; /* adaptive playout */
+    uint64_t misses, misses10m, repeats, repeats10m, grows, decays, rebases, gap_drops;
+    uint64_t pub_count;       /* release (publish) interval histogram */
+    double pub_p50_ms, pub_p99_ms, pub_max_ms;
+    uint64_t pub_over25, pub_over50;
+} rm_rx_stats;
+
+rm_status rm_rx_open(const rm_rx_params *p, rm_rx_frame_cb cb, void *user, rm_receiver **out);
+void rm_rx_stats_get(rm_receiver *r, rm_rx_stats *out);
+/* rm_rx_send_meta queues one stream-0 meta frame (JSON <= 256 B); RM_ERR_ARGS when full/too large. */
+rm_status rm_rx_send_meta(rm_receiver *r, const uint8_t *json, size_t len);
+/* rm_rx_close stops the worker and frees; no callback fires after it returns. Closes socket_fd. */
+void rm_rx_close(rm_receiver *r);
 
 #ifdef __cplusplus
 }

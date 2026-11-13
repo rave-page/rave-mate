@@ -14,7 +14,7 @@ const wire = @import("wire.zig");
 const snd = @import("sender.zig");
 const sock = @import("sock.zig");
 
-pub const abi_version: u32 = 4;
+pub const abi_version: u32 = 5;
 
 const alloc = std.heap.c_allocator;
 
@@ -190,6 +190,134 @@ export fn rm_tx_rate_hint(s: ?*snd.Sender, out: ?*RmRateHint) void {
     o.* = .{ .gen = h.gen, .max_bitrate_kbps = h.max_bitrate_kbps, .max_fps = h.max_fps, .max_height = h.max_height, .quality = h.quality };
 }
 
+// ── receiver (ABI v5) ─────────────────────────────────────────────────────────────────────────────
+const rx = @import("receiver.zig");
+const po = @import("playout.zig");
+
+const RmRxParams = extern struct {
+    abi_version: u32,
+    struct_size: u32,
+    socket_fd: i64,
+    peer_addr: ?[*]const u8,
+    peer_addr_len: i32,
+    keys: RmKeys,
+    body_max: i32,
+    fps: i32,
+    preset: i32,
+    stream: u16,
+    initial_seq: u64,
+    max_frame_bytes: i32,
+};
+const RmRxFrameCb = *const fn (?*anyopaque, [*]const u8, usize, i64, i32) callconv(.c) void;
+const RmRxStats = extern struct {
+    datagrams: u64,
+    delivered: u64,
+    nacks_sent: u64,
+    plis_sent: u64,
+    reasm_drops: u64,
+    slot_drops: u64,
+    metas_sent: u64,
+    loss_pct: f64,
+    owd_ns: i64,
+    owd_jitter_ns: i64,
+    rtt_ns: i64,
+    playout_ms: f64,
+    target_ms: f64,
+    max_ms: f64,
+    misses: u64,
+    misses10m: u64,
+    repeats: u64,
+    repeats10m: u64,
+    grows: u64,
+    decays: u64,
+    rebases: u64,
+    gap_drops: u64,
+    pub_count: u64,
+    pub_p50_ms: f64,
+    pub_p99_ms: f64,
+    pub_max_ms: f64,
+    pub_over25: u64,
+    pub_over50: u64,
+};
+
+// RxHandle adapts the C frame callback (int key) to the receiver's callback.
+const RxHandle = struct { r: *rx.Receiver = undefined, cb: ?RmRxFrameCb, user: ?*anyopaque, fd: sock.Fd };
+
+fn rxDeliver(user: ?*anyopaque, ptr: [*]const u8, len: usize, pts: i64, key: bool) callconv(.c) void {
+    const h: *RxHandle = @ptrCast(@alignCast(user.?));
+    if (h.cb) |cb| cb(h.user, ptr, len, pts, @intFromBool(key));
+}
+
+export fn rm_rx_open(p: ?*const RmRxParams, cb: ?RmRxFrameCb, user: ?*anyopaque, out: ?*?*RxHandle) c_int {
+    const params = p orelse return RM_ERR_ARGS;
+    const o = out orelse return RM_ERR_ARGS;
+    o.* = null;
+    if (params.abi_version != abi_version or params.struct_size != @sizeOf(RmRxParams)) return RM_ERR_ARGS;
+    if (params.socket_fd < 0) return RM_ERR_SOCKET;
+    const k = params.keys;
+    const h = alloc.create(RxHandle) catch return RM_ERR_ARGS;
+    h.* = .{ .cb = cb, .user = user, .fd = @intCast(params.socket_fd) };
+    const cfg = rx.RxConfig{
+        .encrypt = k.encrypt != 0,
+        .token = k.token,
+        .open_key = k.recv_key,
+        .open_prefix = k.recv_nonce_prefix,
+        .send_key = k.send_key,
+        .send_prefix = k.send_nonce_prefix,
+        .body_max = if (params.body_max > 0) @intCast(params.body_max) else 1200,
+        .fps = if (params.fps > 0) @floatFromInt(params.fps) else 60,
+        .preset = switch (params.preset) {
+            1 => po.low_latency,
+            2 => po.smooth,
+            else => po.balanced,
+        },
+        .stream = params.stream,
+        .initial_seq = params.initial_seq,
+        .max_frame_bytes = if (params.max_frame_bytes > 0) @intCast(params.max_frame_bytes) else 4 << 20,
+    };
+    var peer: ?sock.Addr4 = null;
+    if (params.peer_addr) |pa| {
+        if (params.peer_addr_len >= @sizeOf(sock.Addr4)) peer = @as(*align(1) const sock.Addr4, @ptrCast(pa)).*;
+    }
+    h.r = rx.Receiver.openPeer(alloc, h.fd, cfg, peer, rxDeliver, h) catch {
+        alloc.destroy(h);
+        return RM_ERR_CRYPTO;
+    };
+    o.* = h;
+    return RM_OK;
+}
+
+export fn rm_rx_stats_get(hp: ?*RxHandle, out: ?*RmRxStats) void {
+    const h = hp orelse return;
+    const o = out orelse return;
+    const s = h.r.stats();
+    const pb = h.r.publish.snapshot();
+    const pl = s.playout;
+    o.* = .{
+        .datagrams = s.datagrams, .delivered = s.delivered, .nacks_sent = s.nacks_sent, .plis_sent = s.plis_sent,
+        .reasm_drops = s.reasm_drops, .slot_drops = s.slot_drops, .metas_sent = s.metas_sent,
+        .loss_pct = s.loss_pct, .owd_ns = s.owd_ns, .owd_jitter_ns = s.owd_jitter_ns, .rtt_ns = s.rtt_ns,
+        .playout_ms = pl.playout_ms, .target_ms = pl.target_ms, .max_ms = pl.max_ms,
+        .misses = pl.misses, .misses10m = pl.misses10m, .repeats = pl.repeats, .repeats10m = pl.repeats10m,
+        .grows = pl.grows, .decays = pl.decays, .rebases = pl.rebases, .gap_drops = pl.gap_drops,
+        .pub_count = pb.count, .pub_p50_ms = pb.p50_ms, .pub_p99_ms = pb.p99_ms, .pub_max_ms = pb.max_ms,
+        .pub_over25 = pb.over25, .pub_over50 = pb.over50,
+    };
+}
+
+export fn rm_rx_send_meta(hp: ?*RxHandle, json: ?[*]const u8, len: usize) c_int {
+    const h = hp orelse return RM_ERR_ARGS;
+    const j = json orelse return RM_ERR_ARGS;
+    return if (h.r.sendMeta(j[0..len])) RM_OK else RM_ERR_ARGS;
+}
+
+export fn rm_rx_close(hp: ?*RxHandle) void {
+    const h = hp orelse return;
+    h.r.close();
+    sock.close(h.fd);
+    alloc.destroy(h);
+}
+
 export fn rm_tx_close(s: ?*snd.Sender) void {
     if (s) |sender| sender.close();
 }
@@ -239,4 +367,54 @@ test {
     _ = @import("histogram.zig");
     _ = snd;
     if (builtin.os.tag == .linux) _ = @import("interop_test.zig"); // socket loopback: Linux only
+}
+
+var g_rx_frames = std.atomic.Value(u32).init(0);
+fn testRxCb(_: ?*anyopaque, au: [*]const u8, len: usize, _: i64, _: i32) callconv(.c) void {
+    if (len > 0 and au[0] == 0x5A) _ = g_rx_frames.fetchAdd(1, .monotonic);
+}
+
+test "ABI v5: rm_rx_* receives a native sender's frames; rm_rx_send_meta MetaRate reaches the sender" {
+    const hrt = @import("hrtimer.zig");
+    var master: [32]u8 = undefined;
+    for (&master, 0..) |*b, i| b.* = @intCast(i + 7);
+    const salt = "abi-v5-receiver-salt-0123456789abcdef";
+    const txk = keys.deriveUdp(&master, salt, false);
+    const rxk = keys.deriveUdp(&master, salt, true);
+    const tok = keys.token(&master, salt);
+
+    const rfd = try sock.udpSocket();
+    var la = sock.Addr4.loopback(0);
+    try sock.bind(rfd, &la);
+    const raddr = try sock.localAddr(rfd);
+    var p = RmRxParams{ .abi_version = abi_version, .struct_size = @sizeOf(RmRxParams), .socket_fd = @intCast(rfd), .peer_addr = null, .peer_addr_len = 0, .keys = .{ .send_key = rxk.send.key, .send_nonce_prefix = rxk.send.prefix, .recv_key = rxk.recv.key, .recv_nonce_prefix = rxk.recv.prefix, .token = tok, .encrypt = 1, .initiator = 1 }, .body_max = 1200, .fps = 60, .preset = 1, .stream = 1, .initial_seq = 5000, .max_frame_bytes = 0 };
+    var h: ?*RxHandle = null;
+    try std.testing.expectEqual(RM_OK, rm_rx_open(&p, testRxCb, null, &h));
+    defer rm_rx_close(h);
+    p.abi_version = 4;
+    var bad: ?*RxHandle = null;
+    try std.testing.expectEqual(RM_ERR_ARGS, rm_rx_open(&p, testRxCb, null, &bad)); // stale caller
+
+    const tfd = try snd.udpSocket();
+    try snd.udpConnect(tfd, &raddr, @sizeOf(sock.Addr4));
+    const s = try snd.Sender.open(alloc, .{ .token = tok, .send_key = txk.send.key, .send_prefix = txk.send.prefix, .recv_key = txk.recv.key, .recv_prefix = txk.recv.prefix }, tfd, true);
+    defer s.close();
+    var au = [_]u8{0x5A} ** 5000;
+    var i: u32 = 0;
+    const t0 = hrt.nowMono();
+    while (i < 30) : (i += 1) {
+        s.submit(&au, @as(i64, i) * 16_666_667, if (i == 0) snd.flag_keyframe else 0);
+        hrt.sleepUntil(t0 + @as(i64, i + 1) * 16_666_667);
+    }
+    const json = "{\"t\":\"rate\",\"stream\":0,\"br\":12000,\"fps\":30}";
+    try std.testing.expectEqual(RM_OK, rm_rx_send_meta(h, json, json.len));
+    const dl = hrt.nowMono() + 2_000_000_000;
+    while ((g_rx_frames.load(.monotonic) < 30 or s.rateHint().gen == 0) and hrt.nowMono() < dl) hrt.sleepUntil(hrt.nowMono() + 5_000_000);
+    try std.testing.expectEqual(@as(u32, 30), g_rx_frames.load(.monotonic));
+    const rh = s.rateHint();
+    try std.testing.expect(rh.gen == 1 and rh.max_bitrate_kbps == 12000 and rh.max_fps == 30);
+    hrt.sleepUntil(hrt.nowMono() + 300_000_000);
+    var st: RmRxStats = undefined;
+    rm_rx_stats_get(h, &st);
+    try std.testing.expect(st.delivered == 30 and st.metas_sent == 1 and st.rtt_ns > 0 and st.pub_count > 0);
 }

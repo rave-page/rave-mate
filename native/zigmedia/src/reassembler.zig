@@ -31,7 +31,10 @@ const StreamMax = struct { id: u16 = 0, max: u32 = 0, used: bool = false };
 // Ghost: a frame of which NO datagram arrived although a later frame did (a burst loss / overflow
 // took the whole frame, so there is no entry to prove a hole in). NACKed as fragment 0: the
 // retransmit carries frag_count, then the ordinary overtaken proof NACKs the rest.
-const tail_proof_ns: i64 = 4_000_000;
+// > 1 frame interval: normally the next frame's start (overtaken) proves a lost tail first; this only
+// catches the last frame before a source pause. Shorter values NACK whole held tails during an arrival
+// stall (measured: 3x spurious retransmits, extra misses).
+const tail_proof_ns: i64 = 25_000_000;
 const max_ghosts = 16;
 const ghost_ttl_ns: i64 = 1_000_000_000;
 const ghost_max_nacks = 20; // the sender's retransmit ring no longer has it after this: stop asking
@@ -232,8 +235,7 @@ pub const Reassembler = struct {
             const stream: u16 = @intCast(e.key >> 32);
             const fseq: u32 = @truncate(e.key);
             const mx = r.streamMax(stream) orelse fseq;
-            // TAIL proof: the sender paces a frame's fragments back to back; silence on this frame for
-            // tail_proof_ns means its missing tail is lost (no need to wait for the next frame, ~1 frame).
+            // TAIL proof: silence on this frame for tail_proof_ns = its missing tail is lost.
             const overtaken = seqGreater(mx, fseq) or (e.last_rx != 0 and now - e.last_rx >= tail_proof_ns);
             // Proven-lost ceiling: the whole frame if overtaken, else only fragments BELOW the highest
             // index seen for this frame (a later fragment of the same frame proves the gap under it).
