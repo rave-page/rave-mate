@@ -72,6 +72,9 @@ type Options struct {
 	// AdmitReceive is the pre-offer gate: the decoder, plus a new sender + its receiver follow cost when
 	// newSender (a kept destination costs nothing new). nil => AdmitSender / static floor.
 	AdmitReceive func(w, h, fps int, newSender bool) Admission
+	// Keeper hosts GPU destinations outside this process (rave-mate-keeper, 1b) when
+	// MediaLink.SenderKeeper is on; nil or unreachable => the in-process SpoutLibrary sender.
+	Keeper Keeper
 
 	// Test seams (default: videoshare Spout backend).
 	ListSenders func() []string
@@ -126,6 +129,7 @@ type Manager struct {
 	headroom  func() gpumem.Headroom
 	admitSndr func(w, h int) Admission
 	admitRecv func(w, h, fps int, newSender bool) Admission
+	keeper    Keeper
 	// VRAM hold + verified-attempt state (mu). All keyed by receive sender name; bounded by the number
 	// of distinct receives (remembered set / medialink route cap), pruned by reapParked.
 	holds    map[string]Hold          // current holds (visible state)
@@ -171,7 +175,7 @@ func New(o Options) *Manager {
 		shared: map[string]medialink.SourceDesc{}, receives: map[string]Receive{},
 		parked: map[string]*parkedSink{}, stopping: map[string]bool{}, now: time.Now,
 		holds: map[string]Hold{}, holdLog: map[string]time.Time{}, attempts: map[string]*attemptState{},
-		pending: map[string]bool{}, claimAt: map[string]time.Time{},
+		pending: map[string]bool{}, claimAt: map[string]time.Time{}, keeper: o.Keeper,
 	}
 	m.hub = newCaptureHub(o.Log, o.OpenReceiver, o.PutPix)
 	if m.listSenders == nil {
@@ -443,6 +447,7 @@ func (m *Manager) StartReceive(peer, sourceID string) (string, error) {
 	m.mu.Lock()
 	_, parked := m.parked[sender]
 	m.mu.Unlock()
+	parked = parked || m.keeperHas(sender) // keeper-hosted: adopted after a restart, nothing new
 	a := m.receiveGate(w, h, int(desc.FPS), !parked)
 	now = m.now()
 	m.mu.Lock()
@@ -549,7 +554,7 @@ func (m *Manager) StopReceive(session string) {
 		m.router.UnregisterSink(r.SinkID)
 	}
 	if destroyNow != nil {
-		_ = destroyNow.Close()
+		closeOrDestroy(destroyNow)
 		m.log.Info(source, "receive stopped - kept-alive sender destroyed", map[string]any{"session": session})
 	}
 }
@@ -690,6 +695,13 @@ func (m *Manager) openReceiveSink(name string, w, h int) (medialink.Sink, error)
 	// On a saturated card that registration FAILS and can wedge Resolume. Under low free VRAM refuse
 	// the new sender - the source does not appear (missing beats a crash) and the route retries when
 	// headroom returns. Existing routes (the parked-reuse path above) are never gated.
+	if m.keeperHas(name) { // adopt the keeper-hosted destination: no admission, no new sender
+		inner, err := m.openSink(name, w, h)
+		if err != nil {
+			return nil, err
+		}
+		return &keptSink{m: m, inner: inner, name: name, w: w, h: h}, nil
+	}
 	m.mu.Lock()
 	attempt := m.pending[name]
 	delete(m.pending, name)
@@ -725,7 +737,7 @@ func (m *Manager) openNewSender(name string, w, h int, attempt bool, freeBefore 
 	ok, free, why := m.verifyAttempt()
 	m.noteAttempt(name, ok, free, why)
 	if !ok {
-		_ = inner.Close()
+		closeOrDestroy(inner)
 		m.log.Warn(source, "receive sink attempt BACKED OUT - free VRAM collapsed after creating the destination; holding",
 			map[string]any{"sender": name, "freeMB": free, "why": why})
 		return nil, fmt.Errorf("mediaroute: sender %q backed out after a verified attempt (%s)", name, why)
@@ -784,7 +796,14 @@ func (m *Manager) closeKept(k *keptSink) error {
 	}
 	m.mu.Unlock()
 	if destroy {
-		_ = k.inner.Close()
+		closeOrDestroy(k.inner)
+		return nil
+	}
+	if ks, ok := k.inner.(*keeperSink); ok { // keeper destination: park = keeper clear, no host blank
+		if err := ks.k.Clear(ks.s.Name); err != nil {
+			m.log.Debug(source, "kept-alive park: keeper clear failed", map[string]any{"sender": k.name, "err": err.Error()})
+		}
+		m.parkKept(k)
 		return nil
 	}
 	if k.blank == nil {
@@ -829,7 +848,7 @@ func (m *Manager) parkInner(name string, inner medialink.Sink, w, h int, blank [
 	m.parked[name] = entry
 	m.mu.Unlock()
 	if evicted != nil {
-		_ = evicted.Close()
+		closeOrDestroy(evicted)
 		m.log.Info(source, "kept-alive sender evicted - cache full (drop-oldest)", map[string]any{"sender": evName})
 	}
 }
@@ -856,7 +875,7 @@ func (m *Manager) reapParked() {
 	}
 	m.mu.Unlock()
 	for _, e := range expired {
-		_ = e.inner.Close()
+		closeOrDestroy(e.inner)
 		m.log.Info(source, "kept-alive sender released after idle TTL", map[string]any{"sender": e.name})
 	}
 }
@@ -915,8 +934,13 @@ func (m *Manager) claimRemembered() {
 			continue
 		}
 		m.claimAt[name] = now
-		a := m.gateAttempt(name, m.senderCreateGate(r.W, r.H), now)
 		m.mu.Unlock()
+		a := Admission{Allow: true, Reason: "adopt keeper-hosted destination"}
+		if !m.keeperHas(name) {
+			m.mu.Lock()
+			a = m.gateAttempt(name, m.senderCreateGate(r.W, r.H), now)
+			m.mu.Unlock()
+		}
 		if !a.Allow {
 			m.log.Debug(source, "remembered destination not claimed yet - VRAM budget", map[string]any{
 				"sender": name, "freeMB": a.FreeMB, "requiredMB": a.RequiredMB, "reason": a.Reason})
@@ -940,7 +964,7 @@ func (m *Manager) destroyAllParked() {
 	m.parked = map[string]*parkedSink{}
 	m.mu.Unlock()
 	for _, p := range all {
-		_ = p.inner.Close()
+		_ = p.inner.Close() // a keeper destination only DETACHES here: it outlives this process (1b)
 	}
 	if len(all) > 0 {
 		m.log.Info(source, "kept-alive senders released on shutdown", map[string]any{"count": len(all)})
@@ -1111,6 +1135,18 @@ func (m *Manager) openSpoutSink(name string, w, h int) (medialink.Sink, error) {
 	// Native decode wanted → open the sender EAGERLY so its destination texture exists before the
 	// decode engine is chosen (a decoder cannot create one). A failure here is not fatal: fall
 	// straight through to the lazy frame sender, i.e. today's path byte for byte.
+	if m.cfg().ZeroCopyDecode() && m.keeper != nil && m.cfg().SenderKeeperEnabled() {
+		// 1b: the destination lives in rave-mate-keeper - ADOPTED when it already exists (restart /
+		// update: same handle, nothing new in Resolume), created otherwise (admitted by the caller).
+		s, created, err := m.keeper.Ensure(name, w, h)
+		if err == nil {
+			m.log.Info(source, "receive sink open (keeper-hosted GPU destination)", map[string]any{
+				"sender": name, "w": s.W, "h": s.H, "adopted": !created})
+			return &keeperSink{k: m.keeper, s: s}, nil
+		}
+		m.log.Warn(source, "sender keeper unavailable - using the in-process sender", map[string]any{
+			"sender": name, "err": err.Error()})
+	}
 	if m.cfg().ZeroCopyDecode() && m.newSharedSnd != nil {
 		if ss, err := m.newSharedSnd(name, w, h); err == nil {
 			m.log.Info(source, "receive sink open (GPU destination texture)", map[string]any{

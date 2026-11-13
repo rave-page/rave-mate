@@ -514,6 +514,11 @@ type MediaLinkFeature struct {
 	HWPromoteBufferMB int `json:"hwPromoteBufferMB,omitempty"`
 	// HWPromoteDwellSec is how long that headroom must hold before the switch back (0 = 45 s).
 	HWPromoteDwellSec int `json:"hwPromoteDwellSec,omitempty"`
+	// SenderKeeper hosts GPU receive destinations in rave-mate-keeper.exe (pure D3D11 Spout sender, no
+	// GL/interop in our processes) so they survive daemon/media-child restarts and self-updates
+	// (VRAM_FULL_CARD_POLICY 1b). Tri-state, DEFAULT OFF until rig-verified; env
+	// RAVE_MATE_SENDER_KEEPER=1|0 overrides.
+	SenderKeeper *bool `json:"senderKeeper,omitempty"`
 	// SenderMaxHeight pins the immortal Spout sender texture height so its shared handle never
 	// changes across a source-resolution change (decode scales into it). 0 = auto (first-observed
 	// source height, capped 2160); >0 = explicit cap.
@@ -653,6 +658,17 @@ func (m MediaLinkFeature) CPUDecodeFallbackEnabled() bool {
 		return false
 	}
 	return m.CPUDecodeFallback == nil || *m.CPUDecodeFallback
+}
+
+// SenderKeeperEnabled reports whether receive destinations are hosted by rave-mate-keeper (default OFF).
+func (m MediaLinkFeature) SenderKeeperEnabled() bool {
+	switch os.Getenv("RAVE_MATE_SENDER_KEEPER") {
+	case "1", "true":
+		return true
+	case "0", "false":
+		return false
+	}
+	return m.SenderKeeper != nil && *m.SenderKeeper
 }
 
 // ResolvedVramMarginMB returns the configured non-strict margin floor (0 = default; negatives => 0).

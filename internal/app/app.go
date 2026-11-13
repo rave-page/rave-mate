@@ -79,6 +79,7 @@ import (
 	"rave.page/mate/internal/pwcapture"
 	"rave.page/mate/internal/remotectl"
 	"rave.page/mate/internal/rtspserve"
+	"rave.page/mate/internal/senderkeeper"
 	"rave.page/mate/internal/session"
 	"rave.page/mate/internal/session/aggregator"
 	"rave.page/mate/internal/session/sinks/filesink"
@@ -744,6 +745,19 @@ func run(parent context.Context, serviceMode bool) error {
 	// own budget; here it governs the legacy in-proc path and backs `ctl encoder-scan`'s budget panel
 	// (live headroom/cap/reserve + the shared learned-cost file).
 	vramBudget := featurehost.WireVramBudget(mediaLinkCfg, gpuGovSampler, featurehost.VramCostPath(), log)
+	// 1b sender keeper: the DAEMON (not in any job) is the only process that starts rave-mate-keeper, so
+	// the keeper outlives daemon/media-child restarts and self-updates. Off unless
+	// mediaLink.senderKeeper; started once at boot (adoption happens in whichever process opens sinks).
+	keeperSup := senderkeeper.NewSupervisor(senderkeeper.Options{Dial: senderkeeper.DialPipe, Start: senderkeeper.StartDetached})
+	if mediaLinkCfg().SenderKeeperEnabled() {
+		debuglog.Go(log, "sender-keeper", func() {
+			if err := keeperSup.Ping(); err != nil {
+				log.Warn("mediaroute", "sender keeper not available - destinations stay in-process", map[string]any{"err": err.Error()})
+				return
+			}
+			log.Info("mediaroute", "sender keeper up - receive destinations survive restarts/updates", map[string]any{"pipe": senderkeeper.PipeName()})
+		})
+	}
 	medialink.OnResolutionCapChange = mfenc.NoteDecodeResizeGrace // decoder re-init grace on a cap change
 	medialink.DecodeCapHeight = mfenc.DecodeCapHeight             // CPU decode mode (1e) caps the sender's coded height
 	mediaRouter := medialink.New(medialink.Options{
@@ -860,6 +874,7 @@ func run(parent context.Context, serviceMode bool) error {
 		},
 		AdmitSender:  vramBudget.AdmitSender,
 		AdmitReceive: vramBudget.AdmitReceive,
+		Keeper:       keeperSup, // in-proc legacy path: same keeper (the daemon may start it)
 	})
 
 	// medialink P3: timecode plane. Elects one TC master across paired instances (media.tc
