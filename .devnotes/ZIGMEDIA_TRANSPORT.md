@@ -128,3 +128,20 @@ int64(NativeTXParams.StartupGrace)` (0 → native 15s default), and bump its `ab
 Native transport is used when the local build has it AND the route's engines are native; else the Go
 path (unchanged, wire-compatible, so native↔Go interoperate). Route telemetry says which
 (`transport-impl: native|go`); config escape hatch forces Go.
+
+## Resilience (2026-11-13, feat/zigmedia-resilience)
+- Playout (`playout.zig`, legacy mirror `internal/medialink/jitterbuf.go`): margin from measured lateness;
+  miss -> grow to observed x factor (cap = preset max); decay <= interval/4 per step toward
+  quantile / worst-recent-stall target; presets low-latency 60 ms | balanced 150 ms (start at max,
+  hold one 5-min window) | smooth 250 ms; anti-burst interval/2; base-shift re-anchor (clock / PTS
+  step, not a stall); arrival + release on RAW monotonic clock (never the disciplined media clock).
+- Gap policy: hold for the retransmit up to max margin (+250 ms while the reassembler holds a partial
+  or wholly-missing frame); then keyframe wait + PLI (stream-0 meta NACK pli=true), rate-limited 250 ms.
+- Sender: TX queue = byte ring 16 MiB / 64 AUs (>= 150 ms stall at any 4K60 rate); overflow drops oldest
+  queued AU (never in flight) + IDR. Retx ring 8192 dgs, O(frames) lookup. PLI -> on_need_idr.
+- Windows: `sock.zig` (Winsock), `hrtimer.zig` (QPC + high-res waitable timer). Linux receivers: SO_RCVBUF is
+  capped by net.core.rmem_max - burst after a stall overflows it (NACK recovers).
+- Evidence: `chaos_test.zig` (10-min traces: this-rig 6 seeds zero >1.5-frame intervals; wifi-ish; congested),
+  `e2e_test.zig` (real stack through a chaos relay, both OSes).
+- Known gap: MetaRate (receiver rate hints) is ignored by the native sender; the Go supervisor does not read
+  meta on native routes -> rate adaptation inactive on native routes.
