@@ -821,6 +821,7 @@ pub const Dec = struct {
             const ours = !d.dec_provides; // software mode: we own the output sample
             if (ours) {
                 if (!d.ensureOutSample()) return -1;
+                _ = d.out_buf.?.v.SetCurrentLength(@ptrCast(d.out_buf.?), 0); // reused sample: empty it
                 ob.pSample = d.out_smp;
             }
             var status: u32 = 0;
@@ -937,8 +938,18 @@ pub const Dec = struct {
         defer mf.release(buf.?);
         var b2raw: ?*anyopaque = null;
         if (mf.failed(mf.qi(buf.?, &mf.swdec.IID_2DBuffer, &b2raw)) or b2raw == null) {
-            d.reason = .sw_decode_unsupported; // no pitch information: refuse rather than guess
-            return .dead;
+            // Our own output sample is a plain memory buffer (no IMF2DBuffer): the software decoder
+            // writes NV12 at its default stride = width rounded to 16, rows recovered from the length.
+            var p: ?[*]u8 = null;
+            var maxl: u32 = 0;
+            var cur: u32 = 0;
+            if (mf.failed(buf.?.v.Lock(@ptrCast(buf.?), &p, &maxl, &cur)) or p == null) {
+                d.reason = .view_failed;
+                return .dead;
+            }
+            defer _ = buf.?.v.Unlock(@ptrCast(buf.?));
+            const pitch: i32 = (d.in_w + 15) & ~@as(i32, 15);
+            return d.uploadAndBlit(p.?, pitch, cur);
         }
         const b2: *Buf2D = @ptrCast(@alignCast(b2raw.?));
         defer mf.release(@as(*mf.IUnk, @ptrCast(@alignCast(b2))));
@@ -951,6 +962,12 @@ pub const Dec = struct {
             return .dead;
         }
         defer _ = b2.v.Unlock2D(@ptrCast(b2));
+        return d.uploadAndBlit(scan0.?, pitch, clen);
+    }
+
+    // uploadAndBlit: one UpdateSubresource of the NV12 frame at scan0 (pitch, total length clen) into
+    // the coded-size upload texture, then the VP blit into the destination under the access sync.
+    fn uploadAndBlit(d: *Dec, scan0: [*]u8, pitch: i32, clen: u32) Publish {
         const geo = nv12Geometry(d.in_w, d.in_h, pitch, clen) orelse {
             d.reason = .sw_decode_unsupported; // bottom-up or inconsistent layout
             return .dead;
@@ -960,7 +977,7 @@ pub const Dec = struct {
             return .dead;
         }
         const tex = d.up_tex.?;
-        d.ctx.v.UpdateSubresource(@ptrCast(d.ctx), tex, 0, null, scan0.?, @intCast(pitch), 0);
+        d.ctx.v.UpdateSubresource(@ptrCast(d.ctx), tex, 0, null, scan0, @intCast(pitch), 0);
         const in_view = d.inputView(tex, 0) orelse {
             d.reason = .view_failed;
             return .dead;
@@ -989,26 +1006,37 @@ pub const Dec = struct {
     fn ensureUploadTex(d: *Dec, w: u32, h: u32) bool {
         if (d.up_tex != null and d.up_w == w and d.up_h == h) return true;
         d.dropUploadTex();
-        var td = mf.D3D11_TEXTURE2D_DESC{
-            .Width = w,
-            .Height = h,
-            .MipLevels = 1,
-            .ArraySize = 1,
-            .Format = mf.swdec.fmt_nv12,
-            .SampleCount = 1,
-            .SampleQuality = 0,
-            .Usage = 0, // DEFAULT: UpdateSubresource target
-            .BindFlags = mf.swdec.bind_srv,
-            .CPUAccessFlags = 0,
-            .MiscFlags = 0,
-        };
-        var t: ?*anyopaque = null;
-        if (mf.failed(d.dev.v.CreateTexture2D(@ptrCast(d.dev), &td, null, &t)) or t == null) return false;
-        d.up_tex = t.?;
-        d.up_w = w;
-        d.up_h = h;
-        api.traceStage("dec sw upload texture {d}x{d} NV12", .{ w, h });
-        return true;
+        // VP input-view rules for an NV12 texture vary by driver: try the bind sets in order and keep
+        // the first one CreateVideoProcessorInputView accepts (one create per coded-size change only).
+        const binds = [_]u32{ mf.swdec.bind_decoder, mf.swdec.bind_srv | mf.swdec.bind_rt, mf.swdec.bind_srv, 0 };
+        for (binds) |bf| {
+            var td = mf.D3D11_TEXTURE2D_DESC{
+                .Width = w,
+                .Height = h,
+                .MipLevels = 1,
+                .ArraySize = 1,
+                .Format = mf.swdec.fmt_nv12,
+                .SampleCount = 1,
+                .SampleQuality = 0,
+                .Usage = 0, // DEFAULT: UpdateSubresource target
+                .BindFlags = bf,
+                .CPUAccessFlags = 0,
+                .MiscFlags = 0,
+            };
+            var t: ?*anyopaque = null;
+            if (mf.failed(d.dev.v.CreateTexture2D(@ptrCast(d.dev), &td, null, &t)) or t == null) continue;
+            if (d.inputView(t.?, 0) == null) {
+                mf.release(@as(*mf.IUnk, @ptrCast(@alignCast(t.?))));
+                continue;
+            }
+            d.up_tex = t.?;
+            d.up_w = w;
+            d.up_h = h;
+            api.traceStage("dec sw upload texture {d}x{d} NV12 bind={x}", .{ w, h, bf });
+            return true;
+        }
+        api.traceStage("dec sw upload texture {d}x{d}: no bind set accepted by the VP", .{ w, h });
+        return false;
     }
 
     fn dropUploadTex(d: *Dec) void {
