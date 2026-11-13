@@ -745,6 +745,7 @@ func run(parent context.Context, serviceMode bool) error {
 	// (live headroom/cap/reserve + the shared learned-cost file).
 	vramBudget := featurehost.WireVramBudget(mediaLinkCfg, gpuGovSampler, featurehost.VramCostPath(), log)
 	medialink.OnResolutionCapChange = mfenc.NoteDecodeResizeGrace // decoder re-init grace on a cap change
+	medialink.DecodeCapHeight = mfenc.DecodeCapHeight             // CPU decode mode (1e) caps the sender's coded height
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,
 		Encoder: encFac, Decoder: decFac, UDP: cfg.Features.MediaLink.UDPEnabled(), // §2.5 UDP datagram profile (reachability-gated, TCP fallback; mediaLink.transport="tcp" disables)

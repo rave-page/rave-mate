@@ -1,7 +1,7 @@
 //! dec.zig - GPU-resident H.264/HEVC decode + publish (zigmedia inc 2, the receive side).
 //!
-//! Today's receive path is the sender path's mirror image and worse: wire AU → ffmpeg child →
-//! 33 MB raw RGBA per 4K frame back up a stdout pipe → Go buffer → Spout SendImage (a second
+//! Today's receive path is the sender path's mirror image and worse: wire AU â†’ ffmpeg child â†’
+//! 33 MB raw RGBA per 4K frame back up a stdout pipe â†’ Go buffer â†’ Spout SendImage (a second
 //! upload). Here the compressed AUs ride an inbound SHM ring into this child, a D3D11-aware
 //! decoder MFT turns them into NV12 surfaces on OUR device, and the video processor blits each one
 //! straight into the destination Spout sender's shared texture. No raw frame ever crosses a pipe
@@ -14,8 +14,8 @@
 //! receiver's IsFrameNew() hint goes stale - content updates are still seen, because receivers copy
 //! the texture every tick. Same trade cap.zig already accepts on the capture side.
 //!
-//! Synchronisation is cap.zig's, in the same preference order (keyed mutex → Spout's named access
-//! mutex → unsynchronised + a counted flag) with the same rule: the acquire timeout is ALWAYS
+//! Synchronisation is cap.zig's, in the same preference order (keyed mutex â†’ Spout's named access
+//! mutex â†’ unsynchronised + a counted flag) with the same rule: the acquire timeout is ALWAYS
 //! bounded and the lock covers ONE GPU-queued Blt and nothing else. Waiting on the decoder happens
 //! outside it.
 //!
@@ -52,7 +52,7 @@ pub const acquire_ms: u32 = 3;
 /// AUPOOL bounds the input-sample ring. An MFT may hold an input sample after ProcessInput
 /// returns, so a sample must not be reused immediately; 4 round-robin slots mean a slot is only
 /// reused after 3 further accepted submissions. Cap in BYTES = AUPOOL * au_cap (au_cap is derived
-/// from the ring size at open, 512 KiB..4 MiB) → at most 16 MiB of MF memory buffers per session.
+/// from the ring size at open, 512 KiB..4 MiB) â†’ at most 16 MiB of MF memory buffers per session.
 /// Policy: an AU larger than au_cap gets a ONE-OFF sample released right after ProcessInput
 /// (rare - a 4K IDR at 50 Mbps is ~1 MB) rather than being dropped.
 const AUPOOL = 4;
@@ -168,6 +168,19 @@ pub const Dec = struct {
     views: [VIEWCACHE]ViewEntry = @splat(.{}),
     view_idx: usize = 0,
 
+    // SOFTWARE mode (VRAM-light CPU decode): no D3D manager on the decoder (no DXVA, no GPU DPB);
+    // decoded NV12 lands in system memory, ONE UpdateSubresource puts it into up_tex (coded size,
+    // ~3 MB at 1080p) and the same VP scales it into the destination. out_smp: our output sample when
+    // the software MFT does not provide its own (size from GetOutputStreamInfo, re-sized on change).
+    sw: bool = false,
+    threads: u32 = 0,
+    out_smp: ?*mf.IMFSample = null,
+    out_buf: ?*mf.IMFMediaBuffer = null,
+    out_cap: u32 = 0,
+    up_tex: ?*anyopaque = null,
+    up_w: u32 = 0,
+    up_h: u32 = 0,
+
     in_w: i32,
     in_h: i32,
     out_w: i32,
@@ -200,7 +213,31 @@ pub const Dec = struct {
         return @intCast(q);
     }
 
-    /// open builds the whole pipeline. Every failure is CLEAN: out.* names the rung, the caller
+    /// Mode selects HW (DXVA) or SOFTWARE decode; threads bounds the software decoder (0 = default).
+    pub const Mode = struct { sw: bool = false, threads: u32 = 0 };
+
+    /// openMode is open() with a decode mode. SOFTWARE skips the D3D manager handoff (no DXVA, no GPU
+    /// DPB) - the device stays for the upload texture + video processor into the destination.
+    pub fn openMode(
+        gpa: std.mem.Allocator,
+        luid: i64,
+        hevc: bool,
+        in_w: i32,
+        in_h: i32,
+        out_w: i32,
+        out_h: i32,
+        fps_n: i32,
+        fps_d: i32,
+        share: u64,
+        dname: []const u8,
+        ring_bytes: u64,
+        mode: Mode,
+        out: *Reason,
+    ) OpenErr!*Dec {
+        return openImpl(gpa, luid, hevc, in_w, in_h, out_w, out_h, fps_n, fps_d, share, dname, ring_bytes, mode, out);
+    }
+
+    /// open builds the whole HW pipeline. Every failure is CLEAN: out.* names the rung, the caller
     /// emits `opened{cap:"downgraded"}` and Go reopens the route on the ffmpeg decode path.
     pub fn open(
         gpa: std.mem.Allocator,
@@ -217,9 +254,30 @@ pub const Dec = struct {
         ring_bytes: u64,
         out: *Reason,
     ) OpenErr!*Dec {
+        return openImpl(gpa, luid, hevc, in_w, in_h, out_w, out_h, fps_n, fps_d, share, dname, ring_bytes, .{}, out);
+    }
+
+    fn openImpl(
+        gpa: std.mem.Allocator,
+        luid: i64,
+        hevc: bool,
+        in_w: i32,
+        in_h: i32,
+        out_w: i32,
+        out_h: i32,
+        fps_n: i32,
+        fps_d: i32,
+        share: u64,
+        dname: []const u8,
+        ring_bytes: u64,
+        mode: Mode,
+        out: *Reason,
+    ) OpenErr!*Dec {
         out.* = .decoder_failed;
         const d = gpa.create(Dec) catch return error.DecOpenFailed;
         d.* = .{
+            .sw = mode.sw,
+            .threads = mode.threads,
             .gpa = gpa,
             .in_w = in_w,
             .in_h = in_h,
@@ -246,7 +304,7 @@ pub const Dec = struct {
         try d.openDevice(luid);
         try d.openDest(gpa, dname, out);
         try d.openVideoProcessor(out);
-        try d.bindDecoder(out);
+        if (d.sw) try d.bindSoftwareDecoder(out) else try d.bindDecoder(out);
         try d.negotiateTypes(out);
         try d.buildInputPool();
 
@@ -334,7 +392,7 @@ pub const Dec = struct {
         }
     }
 
-    // openVideoProcessor builds the VP for decoded-NV12 → destination-format, plus the output view
+    // openVideoProcessor builds the VP for decoded-NV12 â†’ destination-format, plus the output view
     // over the sender's texture. Content desc input = the DECODED size, output = the sender's.
     fn openVideoProcessor(d: *Dec, out: *Reason) OpenErr!void {
         out.* = .fmt_unsupported;
@@ -462,6 +520,79 @@ pub const Dec = struct {
         return error.DecOpenFailed;
     }
 
+    // bindSoftwareDecoder binds a SOFTWARE decoder MFT (no D3D manager => system-memory NV12, no DXVA
+    // surfaces on the card). Prefers a synchronous MFT (the in-box Microsoft H264 Video Decoder is);
+    // worker threads bounded via CODECAPI_AVDecNumWorkerThreads so the DJ PC's audio/visual apps keep
+    // their cores. No candidate (e.g. HEVC without the extension) => sw_decode_unsupported.
+    fn bindSoftwareDecoder(d: *Dec, out: *Reason) OpenErr!void {
+        out.* = .sw_decode_unsupported;
+        const sub = if (d.hevc) api.FMT_HEVC else api.FMT_H264;
+        const ti = api.RegisterTypeInfo{ .major = api.MT_VIDEO, .sub = sub };
+        const to = api.RegisterTypeInfo{ .major = api.MT_VIDEO, .sub = api.FMT_NV12 };
+        var acts: ?[*]*mf.IMFActivate = null;
+        var n: u32 = 0;
+        api.traceStage("dec sw MFTEnumEx", .{});
+        if (mf.failed(api.enumMFT(api.CAT_VIDEO_DECODER, api.ENUM_SORTFILTER, &ti, &to, &acts, &n)) or n == 0 or acts == null) {
+            return error.DecOpenFailed;
+        }
+        const list = acts.?[0..n];
+        defer {
+            for (list) |a| mf.release(a);
+            api.coTaskMemFree(@ptrCast(acts));
+        }
+        for (list) |a| {
+            var raw: ?*anyopaque = null;
+            if (mf.failed(a.v.ActivateObject(@ptrCast(a), &api.IID_TRANSFORM, &raw)) or raw == null) continue;
+            const t: *mf.IMFTransform = @ptrCast(@alignCast(raw.?));
+            var attrs: ?*mf.IMFAttributes = null;
+            if (!mf.failed(t.v.GetAttributes(@ptrCast(t), &attrs)) and attrs != null) {
+                api.setU32(attrs.?, &api.A_ASYNC_UNLOCK, 1);
+                api.setU32(attrs.?, &api.A_LOW_LATENCY, 1);
+                mf.release(attrs.?);
+            }
+            if (d.threads > 0) {
+                var craw: ?*anyopaque = null;
+                if (!mf.failed(mf.qi(t, &mf.swdec.IID_CodecAPI, &craw)) and craw != null) {
+                    const c: *mf.ICodecAPI = @ptrCast(@alignCast(craw.?));
+                    const v = mf.swdec.Variant{ .vt = mf.swdec.vt_ui4, .val = d.threads };
+                    _ = c.v.SetValue(@ptrCast(c), &mf.swdec.AVDecNumWorkerThreads, &v);
+                    mf.release(c);
+                }
+            }
+            d.dec = t;
+            d.has_dec = true;
+            const nm = "software decoder";
+            @memcpy(d.name_buf[0..nm.len], nm);
+            d.name_len = nm.len;
+            return;
+        }
+        return error.DecOpenFailed;
+    }
+
+    // ensureOutSample (software mode, MFT does not provide samples) sizes our output sample to the
+    // decoder's current cbSize. Bounded: one sample, re-allocated only when the coded size grows.
+    fn ensureOutSample(d: *Dec) bool {
+        var osi = api.OutputStreamInfo{ .dwFlags = 0, .cbSize = 0, .cbAlignment = 0 };
+        if (mf.failed(d.dec.v.GetOutputStreamInfo(@ptrCast(d.dec), 0, &osi)) or osi.cbSize == 0) return false;
+        if (d.out_smp != null and d.out_cap >= osi.cbSize) return true;
+        if (d.out_smp) |s| mf.release(s);
+        if (d.out_buf) |b| mf.release(b);
+        d.out_smp = null;
+        d.out_buf = null;
+        var mb: ?*mf.IMFMediaBuffer = null;
+        if (mf.failed(api.createMemoryBuffer(osi.cbSize, &mb)) or mb == null) return false;
+        var smp: ?*mf.IMFSample = null;
+        if (mf.failed(api.createSample(&smp)) or smp == null) {
+            mf.release(mb.?);
+            return false;
+        }
+        _ = smp.?.v.AddBuffer(@ptrCast(smp.?), mb.?);
+        d.out_buf = mb.?;
+        d.out_smp = smp.?;
+        d.out_cap = osi.cbSize;
+        return true;
+    }
+
     // negotiateTypes sets the compressed input type and the NV12 output type, then resolves the
     // async/sync drive mode and the output-sample ownership.
     fn negotiateTypes(d: *Dec, out: *Reason) OpenErr!void {
@@ -481,10 +612,13 @@ pub const Dec = struct {
             d.dec_out_size = osi.cbSize;
         }
         if (!d.dec_provides) {
-            // Without MFT-provided samples we would have to allocate the NV12 surface ourselves and
-            // hand it in - a different (and untested here) contract. Downgrade instead of guessing.
-            out.* = .sw_decode_unsupported;
-            return error.DecOpenFailed;
+            // HW: without MFT-provided samples we would have to allocate the NV12 SURFACE ourselves - a
+            // different (untested) contract; downgrade. SOFTWARE: system-memory output is the contract;
+            // we hand in our own sample.
+            if (!d.sw or !d.ensureOutSample()) {
+                out.* = .sw_decode_unsupported;
+                return error.DecOpenFailed;
+            }
         }
         var eraw: ?*anyopaque = null;
         if (!mf.failed(mf.qi(d.dec, &api.IID_EVGEN, &eraw)) and eraw != null) {
@@ -547,6 +681,7 @@ pub const Dec = struct {
         d.coded_h = nh;
         d.resizes += 1;
         d.src_rect = .{ .left = 0, .top = 0, .right = nw, .bottom = nh };
+        d.dropUploadTex(); // software mode: re-created at the new coded size on the next publish
         // Flush the bounded input-view cache: every entry is bound to the OLD enumerator AND the
         // pre-resize DPB surfaces. inputView() rebuilds against the new enumerator on the next publish
         // (no stale views, no leak across repeated toggles).
@@ -683,6 +818,11 @@ pub const Dec = struct {
     fn harvest(d: *Dec) i32 {
         while (true) {
             var ob = api.OutputDataBuffer{};
+            const ours = !d.dec_provides; // software mode: we own the output sample
+            if (ours) {
+                if (!d.ensureOutSample()) return -1;
+                ob.pSample = d.out_smp;
+            }
             var status: u32 = 0;
             const hr = d.dec.v.ProcessOutput(@ptrCast(d.dec), 0, 1, &ob, &status);
             if (hr == api.E_STREAM_CHANGE) {
@@ -706,8 +846,8 @@ pub const Dec = struct {
             }
             const s = ob.pSample orelse return 0;
             if (ob.pEvents) |ev| mf.release(ev);
-            const v = d.publish(s);
-            mf.release(s);
+            const v = if (d.sw) d.publishSoftware(s) else d.publish(s);
+            if (!ours) mf.release(s);
             switch (v) {
                 .ok => d.pub_n += 1,
                 .timeout => d.mtx_timeouts += 1, // frame simply not published; never a spin
@@ -782,6 +922,107 @@ pub const Dec = struct {
             return .dead;
         }
         return .ok;
+    }
+
+    /// publishSoftware uploads one system-memory NV12 frame (software decode) into the coded-size
+    /// upload texture and blits it into the destination through the SAME VP + sync as publish(). The
+    /// upload is one UpdateSubresource of the coded frame (3 MB at 1080p); colour conversion and the
+    /// upscale to the nominal destination stay on the GPU VP - never a 33 MB BGRA write on the CPU.
+    pub fn publishSoftware(d: *Dec, s: *mf.IMFSample) Publish {
+        var buf: ?*mf.IMFMediaBuffer = null;
+        if (mf.failed(s.v.ConvertToContiguousBuffer(@ptrCast(s), &buf)) or buf == null) {
+            d.reason = .view_failed;
+            return .dead;
+        }
+        defer mf.release(buf.?);
+        var b2raw: ?*anyopaque = null;
+        if (mf.failed(mf.qi(buf.?, &mf.swdec.IID_2DBuffer, &b2raw)) or b2raw == null) {
+            d.reason = .sw_decode_unsupported; // no pitch information: refuse rather than guess
+            return .dead;
+        }
+        const b2: *Buf2D = @ptrCast(@alignCast(b2raw.?));
+        defer mf.release(@as(*mf.IUnk, @ptrCast(@alignCast(b2))));
+        var clen: u32 = 0;
+        _ = b2.v.GetContiguousLength(@ptrCast(b2), &clen);
+        var scan0: ?[*]u8 = null;
+        var pitch: i32 = 0;
+        if (mf.failed(b2.v.Lock2D(@ptrCast(b2), &scan0, &pitch)) or scan0 == null) {
+            d.reason = .view_failed;
+            return .dead;
+        }
+        defer _ = b2.v.Unlock2D(@ptrCast(b2));
+        const geo = nv12Geometry(d.in_w, d.in_h, pitch, clen) orelse {
+            d.reason = .sw_decode_unsupported; // bottom-up or inconsistent layout
+            return .dead;
+        };
+        if (!d.ensureUploadTex(geo.w, geo.h)) {
+            d.reason = .view_failed;
+            return .dead;
+        }
+        const tex = d.up_tex.?;
+        d.ctx.v.UpdateSubresource(@ptrCast(d.ctx), tex, 0, null, scan0.?, @intCast(pitch), 0);
+        const in_view = d.inputView(tex, 0) orelse {
+            d.reason = .view_failed;
+            return .dead;
+        };
+        switch (d.acquire()) {
+            .ok => {},
+            .timeout => return .timeout,
+            .dead => {
+                d.reason = .acquire_dead;
+                return .dead;
+            },
+        }
+        const stream = api.VPStream{ .Enable = 1, .OutputIndex = 0, .InputFrameOrField = 0, .PastFrames = 0, .FutureFrames = 0, .pInputSurface = in_view };
+        const ok = !mf.failed(d.vctx.v.VideoProcessorBlt(@ptrCast(d.vctx), d.vproc, d.dst_view, 0, 1, &stream));
+        if (ok) d.ctx.v.Flush(@ptrCast(d.ctx));
+        d.release();
+        if (!ok) {
+            d.reason = .blt_failed;
+            return .dead;
+        }
+        return .ok;
+    }
+
+    // ensureUploadTex (re)creates the coded-size NV12 upload texture; a size change drops the old one
+    // first (never two on the card) and flushes the input-view cache bound to it.
+    fn ensureUploadTex(d: *Dec, w: u32, h: u32) bool {
+        if (d.up_tex != null and d.up_w == w and d.up_h == h) return true;
+        d.dropUploadTex();
+        var td = mf.D3D11_TEXTURE2D_DESC{
+            .Width = w,
+            .Height = h,
+            .MipLevels = 1,
+            .ArraySize = 1,
+            .Format = mf.swdec.fmt_nv12,
+            .SampleCount = 1,
+            .SampleQuality = 0,
+            .Usage = 0, // DEFAULT: UpdateSubresource target
+            .BindFlags = mf.swdec.bind_srv,
+            .CPUAccessFlags = 0,
+            .MiscFlags = 0,
+        };
+        var t: ?*anyopaque = null;
+        if (mf.failed(d.dev.v.CreateTexture2D(@ptrCast(d.dev), &td, null, &t)) or t == null) return false;
+        d.up_tex = t.?;
+        d.up_w = w;
+        d.up_h = h;
+        api.traceStage("dec sw upload texture {d}x{d} NV12", .{ w, h });
+        return true;
+    }
+
+    fn dropUploadTex(d: *Dec) void {
+        const t = d.up_tex orelse return;
+        for (0..VIEWCACHE) |i| {
+            if (d.views[i].tex == t) {
+                if (d.views[i].view) |v| mf.release(@as(*mf.IUnk, @ptrCast(@alignCast(v))));
+                d.views[i] = .{};
+            }
+        }
+        mf.release(@as(*mf.IUnk, @ptrCast(@alignCast(t))));
+        d.up_tex = null;
+        d.up_w = 0;
+        d.up_h = 0;
     }
 
     // inputView returns a cached VP input view for (tex, sub), creating + caching on a miss.
@@ -897,6 +1138,11 @@ pub const Dec = struct {
 
     /// close releases everything, safe on every PARTIAL-open path (errdefer runs it).
     pub fn close(d: *Dec) void {
+        d.dropUploadTex();
+        if (d.out_smp) |s| mf.release(s);
+        if (d.out_buf) |b| mf.release(b);
+        d.out_smp = null;
+        d.out_buf = null;
         for (0..AUPOOL) |i| {
             if (d.in_smp[i]) |s| mf.release(s);
             if (d.in_buf[i]) |b| mf.release(b);
@@ -938,6 +1184,49 @@ pub const Dec = struct {
         gpa.destroy(d);
     }
 };
+
+// Buf2D is IMF2DBuffer with the calls software mode needs (vtable order per mfobjects.idl).
+const Buf2D = extern struct {
+    v: *const extern struct {
+        _iunk: [3]mf.VOP_,
+        Lock2D: *const fn (*anyopaque, *?[*]u8, *i32) callconv(.winapi) mf.HRESULT,
+        Unlock2D: *const fn (*anyopaque) callconv(.winapi) mf.HRESULT,
+        _p: [2]mf.VOP_, // GetScanline0AndPitch IsContiguousFormat
+        GetContiguousLength: *const fn (*anyopaque, *u32) callconv(.winapi) mf.HRESULT,
+    },
+};
+
+// nv12Geometry derives the upload texture size from a locked NV12 frame: width = display width rounded
+// up to even (<= pitch); height = the ALLOCATED luma rows (the chroma plane starts pitch*rows after
+// scanline 0 - a 1080 stream is laid out with 1088 rows), recovered from the contiguous length
+// (pitch * rows * 3/2). The VP source rect crops back to the display size. null = refuse (bottom-up
+// pitch, or a length that does not describe an NV12 frame of this width).
+fn nv12Geometry(in_w: i32, in_h: i32, pitch: i32, clen: u32) ?struct { w: u32, h: u32 } {
+    if (pitch <= 0 or in_w <= 0 or in_h <= 0) return null;
+    const p: u64 = @intCast(pitch);
+    const w: u64 = (@as(u64, @intCast(in_w)) + 1) & ~@as(u64, 1);
+    if (w > p) return null;
+    var rows: u64 = @intCast(in_h);
+    if (clen > 0) {
+        rows = (@as(u64, clen) * 2) / (3 * p);
+        if (rows < @as(u64, @intCast(in_h))) return null;
+    }
+    rows = (rows + 1) & ~@as(u64, 1);
+    if (rows > 16384) return null;
+    return .{ .w = @intCast(w), .h = @intCast(rows) };
+}
+
+test "nv12 geometry: 1080p in a 1088-row buffer, odd widths, refusals" {
+    const g = nv12Geometry(1920, 1080, 1920, 1920 * 1088 * 3 / 2).?;
+    try std.testing.expectEqual(@as(u32, 1920), g.w);
+    try std.testing.expectEqual(@as(u32, 1088), g.h);
+    const g2 = nv12Geometry(1279, 719, 1280, 1280 * 720 * 3 / 2).?;
+    try std.testing.expectEqual(@as(u32, 1280), g2.w);
+    try std.testing.expectEqual(@as(u32, 720), g2.h);
+    try std.testing.expect(nv12Geometry(1920, 1080, -1920, 0) == null); // bottom-up
+    try std.testing.expect(nv12Geometry(1920, 1080, 1280, 0) == null); // pitch < width
+    try std.testing.expect(nv12Geometry(1920, 1080, 1920, 1920 * 500) == null); // too short
+}
 
 // unpackFrameSize splits MF_MT_FRAME_SIZE (packed width<<32 | height) into signed dims, matching
 // mtVideo's packing on the encode side. Pure - the device-free half of the stream-change handler.
@@ -999,7 +1288,7 @@ test "frame-size unpack matches the MF_MT_FRAME_SIZE packing" {
 }
 
 test "au pool capacity is ring-derived and clamped" {
-    try std.testing.expectEqual(au_cap_min, Dec.auCapFor(4 * 1024)); // tiny ring → the floor
+    try std.testing.expectEqual(au_cap_min, Dec.auCapFor(4 * 1024)); // tiny ring â†’ the floor
     try std.testing.expectEqual(@as(u32, 1024 * 1024), Dec.auCapFor(4 * 1024 * 1024)); // 4 MiB ring
     try std.testing.expectEqual(au_cap_max, Dec.auCapFor(64 * 1024 * 1024)); // ceiling holds
 }

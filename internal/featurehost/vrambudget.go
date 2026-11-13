@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/decmode"
 	"rave.page/mate/internal/encoderscan"
 	"rave.page/mate/internal/gpubench"
 	"rave.page/mate/internal/gpubudget"
@@ -84,6 +85,18 @@ func WireVramBudget(liveCfg func() config.MediaLinkFeature, sampler gpumem.Sampl
 		return mfenc.DecVerdict{Allow: d.Admit, Present: d.Present, FreeMB: d.FreeMB,
 			CostMB: d.CostMB, ReserveMB: d.ReserveMB, Reason: d.Reason}
 	}
+	// Adaptive HW/CPU decode (1e): software mode admitted on its own small cost; config read live.
+	mfenc.DecAdmitCPU = func(inW, inH, _, _, fps int) mfenc.DecVerdict {
+		d := b.AdmitCost(gpubudget.OpDecodeSW, gpubudget.Geom{W: inW, H: inH, FPS: fps}, mfenc.CPUDecodeCostMB(inW, inH))
+		return mfenc.DecVerdict{Allow: d.Admit, Present: d.Present, FreeMB: d.FreeMB, CostMB: d.CostMB, ReserveMB: d.ReserveMB, Reason: d.Reason}
+	}
+	mfenc.DecCPUFallback = func() (bool, int, decmode.Config) {
+		c := liveCfg()
+		return c.CPUDecodeFallbackEnabled(), decmode.Threads(c.CPUDecodeThreads, 0), decmode.Config{
+			PromoteBufferMB: uint64(max(c.HWPromoteBufferMB, 0)),
+			Dwell:           time.Duration(max(c.HWPromoteDwellSec, 0)) * time.Second,
+		}
+	}
 	mfenc.DecObserve = func(inW, inH, fps int, hevc bool, mb float64) {
 		b.Observe(gpubudget.OpDecode, gpubudget.Geom{W: inW, H: inH, FPS: fps, Codec: decCodec(hevc)}, mb)
 	}
@@ -99,7 +112,17 @@ func WireVramBudget(liveCfg func() config.MediaLinkFeature, sampler gpumem.Sampl
 		AdmitSender: func(w, h int) mediaroute.Admission { return admission(b.AdmitSender(w, h)) },
 		// Codec unknown pre-offer: HEVC is the costlier learned 4K decode on the rig (114 vs 56 MB).
 		AdmitReceive: func(w, h, fps int, newSender bool) mediaroute.Admission {
-			return admission(b.AdmitReceive(w, h, fps, "hevc", newSender))
+			d := b.AdmitReceive(w, h, fps, "hevc", newSender)
+			if !d.Admit && liveCfg().CPUDecodeFallbackEnabled() {
+				// HW decode does not fit: the receive still opens in CPU decode mode (1e) when that fits.
+				// The sender is capped once the decoder reports CPU mode, so the coded size here is the
+				// worst case (nominal) - conservative for the upload texture.
+				if c := b.AdmitReceiveDecode(w, h, fps, "hevc", newSender, mfenc.CPUDecodeCostMB(w, h)); c.Admit {
+					c.Reason = "HW decode does not fit (" + d.Reason + ") - opening in CPU decode mode: " + c.Reason
+					return admission(c)
+				}
+			}
+			return admission(d)
 		},
 		GovernorFloorMB: gpubudget.GovernorFloorMB(pol.Mode, uint64(liveCfg().ResolvedVramReserveMB())),
 	}

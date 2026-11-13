@@ -161,6 +161,7 @@ func (rm *RouteManager) congestGovernor(ctx context.Context, rio *routeIO, udp s
 				h = minRateHint(h, rateLadder(free, rm.govFloorMB, ceil, baseFPS, stream))
 			}
 		}
+		applyDecodeCap(&h)           // CPU decode mode: ask for a coded size the software decoder sustains
 		capBudgetToCoded(&h, budget) // item 2: a resolution cap lowers the bitrate to the coded-size model
 		h.Type, h.Stream = MetaRate, stream
 		rio.st.setBudget(rm.budgetModeStr(), h.MaxBitrateKbps, ceil, 0, budgetReason(h, ceil, baseFPS)) // item 5

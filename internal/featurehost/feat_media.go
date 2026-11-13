@@ -132,6 +132,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 	// Resolution-cap changes grant the local decoder a re-init grace so a coded-size switch is not
 	// mistaken for a frozen-destination wedge (the destination geometry stays nominal regardless).
 	medialink.OnResolutionCapChange = mfenc.NoteDecodeResizeGrace
+	medialink.DecodeCapHeight = mfenc.DecodeCapHeight // CPU decode mode (1e) caps the sender's coded height
 	// Plan-driven AUTO device selection (throughput-aware; pin/avoid unchanged; unmeasured => engine
 	// default). The sender-side CPU% is not sampled here (a HW encoder is the common case); nil.
 	encDevResolver := NewEncodeDeviceResolver(liveCfg, f.vram.Budget, nil, rt.Log)

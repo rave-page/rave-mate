@@ -123,8 +123,18 @@ func (b *Budget) AdmitSender(w, h int) Decision {
 // destination sender and its receiver follow cost. A parked/kept destination (newSender=false) is
 // already paid for and triggers nothing new in Resolume.
 func (b *Budget) AdmitReceive(w, h, fps int, codec string, newSender bool) Decision {
+	return b.AdmitReceiveDecode(w, h, fps, codec, newSender, 0)
+}
+
+// AdmitReceiveDecode is AdmitReceive with the decode cost overridden (decodeMB > 0: e.g. the SOFTWARE
+// decode mode's small upload cost, so a receive the HW pipeline cannot afford is still admitted in
+// CPU mode instead of held).
+func (b *Budget) AdmitReceiveDecode(w, h, fps int, codec string, newSender bool, decodeMB float64) Decision {
 	gd := Geom{W: w, H: h, FPS: fps, Codec: codec}
 	cost := b.cost(OpDecode, gd)
+	if decodeMB > 0 {
+		cost = Cost{MB: decodeMB, Source: "estimate"}
+	}
 	follow := 0.0
 	if newSender {
 		gs := Geom{W: w, H: h, Codec: "nrgba"}
@@ -134,6 +144,16 @@ func (b *Budget) AdmitReceive(w, h, fps int, codec string, newSender bool) Decis
 	}
 	d := AdmitNeed(b.inputs(), OpReceive, gd, cost, follow, b.pol)
 	b.record(OpReceive, d)
+	return d
+}
+
+// OpDecodeSW is the SOFTWARE decode mode (coded-size NV12 upload texture + VP; destination excluded).
+const OpDecodeSW Op = "decode-sw"
+
+// AdmitCost admits an op whose cost the caller computed (no learned entry yet, e.g. software decode).
+func (b *Budget) AdmitCost(op Op, g Geom, costMB float64) Decision {
+	d := AdmitNeed(b.inputs(), op, g, Cost{MB: costMB, Source: "estimate"}, 0, b.pol)
+	b.record(op, d)
 	return d
 }
 

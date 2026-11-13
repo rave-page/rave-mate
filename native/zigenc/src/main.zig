@@ -43,7 +43,7 @@
 //!     256 + ring_kb*1024. Sizing MUST come from src + ring_kb, never from in_w*in_h*4,
 //!     which is why a spout session requires header ver >= 2 before it maps anything.
 //!   AU record: u32 len | u32 flags(bit0 key) | i64 pts ns | data | pad to 8.
-//!   len 0xFFFFFFFF = wrap marker; tail < 16 = implicit wrap. Ring full → drop + count
+//!   len 0xFFFFFFFF = wrap marker; tail < 16 = implicit wrap. Ring full â†’ drop + count
 //!   (bounded by design; parent drains on evAU).
 //! Events (auto-reset, parent creates): <shm>-f frame ready, <shm>-c frame consumed,
 //!   <shm>-a AU appended. Both src modes open all three (uniform open/restart/teardown);
@@ -98,7 +98,7 @@ const hdr_size = 256;
 const wrap_marker: u32 = 0xFFFFFFFF;
 const hdr_magic: u32 = 0x32464D52; // 'RMF2' little-endian
 const hdr_ver_zerocopy: u32 = 2; // minimum header version that may carry src:"spout"
-// Ring bounds (design §3.1): bitrate-derived, geometry-INDEPENDENT, so a sender resize costs
+// Ring bounds (design Â§3.1): bitrate-derived, geometry-INDEPENDENT, so a sender resize costs
 // zero SHM realloc. Both ends clamp; a value outside this is a protocol error, not a resize.
 const ring_kb_min: u32 = 4 * 1024;
 const ring_kb_max: u32 = 16 * 1024;
@@ -209,7 +209,7 @@ const off_feed_fails = 120;
 // for the parent's deadline to end the whole route.
 const off_busy_drops = 124;
 
-// dir:"dec" block (design §10: the ring counters instantiated a second time, opposite direction).
+// dir:"dec" block (design Â§10: the ring counters instantiated a second time, opposite direction).
 const off_in_write = 128;
 const off_in_read = 136;
 const off_dec_busy = 152;
@@ -273,6 +273,14 @@ const Session = struct {
     dname: []u8 = &.{},
     in_ring_kb: u32 = 0,
     dec_open: ?*dec.Dec = null,
+    // dir:"dec" + sw: SOFTWARE decode (VRAM-light CPU mode, VRAM_FULL_CARD_POLICY 1e): no DXVA, the
+    // decoded NV12 is uploaded into a coded-size texture and scaled into the same destination.
+    // dec_threads bounds the software decoder's worker threads (parent clamps; 0 = decoder default).
+    dec_threads: u32 = 0,
+    // keygate: a FRESH decoder (mode swap / software mode) is fed only from the first keyframe - a
+    // P-frame without its reference decodes to garbage. key_seen latches the first keyframe.
+    keygate: bool = false,
+    key_seen: bool = false,
     // proto v5 network receive: null_dec = no decoder/destination (GPU-free tests); net_blk = the
     // mapping carries the netrx telemetry block after the ring; net = the attached receiver (set and
     // cleared by the session thread under mu); want_net = a pending attach from the stdin thread.
@@ -282,7 +290,7 @@ const Session = struct {
     net: ?*netrx.Net = null,
     want_net: ?*netrx.Params = null,
 
-    // mailbox (stdin thread → session thread)
+    // mailbox (stdin thread â†’ session thread)
     mu: Lock = .{},
     want_idr: bool = false,
     want_kbps: u32 = 0,
@@ -427,7 +435,7 @@ fn ringPut(s: *Session, data: []const u8, pts_ns: i64, key: bool) void {
 
 fn sinkPut(ctx: *anyopaque, data: []const u8, pts100: i64, key: bool) void {
     const s: *Session = @ptrCast(@alignCast(ctx));
-    ringPut(s, data, pts100 * 100, key); // MF 100ns → ns on the wire
+    ringPut(s, data, pts100 * 100, key); // MF 100ns â†’ ns on the wire
 }
 
 const OpenedEv = struct {
@@ -622,7 +630,7 @@ fn sessionMain(s: *Session) void {
     enc.close();
 }
 
-// Mailbox is one drained control snapshot (stdin thread → session thread).
+// Mailbox is one drained control snapshot (stdin thread â†’ session thread).
 const Mailbox = struct { idr: bool, kbps: u32, cap_w: i32, cap_h: i32, closing: bool };
 
 fn drainMailbox(s: *Session) Mailbox {
@@ -640,7 +648,7 @@ fn drainMailbox(s: *Session) Mailbox {
 // encode. ALLOCATION-FREE - no queue exists, so backpressure is newest-wins by construction: a
 // late encode delays the next tick and the tick is then RESYNCED, never caught up (no burst).
 //
-// Pacing is BLIND (design §6): we do not consult Spout's IsFrameNew, which would need a bound
+// Pacing is BLIND (design Â§6): we do not consult Spout's IsFrameNew, which would need a bound
 // receiver - the very GL/readback object this path removes. A static sender therefore encodes
 // duplicate frames as near-free skipped-macroblock P-frames instead of going quiet, which keeps
 // the peer's jitter buffer fed. capFrames vs AU sizes makes the cost visible.
@@ -732,13 +740,13 @@ fn decSessionMain(s: *Session) void {
         return;
     }
     var reason: dec.Reason = .decoder_failed;
-    const d = dec.Dec.open(s.gpa, s.luid, s.codec_hevc, s.in_w, s.in_h, s.out_w, s.out_h, s.fps_n, s.fps_d, s.dsh, s.dname, s.ring_size, &reason) catch {
+    const d = dec.Dec.openMode(s.gpa, s.luid, s.codec_hevc, s.in_w, s.in_h, s.out_w, s.out_h, s.fps_n, s.fps_d, s.dsh, s.dname, s.ring_size, .{ .sw = s.sw_req, .threads = s.dec_threads }, &reason) catch {
         emit(OpenedEv{ .sid = s.sid, .ok = false, .err = "native decode refused", .dir = "dec", .cap = "downgraded", .err_dst = reason.text() });
         return;
     };
     s.dec_open = d;
     s.hdr.setU32At(off_dec_flags, d.flags);
-    emit(OpenedEv{ .sid = s.sid, .ok = true, .name = d.name(), .dir = "dec", .cap = "zerocopy" });
+    emit(OpenedEv{ .sid = s.sid, .ok = true, .name = d.name(), .dir = "dec", .cap = if (s.sw_req) "software" else "zerocopy" });
     decLoop(s, d);
     const rc = d.drain();
     std.debug.print("mfenc session {d} (decode): fed={d} published={d} drain_rc={d}\n", .{ s.sid, d.fed_n, d.pub_n, rc });
@@ -815,6 +823,12 @@ fn decLoop(s: *Session, dopt: ?*dec.Dec) void {
         var n: u32 = 0;
         while (n < dec_batch) : (n += 1) {
             const rec = ringTake(s) orelse break;
+            if (!keyGateAdmit(&s.key_seen, s.keygate, rec.key)) { // fresh decoder: wait for the keyframe
+                s.hdr.setInRead(s.hdr.inRead() + rec.rec);
+                _ = SetEvent(s.ev_cons);
+                s.hdr.addAt(off_dec_dropped, 1);
+                continue;
+            }
             const t0 = qpcNs();
             const rc = d.feed(rec.data, @divTrunc(rec.pts_ns, 100));
             // Advance ONLY after feed copied the AU out of the ring.
@@ -841,6 +855,24 @@ fn decLoop(s: *Session, dopt: ?*dec.Dec) void {
         }
         if (n == 0) _ = d.pump();
     }
+}
+
+// keyGateAdmit: with the gate on, AUs before the first keyframe are dropped; the first keyframe latches
+// seen and everything after it is fed. Gate off = every AU (the pre-v6 behaviour). Pure.
+fn keyGateAdmit(seen: *bool, gate: bool, key: bool) bool {
+    if (!gate or seen.*) return true;
+    if (!key) return false;
+    seen.* = true;
+    return true;
+}
+
+test "key gate feeds a fresh decoder only from the first keyframe" {
+    var seen = false;
+    const keys = [_]bool{ false, false, true, false, true, false };
+    const want = [_]bool{ false, false, true, true, true, true };
+    for (keys, want) |k, w| try std.testing.expectEqual(w, keyGateAdmit(&seen, true, k));
+    var s2 = false;
+    try std.testing.expect(keyGateAdmit(&s2, false, false)); // gate off: unchanged behaviour
 }
 
 fn takeAttach(s: *Session) ?*netrx.Params {
@@ -952,8 +984,11 @@ const Cmd = struct {
     dfmt: u32 = 0,
     dname: []const u8 = "",
     in_ring_kb: u32 = 0,
-    // sw: take the SOFTWARE encoder tier for this session (parent's poison ledger).
+    // sw: take the SOFTWARE encoder tier for this session (parent's poison ledger); on dir:"dec" the
+    // SOFTWARE decode mode (proto v6).
     sw: bool = false,
+    threads: u32 = 0, // dir:"dec" + sw: decoder worker threads (proto v6)
+    keygate: bool = false, // dir:"dec": feed only from the first keyframe (proto v6)
     // proto v5 network receive (open + "netrx" + "meta" ops).
     null_dec: bool = false,
     net_blk: bool = false,
@@ -1025,7 +1060,7 @@ pub fn main(init: std.process.Init) !void {
     // process boundary IS the containment; the parent must survive + restart us.
     if (init.environ_map.get("RAVE_MATE_MFENC_FAULT_INJECT_THREAD") != null) {
         const t = try std.Thread.spawn(.{}, faultThread, .{});
-        t.join(); // AV fires in faultThread → process dies before join returns
+        t.join(); // AV fires in faultThread â†’ process dies before join returns
     }
     if (init.environ_map.get("RAVE_MATE_MFENC_FAULT_AFTER_FRAMES")) |v| {
         fault_after_frames = std.fmt.parseInt(u64, v, 10) catch 0;
@@ -1056,7 +1091,7 @@ pub fn main(init: std.process.Init) !void {
     // parent version-gates sending it rather than relying on the silent-ignore alone.
     emit(struct {
         ev: []const u8 = "hello",
-        ver: u32 = 5,
+        ver: u32 = 6, // v6: dir:"dec" sw (software decode) + threads + keygate
         luid: i64,
         // Active policies: the only channel that says WHICH code path this child is running.
         dev: []const u8,
@@ -1080,7 +1115,7 @@ pub fn main(init: std.process.Init) !void {
                 continue;
             },
             error.ReadFailed => break,
-        } orelse break; // EOF: parent died/closed → shut down
+        } orelse break; // EOF: parent died/closed â†’ shut down
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (trimmed.len == 0) continue;
         _ = arena_state.reset(.retain_capacity);
@@ -1141,6 +1176,8 @@ pub fn main(init: std.process.Init) !void {
                 .in_ring_kb = cmd.in_ring_kb,
                 .null_dec = dir_dec and cmd.null_dec,
                 .net_blk = dir_dec and cmd.net_blk,
+                .dec_threads = if (dir_dec) @min(cmd.threads, 16) else 0,
+                .keygate = dir_dec and (cmd.keygate or cmd.sw),
             };
             s.thread = try std.Thread.spawn(.{}, sessionMain, .{s});
             try sessions.put(cmd.sid, s);
@@ -1237,7 +1274,7 @@ test "capheight control op decodes to the Cmd fields (proto v4 wire contract)" {
 }
 
 test "spout ring bounds are the bitrate-derived window, geometry-independent" {
-    // 4K60 @ 50 Mbps → half a second of bitstream → the 4 MiB floor; 8K/200 Mbps stays under
+    // 4K60 @ 50 Mbps â†’ half a second of bitstream â†’ the 4 MiB floor; 8K/200 Mbps stays under
     // the 16 MiB ceiling. Both ends clamp to the same constants (parent: ringKB in mfenc).
     try std.testing.expectEqual(@as(u32, 4 * 1024), ring_kb_min);
     try std.testing.expectEqual(@as(u32, 16 * 1024), ring_kb_max);

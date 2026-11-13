@@ -503,6 +503,17 @@ type MediaLinkFeature struct {
 	VramPolicy string `json:"vramPolicy,omitempty"`
 	// VramMarginMB raises the non-strict margin floor (0 = default 64 MB; margin = max(this, 25% need)).
 	VramMarginMB int `json:"vramMarginMB,omitempty"`
+	// CPUDecodeFallback (owner directive 2026-11-13): when the VRAM budget refuses or cannot keep a HW
+	// decode pipeline, decode in SOFTWARE inside the decode child into the SAME destination (no DXVA
+	// pool, no new sender, sender asked for a lower coded height) and return to HW once free VRAM >= HW
+	// need + HWPromoteBufferMB for HWPromoteDwellSec. Tri-state, DEFAULT ON; explicit false = hold.
+	CPUDecodeFallback *bool `json:"cpuDecodeFallback,omitempty"`
+	// CPUDecodeThreads bounds the software decoder's worker threads (0 = 4; never above half the CPUs).
+	CPUDecodeThreads int `json:"cpuDecodeThreads,omitempty"`
+	// HWPromoteBufferMB is the extra free VRAM required before returning to HW (0 = max(512, 2x need)).
+	HWPromoteBufferMB int `json:"hwPromoteBufferMB,omitempty"`
+	// HWPromoteDwellSec is how long that headroom must hold before the switch back (0 = 45 s).
+	HWPromoteDwellSec int `json:"hwPromoteDwellSec,omitempty"`
 	// SenderMaxHeight pins the immortal Spout sender texture height so its shared handle never
 	// changes across a source-resolution change (decode scales into it). 0 = auto (first-observed
 	// source height, capped 2160); >0 = explicit cap.
@@ -604,6 +615,18 @@ func (m MediaLinkFeature) VramPolicyName() string {
 		return v
 	}
 	return m.VramPolicy
+}
+
+// CPUDecodeFallbackEnabled reports whether the adaptive HW/CPU decode fallback is on (env
+// RAVE_MATE_CPU_DECODE_FALLBACK=1|0 wins; default ON).
+func (m MediaLinkFeature) CPUDecodeFallbackEnabled() bool {
+	switch os.Getenv("RAVE_MATE_CPU_DECODE_FALLBACK") {
+	case "1", "true":
+		return true
+	case "0", "false":
+		return false
+	}
+	return m.CPUDecodeFallback == nil || *m.CPUDecodeFallback
 }
 
 // ResolvedVramMarginMB returns the configured non-strict margin floor (0 = default; negatives => 0).

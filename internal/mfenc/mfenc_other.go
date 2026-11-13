@@ -165,6 +165,8 @@ type ProcDecStats struct {
 	DecResizes  uint64
 	DecCodedW   int
 	DecCodedH   int
+	Mode        string
+	ModeText    string
 }
 
 // ProcDecSession is unavailable on this platform (no Zig MF decode child).
