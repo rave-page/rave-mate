@@ -27,6 +27,14 @@ pub const NackItem = struct { stream: u16, frame_seq: u32, frag_idx: u16 };
 const max_streams = 8;
 const StreamMax = struct { id: u16 = 0, max: u32 = 0, used: bool = false };
 
+// Ghost: a frame of which NO datagram arrived although a later frame did (a burst loss / overflow
+// took the whole frame, so there is no entry to prove a hole in). NACKed as fragment 0: the
+// retransmit carries frag_count, then the ordinary overtaken proof NACKs the rest.
+const max_ghosts = 16;
+const ghost_ttl_ns: i64 = 1_000_000_000;
+const ghost_max_nacks = 20; // the sender's retransmit ring no longer has it after this: stop asking
+const Ghost = struct { stream: u16 = 0, fs: u32 = 0, born: i64 = 0, last_nack: i64 = 0, nacks: u8 = 0, active: bool = false };
+
 pub const Reassembler = struct {
     alloc: std.mem.Allocator,
     entries: []Entry,
@@ -37,6 +45,8 @@ pub const Reassembler = struct {
     next_order: u64 = 1,
     dropped: u64 = 0,
     smax: [max_streams]StreamMax = [_]StreamMax{.{}} ** max_streams, // per-stream high-water frame_seq
+    ghosts: [max_ghosts]Ghost = [_]Ghost{.{}} ** max_ghosts,
+    now_hint: i64 = 0, // last scanMissing time (ghost birth stamp)
 
     pub fn init(alloc: std.mem.Allocator, n_entries: usize, body_max: usize, max_frame_bytes: usize) !Reassembler {
         const es = try alloc.alloc(Entry, n_entries);
@@ -92,6 +102,20 @@ pub const Reassembler = struct {
         return e.buf[0..total];
     }
 
+    /// incompleteBefore reports whether a partially received frame with frame_seq in [lo, hi) is held
+    /// (a retransmit can still complete it).
+    pub fn incompleteBefore(r: *const Reassembler, lo: u32, hi: u32) bool {
+        for (r.ghosts) |g| {
+            if (g.active and !seqGreater(lo, g.fs) and seqGreater(hi, g.fs)) return true;
+        }
+        for (r.entries) |e| {
+            if (!e.active or e.have >= e.count) continue;
+            const fs: u32 = @truncate(e.key);
+            if (!seqGreater(lo, fs) and seqGreater(hi, fs)) return true;
+        }
+        return false;
+    }
+
     pub fn droppedCount(r: *const Reassembler) u64 {
         return r.dropped;
     }
@@ -135,7 +159,15 @@ pub const Reassembler = struct {
     fn noteFrame(r: *Reassembler, stream: u16, frame_seq: u32) void {
         for (&r.smax) |*s| {
             if (s.used and s.id == stream) {
-                if (seqGreater(frame_seq, s.max)) s.max = frame_seq;
+                if (seqGreater(frame_seq, s.max)) {
+                    var g = s.max +% 1;
+                    var k: usize = 0;
+                    while (seqGreater(frame_seq, g) and k < 8) : ({
+                        g +%= 1;
+                        k += 1;
+                    }) r.addGhost(stream, g);
+                    s.max = frame_seq;
+                }
                 return;
             }
         }
@@ -145,6 +177,18 @@ pub const Reassembler = struct {
                 return;
             }
         }
+    }
+
+    fn addGhost(r: *Reassembler, stream: u16, fs: u32) void {
+        var pick: usize = 0;
+        for (r.ghosts, 0..) |g, i| {
+            if (!g.active) {
+                pick = i;
+                break;
+            }
+            if (g.born < r.ghosts[pick].born) pick = i; // full: replace the oldest
+        }
+        r.ghosts[pick] = .{ .stream = stream, .fs = fs, .born = r.now_hint, .active = true };
     }
 
     fn streamMax(r: *const Reassembler, stream: u16) ?u32 {
@@ -163,7 +207,23 @@ pub const Reassembler = struct {
     /// Returns how many items. The caller NACKs them immediately so recovery completes within the
     /// playout margin (one LAN RTT).
     pub fn scanMissing(r: *Reassembler, out: []NackItem, now: i64, min_interval_ns: i64) usize {
+        r.now_hint = now;
         var k: usize = 0;
+        for (&r.ghosts) |*g| {
+            if (!g.active) continue;
+            const key = (@as(u64, g.stream) << 32) | g.fs;
+            if (r.find(key) != null or r.isDone(key) or g.nacks >= ghost_max_nacks or (g.born != 0 and now - g.born > ghost_ttl_ns)) {
+                g.active = false; // arrived (ordinary proof takes over) / completed / given up
+                continue;
+            }
+            if (g.born == 0) g.born = now;
+            if (g.last_nack != 0 and now - g.last_nack < min_interval_ns) continue;
+            if (k >= out.len) return k;
+            out[k] = .{ .stream = g.stream, .frame_seq = g.fs, .frag_idx = 0 };
+            k += 1;
+            g.last_nack = now;
+            g.nacks += 1;
+        }
         for (r.entries) |*e| {
             if (!e.active or e.have >= e.count) continue;
             const stream: u16 = @intCast(e.key >> 32);
@@ -276,4 +336,22 @@ test "drop-oldest on pool overflow" {
     try std.testing.expect(r.droppedCount() >= 1);
     // frame 1 was dropped → its completion now starts fresh but is marked done (evicted) → ignored.
     try std.testing.expectEqual(@as(?[]const u8, null), r.accept(1, 1, 1, 2, "ZZ"));
+}
+
+test "wholly-missing frame (no datagram) is NACKed as fragment 0" {
+    var r = try Reassembler.init(std.testing.allocator, 4, 4, 64);
+    defer r.deinit();
+    var items: [8]NackItem = undefined;
+    _ = r.accept(1, 1, 0, 1, "AA"); // frame 1 complete
+    _ = r.accept(1, 3, 0, 2, "CCCC"); // frame 3 starts; frame 2 never seen at all
+    const k = r.scanMissing(&items, 1000, 0);
+    var saw2 = false;
+    for (items[0..k]) |it| if (it.frame_seq == 2 and it.frag_idx == 0) {
+        saw2 = true;
+    };
+    try std.testing.expect(saw2);
+    try std.testing.expect(r.incompleteBefore(2, 3));
+    _ = r.accept(1, 2, 0, 1, "BB"); // retransmit completes frame 2 -> ghost retired
+    try std.testing.expectEqual(@as(usize, 0), r.scanMissing(&items, 2000, 0) - (if (r.scanMissing(&items, 2000, 0) > 0) @as(usize, 0) else 0));
+    try std.testing.expect(!r.incompleteBefore(2, 3));
 }

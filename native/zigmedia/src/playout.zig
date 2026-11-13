@@ -65,6 +65,7 @@ const shift_win_ns: i64 = 1_000_000_000;
 const shift_min_frames = 30;
 const ring_cap = 1024;
 const stat_minutes = 10;
+const recover_grace_ns: i64 = 250_000_000;
 
 const MinuteRing = struct {
     min: [stat_minutes]i64 = [_]i64{-1} ** stat_minutes,
@@ -247,6 +248,10 @@ pub const Playout = struct {
     next_seq: u32 = 0,
     wait_key: bool = false,
     pli_pending: bool = false, // set on an unrecovered gap; the caller sends a rate-limited PLI and clears
+    // recovering: the caller's reassembler holds a PARTIAL frame inside the current gap (a retransmit
+    // is in flight) - the gap is held recover_grace_ns longer before giving up (a stall-delayed IDR
+    // plus its NACK round trip can exceed the max margin; skipping it costs a whole GOP + a PLI).
+    recovering: bool = false,
 
     // base: current bucket + previous bucket mins.
     bucket_start: i64 = 0,
@@ -435,6 +440,10 @@ pub const Playout = struct {
         return true;
     }
 
+    fn gapLimit(p: *const Playout) i64 {
+        return p.preset.max_ns + (if (p.recovering) recover_grace_ns else 0);
+    }
+
     fn longPeakAt(p: *const Playout, now: i64) i64 {
         if (p.preset.decay_step_ns <= 0) return 0;
         return @max(p.long_peak - @divTrunc(now - p.long_peak_t, p.preset.decay_step_ns) * bin_ns, 0);
@@ -468,7 +477,7 @@ pub const Playout = struct {
                 // Missing predecessor: wait for its retransmit up to the max margin, then skip.
                 const gap: i64 = @intCast(h.seq -% p.next_seq);
                 const miss_pts = h.pts_ns - gap * p.interval_ns;
-                if (now < miss_pts + p.base() + p.preset.max_ns) return null;
+                if (now < miss_pts + p.base() + p.gapLimit()) return null;
                 p.next_seq = h.seq;
                 p.pli_pending = true;
                 if (!h.key) {
@@ -503,7 +512,7 @@ pub const Playout = struct {
         var w: i64 = undefined;
         if (h.seq != p.next_seq and !p.wait_key) {
             const gap: i64 = @intCast(h.seq -% p.next_seq);
-            w = (h.pts_ns - gap * p.interval_ns) + p.base() + p.preset.max_ns;
+            w = (h.pts_ns - gap * p.interval_ns) + p.base() + p.gapLimit();
         } else {
             w = p.deadline(h.pts_ns);
         }

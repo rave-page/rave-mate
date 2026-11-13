@@ -15,6 +15,8 @@ pub fn build(b: *std.Build) void {
         .link_libc = true, // c_allocator + the shim's final link
     });
 
+    if (target.result.os.tag == .windows) mod.linkSystemLibrary("ws2_32", .{}); // Winsock (sock.zig)
+
     const lib = b.addLibrary(.{
         .name = "ravemedia",
         .linkage = .static,
