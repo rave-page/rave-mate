@@ -365,6 +365,7 @@ test {
     _ = @import("e2e_test.zig");
     _ = @import("reassembler.zig");
     _ = @import("histogram.zig");
+    _ = @import("rx_lifecycle_test.zig");
     _ = snd;
     if (builtin.os.tag == .linux) _ = @import("interop_test.zig"); // socket loopback: Linux only
 }

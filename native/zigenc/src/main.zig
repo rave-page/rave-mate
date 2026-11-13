@@ -12,11 +12,18 @@
 //!    "dfmt":<DXGI fmt>,"dname":"<dest sender>","in_ring_kb":..}
 //!   {"op":"close","sid":1} | {"op":"bitrate","sid":1,"kbps":..} | {"op":"idr","sid":1}
 //!   {"op":"capheight","sid":1,"out_w":..,"out_h":..} (proto v4: live coded-resolution cap)
+//!   proto v5 (network receive, netrx.zig): open gains "null_dec" (no decoder/destination: GPU-free
+//!   tests) + "net_blk" (512 B telemetry block after the inbound ring);
+//!   {"op":"netrx","sid":1,"pinfo":<hex WSAPROTOCOL_INFOW>,"peer":"a.b.c.d:p","enc":..,"token":..,
+//!    "okey":<hex32>,"opfx":..,"skey":<hex32>,"spfx":..,"body_max":..,"rfps":..,"preset":..,
+//!    "stream":..,"iseq":..,"maxfb":..} attaches the zigmedia receiver to a dir:"dec" session;
+//!   {"op":"meta","sid":1,"m":"<json>"} queues receiver->sender meta on the receiver's seq/nonce space
 //!   {"op":"quit"}
 //! stdout events: {"ev":"hello","ver":2,"luid":..} {"ev":"opened","sid":..,"ok":..,
 //!   "err":..,"name":..,"bgra":..,"src":..,"cap":"zerocopy"|"downgraded","err_src":..}
 //!   {"ev":"srcgone","sid":..,"reason":..} {"ev":"dstgone","sid":..,"reason":..}
-//!   {"ev":"closed","sid":..}
+//!   {"ev":"closed","sid":..} {"ev":"netrx","sid":..,"ok":..,"err":..}
+//!   {"ev":"meta","sid":..,"at":<child mono ns>,"m":"<sender meta json>"}
 //!
 //! Data plane per session (named shared memory, parent creates, we open):
 //!   header 256 B: 0 magic 'RMF2' u32 | 4 ver u32 | 8 frameSeq u64 (parent) |
@@ -46,6 +53,7 @@ const std = @import("std");
 const mf = @import("mf.zig");
 const cap = @import("cap.zig");
 const dec = @import("dec.zig");
+const netrx = @import("netrx.zig");
 
 extern "kernel32" fn OpenFileMappingW(u32, i32, [*:0]const u16) callconv(.winapi) ?*anyopaque;
 extern "kernel32" fn MapViewOfFile(*anyopaque, u32, u32, u32, usize) callconv(.winapi) ?[*]u8;
@@ -265,6 +273,14 @@ const Session = struct {
     dname: []u8 = &.{},
     in_ring_kb: u32 = 0,
     dec_open: ?*dec.Dec = null,
+    // proto v5 network receive: null_dec = no decoder/destination (GPU-free tests); net_blk = the
+    // mapping carries the netrx telemetry block after the ring; net = the attached receiver (set and
+    // cleared by the session thread under mu); want_net = a pending attach from the stdin thread.
+    null_dec: bool = false,
+    net_blk: bool = false,
+    net_base: ?[*]u8 = null,
+    net: ?*netrx.Net = null,
+    want_net: ?*netrx.Params = null,
 
     // mailbox (stdin thread → session thread)
     mu: Lock = .{},
@@ -329,7 +345,8 @@ fn openShm(s: *Session) !void {
     } else if (frame_bytes > ring) {
         ring = frame_bytes;
     }
-    const total: usize = @intCast(hdr_size + frame_bytes + ring);
+    const blk: u64 = if (s.dir_dec and s.net_blk) netrx.blk_size else 0;
+    const total: usize = @intCast(hdr_size + frame_bytes + ring + blk);
 
     const wname = try utf16Z(gpa, s.shm_name);
     defer gpa.free(wname);
@@ -344,6 +361,7 @@ fn openShm(s: *Session) !void {
     s.frame = view + hdr_size;
     s.ring = view + hdr_size + @as(usize, @intCast(frame_bytes));
     s.ring_size = ring;
+    if (blk > 0) s.net_base = s.ring + @as(usize, @intCast(ring));
 
     inline for (.{ "-f", "-c", "-a" }, 0..) |suffix, i| {
         const en = try std.fmt.allocPrint(gpa, "{s}{s}", .{ s.shm_name, suffix });
@@ -466,6 +484,23 @@ const DstGoneEv = struct {
     ev: []const u8 = "dstgone",
     sid: u32,
     reason: []const u8,
+};
+
+// NetEv: the verdict of a "netrx" attach.
+const NetEv = struct {
+    ev: []const u8 = "netrx",
+    sid: u32,
+    ok: bool,
+    err: []const u8 = "",
+};
+
+// MetaEv forwards one sender->receiver meta frame (sync pong, report) to the parent; at = arrival on
+// the child's monotonic (QPC) clock so the parent can place T4 exactly.
+const MetaEv = struct {
+    ev: []const u8 = "meta",
+    sid: u32,
+    at: i64,
+    m: []const u8,
 };
 
 // sessionMain owns one pipeline on one thread (COM MTA).
@@ -691,6 +726,11 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
 // the destination sender's shared texture. Nothing but scalars and compressed AUs crosses the
 // process boundary; a decoded frame never leaves the GPU.
 fn decSessionMain(s: *Session) void {
+    if (s.null_dec) { // GPU-free: no decoder, no destination - the network path is the unit under test
+        emit(OpenedEv{ .sid = s.sid, .ok = true, .name = "null", .dir = "dec", .cap = "null" });
+        decLoop(s, null);
+        return;
+    }
     var reason: dec.Reason = .decoder_failed;
     const d = dec.Dec.open(s.gpa, s.luid, s.codec_hevc, s.in_w, s.in_h, s.out_w, s.out_h, s.fps_n, s.fps_d, s.dsh, s.dname, s.ring_size, &reason) catch {
         emit(OpenedEv{ .sid = s.sid, .ok = false, .err = "native decode refused", .dir = "dec", .cap = "downgraded", .err_dst = reason.text() });
@@ -747,12 +787,27 @@ fn ringTake(s: *Session) ?AuRec {
 // accumulating.
 const dec_batch = 8;
 
-fn decLoop(s: *Session, d: *dec.Dec) void {
+fn decLoop(s: *Session, dopt: ?*dec.Dec) void {
     var live = true; // false after dstgone: session + decoder stay up, publishing stops
+    var last_blk: i64 = 0;
+    var dead_reported = false;
+    defer detachNet(s);
     while (true) {
-        _ = WaitForSingleObject(s.ev_frame, 20);
+        _ = WaitForSingleObject(s.ev_frame, if (s.net != null) 10 else 20);
         const m = drainMailbox(s);
         if (m.closing) break;
+        if (takeAttach(s)) |p| attachNet(s, dopt, p);
+        if (s.net) |n| { // network source: the receiver thread owns the decoder now
+            netTick(s, n, dopt, &last_blk, &dead_reported);
+            continue;
+        }
+        const d = dopt orelse { // null_dec, not attached: discard ring AUs (bounded, never decoded)
+            while (ringTake(s)) |rec| {
+                s.hdr.setInRead(s.hdr.inRead() + rec.rec);
+                _ = SetEvent(s.ev_cons);
+            }
+            continue;
+        };
         if (!live) {
             _ = d.pump(); // async MFT events still arrive; keep the tail draining
             continue;
@@ -788,6 +843,69 @@ fn decLoop(s: *Session, d: *dec.Dec) void {
     }
 }
 
+fn takeAttach(s: *Session) ?*netrx.Params {
+    s.mu.lock();
+    defer s.mu.unlock();
+    const p = s.want_net;
+    s.want_net = null;
+    return p;
+}
+
+// attachNet opens the zigmedia receiver on the duplicated socket (session thread). From here the
+// session thread never touches the decoder again until detachNet joined the receiver thread.
+fn attachNet(s: *Session, d: ?*dec.Dec, p: *netrx.Params) void {
+    defer s.gpa.destroy(p);
+    if (s.net != null) return emit(NetEv{ .sid = s.sid, .ok = false, .err = "already attached" });
+    if (s.net_base == null) return emit(NetEv{ .sid = s.sid, .ok = false, .err = "no telemetry block (open without net_blk)" });
+    const n = netrx.Net.attach(s.gpa, d, p) catch |e| return emit(NetEv{ .sid = s.sid, .ok = false, .err = @errorName(e) });
+    s.mu.lock();
+    s.net = n;
+    s.mu.unlock();
+    netrx.writeBlock(s.net_base.?, n, 1);
+    emit(NetEv{ .sid = s.sid, .ok = true });
+}
+
+// detachNet: teardown order RX thread (joined) -> socket; the decoder is closed by decSessionMain
+// after decLoop returns, the destination by the parent after "closed".
+fn detachNet(s: *Session) void {
+    s.mu.lock();
+    const n = s.net;
+    s.net = null;
+    s.mu.unlock();
+    if (n) |nn| nn.close(s.net_base);
+}
+
+// netTick is the session thread's attached-mode duty: forward sender meta, report a decoder failure
+// once (the parent decides), mirror telemetry into the shm at ~4 Hz. Never touches the decoder.
+fn netTick(s: *Session, n: *netrx.Net, d: ?*dec.Dec, last_blk: *i64, dead_reported: *bool) void {
+    var buf: [netrx.meta_max]u8 = undefined;
+    var at: i64 = 0;
+    var k: u32 = 0;
+    while (k < 16) : (k += 1) {
+        const len = n.rx.takeMetaIn(&buf, &at) orelse break;
+        emit(MetaEv{ .sid = s.sid, .at = at, .m = buf[0..len] });
+    }
+    if (!dead_reported.* and n.dead.load(.acquire)) {
+        dead_reported.* = true;
+        s.hdr.addAt(off_dec_errors, 1);
+        emit(DstGoneEv{ .sid = s.sid, .reason = if (d) |dd| dd.reason.text() else "decoder_failed" });
+    }
+    const now: i64 = @intCast(qpcNs());
+    if (now - last_blk.* < 250 * std.time.ns_per_ms) return;
+    last_blk.* = now;
+    netrx.writeBlock(s.net_base.?, n, 1);
+    // Mirror the publish counters into the dec header so the parent's frozen-destination oracle and
+    // ProcDecStats keep working unchanged. Decoder fields are receiver-thread-written scalars (telemetry).
+    s.hdr.setU64At(off_dec_frames, n.published.load(.acquire));
+    const lp = n.last_pub_ns.load(.acquire);
+    if (lp > 0) s.hdr.setI64At(off_last_pub_ns, lp);
+    if (d) |dd| {
+        s.hdr.setU64At(off_dec_mtx_timeouts, dd.mtx_timeouts);
+        s.hdr.setU64At(off_dec_resizes, dd.resizes);
+        s.hdr.setU64At(off_dec_coded, (@as(u64, @intCast(dd.coded_w)) << 32) | @as(u64, @as(u32, @bitCast(dd.coded_h))));
+    }
+}
+
 fn teardownSession(s: *Session) void {
     closeShm(s); // pipeline is closed by now; the parent holds its own view of the mapping
     emit(struct { ev: []const u8 = "closed", sid: u32 }{ .sid = s.sid });
@@ -802,6 +920,7 @@ fn closeSession(s: *Session) void {
     s.gpa.free(s.shm_name);
     s.gpa.free(s.sname);
     s.gpa.free(s.dname);
+    if (s.want_net) |p| s.gpa.destroy(p); // attach requested but never consumed
     s.gpa.destroy(s);
 }
 
@@ -835,7 +954,59 @@ const Cmd = struct {
     in_ring_kb: u32 = 0,
     // sw: take the SOFTWARE encoder tier for this session (parent's poison ledger).
     sw: bool = false,
+    // proto v5 network receive (open + "netrx" + "meta" ops).
+    null_dec: bool = false,
+    net_blk: bool = false,
+    pinfo: []const u8 = "",
+    peer: []const u8 = "",
+    enc: bool = true,
+    token: u32 = 0,
+    okey: []const u8 = "",
+    opfx: u32 = 0,
+    skey: []const u8 = "",
+    spfx: u32 = 0,
+    body_max: u32 = 0,
+    rfps: f64 = 0,
+    preset: []const u8 = "",
+    stream: u16 = 1,
+    iseq: u64 = 0,
+    maxfb: u32 = 0,
+    m: []const u8 = "",
 };
+
+// parseNetParams builds an attach request from a "netrx" op; null = malformed (reported, nothing kept).
+fn parseNetParams(gpa: std.mem.Allocator, cmd: Cmd) ?*netrx.Params {
+    var okey: [32]u8 = undefined;
+    var skey: [32]u8 = undefined;
+    if (!netrx.hexDecode(&okey, cmd.okey) or !netrx.hexDecode(&skey, cmd.skey)) return null;
+    const p = gpa.create(netrx.Params) catch return null;
+    if (!netrx.hexDecode(&p.info, cmd.pinfo)) {
+        gpa.destroy(p);
+        return null;
+    }
+    p.peer = null;
+    if (cmd.peer.len > 0) {
+        p.peer = netrx.parseAddr4(cmd.peer) orelse {
+            gpa.destroy(p);
+            return null;
+        };
+    }
+    p.cfg = .{
+        .encrypt = cmd.enc,
+        .token = cmd.token,
+        .open_key = okey,
+        .open_prefix = cmd.opfx,
+        .send_key = skey,
+        .send_prefix = cmd.spfx,
+        .body_max = if (cmd.body_max > 0) cmd.body_max else 1200,
+        .fps = if (cmd.rfps > 0) cmd.rfps else 60,
+        .max_frame_bytes = if (cmd.maxfb > 0) cmd.maxfb else 4 << 20,
+        .preset = netrx.presetByName(cmd.preset),
+        .stream = cmd.stream,
+        .initial_seq = cmd.iseq,
+    };
+    return p;
+}
 
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
@@ -885,7 +1056,7 @@ pub fn main(init: std.process.Init) !void {
     // parent version-gates sending it rather than relying on the silent-ignore alone.
     emit(struct {
         ev: []const u8 = "hello",
-        ver: u32 = 4,
+        ver: u32 = 5,
         luid: i64,
         // Active policies: the only channel that says WHICH code path this child is running.
         dev: []const u8,
@@ -932,7 +1103,7 @@ pub fn main(init: std.process.Init) !void {
                 continue;
             }
             const dir_dec = std.mem.eql(u8, cmd.dir, "dec");
-            if (dir_dec and (cmd.dsh == 0 or cmd.dname.len == 0 or cmd.dname.len > 256 or
+            if (dir_dec and ((!cmd.null_dec and (cmd.dsh == 0 or cmd.dname.len == 0)) or cmd.dname.len > 256 or
                 cmd.out_w <= 0 or cmd.out_h <= 0 or
                 cmd.in_ring_kb < ring_kb_min or cmd.in_ring_kb > ring_kb_max))
             {
@@ -968,6 +1139,8 @@ pub fn main(init: std.process.Init) !void {
                 .dfmt = cmd.dfmt,
                 .dname = try gpa.dupe(u8, cmd.dname),
                 .in_ring_kb = cmd.in_ring_kb,
+                .null_dec = dir_dec and cmd.null_dec,
+                .net_blk = dir_dec and cmd.net_blk,
             };
             s.thread = try std.Thread.spawn(.{}, sessionMain, .{s});
             try sessions.put(cmd.sid, s);
@@ -993,6 +1166,22 @@ pub fn main(init: std.process.Init) !void {
         } else if (std.mem.eql(u8, cmd.op, "idr")) {
             s.mu.lock();
             s.want_idr = true;
+            s.mu.unlock();
+        } else if (std.mem.eql(u8, cmd.op, "netrx")) {
+            const p = parseNetParams(gpa, cmd) orelse {
+                emit(NetEv{ .sid = cmd.sid, .ok = false, .err = "bad netrx args" });
+                continue;
+            };
+            s.mu.lock();
+            if (s.want_net) |old| gpa.destroy(old);
+            s.want_net = p;
+            s.mu.unlock();
+            if (s.evs_open >= 1) _ = SetEvent(s.ev_frame); // wake the session thread now
+        } else if (std.mem.eql(u8, cmd.op, "meta")) {
+            // Receiver->sender meta (MetaRate, reports, sync pings) rides the receiver's ONE control
+            // seq/nonce counter. Bounded mailbox; a full one drops (the parent re-sends on its cadence).
+            s.mu.lock();
+            if (s.net) |n| _ = n.rx.sendMeta(cmd.m);
             s.mu.unlock();
         } else if (std.mem.eql(u8, cmd.op, "capheight")) {
             // Live coded-resolution cap (proto v4). out_w/out_h carry the new even target dims the
@@ -1022,6 +1211,7 @@ test {
     _ = @import("mf.zig");
     _ = @import("cap.zig");
     _ = @import("dec.zig");
+    _ = @import("netrx.zig");
 }
 
 // The crash-attribution block is read by the Go supervisor out of the SAME mapping after the

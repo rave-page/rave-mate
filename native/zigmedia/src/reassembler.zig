@@ -18,6 +18,7 @@ const Entry = struct {
     order: u64 = 0,
     last_nack: i64 = 0, // rate-limit NACKs for this frame
     last_rx: i64 = 0, // last fragment arrival (tail-loss proof)
+    nacked: bool = false, // a retransmit was requested (recovered/expired accounting)
     buf: []u8, // backing (max frame bytes)
     present: []u64, // fragment-present bitmap (max_frags bits)
 };
@@ -49,6 +50,8 @@ pub const Reassembler = struct {
     done_pos: usize = 0,
     next_order: u64 = 1,
     dropped: u64 = 0,
+    nack_recovered: u64 = 0, // NACKed frames that completed (retransmit landed)
+    nack_expired: u64 = 0, // NACKed frames evicted / ghosts given up (retransmit never landed)
     smax: [max_streams]StreamMax = [_]StreamMax{.{}} ** max_streams, // per-stream high-water frame_seq
     ghosts: [max_ghosts]Ghost = [_]Ghost{.{}} ** max_ghosts,
     now_hint: i64 = 0, // last scanMissing time (ghost birth stamp)
@@ -84,7 +87,11 @@ pub const Reassembler = struct {
         r.noteFrame(stream, frame_seq); // high-water for overtaken-frame NACK detection
         if (r.isDone(key)) return null;
 
-        var e = r.find(key) orelse r.alloc_entry(key, frag_count);
+        var e = r.find(key) orelse blk: {
+            const ne = r.alloc_entry(key, frag_count);
+            ne.nacked = r.ghostNacked(key); // a NACKed wholly-missing frame now arriving
+            break :blk ne;
+        };
         if (e.count != frag_count) return null; // inconsistent metadata
         if (bitGet(e.present, frag_idx)) return null; // duplicate
 
@@ -104,6 +111,7 @@ pub const Reassembler = struct {
         if (e.have < e.count) return null;
         const total = @as(usize, e.count - 1) * r.body_max + e.last_len;
         r.markDone(key);
+        if (e.nacked) r.nack_recovered += 1;
         e.active = false; // free the entry; buf stays valid until the next accept reuses it
         return e.buf[0..total];
     }
@@ -148,6 +156,7 @@ pub const Reassembler = struct {
         if (e.active) { // evicting an in-flight frame (drop-oldest)
             r.markDone(e.key);
             r.dropped += 1;
+            if (e.nacked) r.nack_expired += 1;
         }
         e.active = true;
         e.key = key;
@@ -155,6 +164,7 @@ pub const Reassembler = struct {
         e.have = 0;
         e.max_frag = -1;
         e.last_nack = 0;
+        e.nacked = false;
         e.last_len = 0;
         e.order = r.next_order;
         r.next_order += 1;
@@ -219,6 +229,7 @@ pub const Reassembler = struct {
             if (!g.active) continue;
             const key = (@as(u64, g.stream) << 32) | g.fs;
             if (r.find(key) != null or r.isDone(key) or g.nacks >= ghost_max_nacks or (g.born != 0 and now - g.born > ghost_ttl_ns)) {
+                if (g.nacks > 0 and r.find(key) == null and !r.isDone(key)) r.nack_expired += 1; // given up
                 g.active = false; // arrived (ordinary proof takes over) / completed / given up
                 continue;
             }
@@ -245,6 +256,7 @@ pub const Reassembler = struct {
             var i: u16 = 0;
             while (i < limit) : (i += 1) {
                 if (!bitGet(e.present, i)) {
+                    e.nacked = true;
                     out[k] = .{ .stream = stream, .frame_seq = fseq, .frag_idx = i };
                     k += 1;
                     if (k >= out.len) {
@@ -256,6 +268,13 @@ pub const Reassembler = struct {
             e.last_nack = now;
         }
         return k;
+    }
+
+    fn ghostNacked(r: *const Reassembler, key: u64) bool {
+        for (r.ghosts) |g| {
+            if (g.active and g.nacks > 0 and ((@as(u64, g.stream) << 32) | g.fs) == key) return true;
+        }
+        return false;
     }
 
     fn isDone(r: *const Reassembler, key: u64) bool {
@@ -361,4 +380,21 @@ test "wholly-missing frame (no datagram) is NACKed as fragment 0" {
     _ = r.accept(1, 2, 0, 1, "BB"); // retransmit completes frame 2 -> ghost retired
     try std.testing.expectEqual(@as(usize, 0), r.scanMissing(&items, 2000, 0) - (if (r.scanMissing(&items, 2000, 0) > 0) @as(usize, 0) else 0));
     try std.testing.expect(!r.incompleteBefore(2, 3));
+}
+
+test "NACK accounting: a retransmit that lands counts recovered, an evicted NACKed frame counts expired" {
+    var r = try Reassembler.init(std.testing.allocator, 2, 4, 64);
+    defer r.deinit();
+    var items: [8]NackItem = undefined;
+    _ = r.accept(1, 1, 0, 3, "AAAA");
+    _ = r.accept(1, 1, 2, 3, "CC");
+    try std.testing.expectEqual(@as(usize, 1), r.scanMissing(&items, 1000, 0)); // frag 1 NACKed
+    _ = r.accept(1, 1, 1, 3, "BBBB").?; // retransmit lands
+    try std.testing.expectEqual(@as(u64, 1), r.nack_recovered);
+    _ = r.accept(1, 2, 0, 2, "DDDD");
+    _ = r.accept(1, 3, 0, 2, "EEEE"); // frame 2 overtaken -> NACKed below
+    try std.testing.expect(r.scanMissing(&items, 2000, 0) > 0);
+    _ = r.accept(1, 4, 0, 2, "FFFF");
+    _ = r.accept(1, 5, 0, 2, "GGGG"); // pool of 2: frames 2 + 3 evicted, at least frame 2 NACKed
+    try std.testing.expect(r.nack_expired >= 1);
 }
