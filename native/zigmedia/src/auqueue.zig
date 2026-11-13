@@ -1,134 +1,149 @@
-//! Bounded access-unit queue between the encode thread (producer) and the TX thread (consumer). This
-//! replaces the single-slot AU hand-off that DROPS today (the 2026-11-12 finding: the Go side
-//! overwrote the one slot whenever packetize/pace/send stalled past a frame period). Fixed pools sized
-//! at open — allocation-free in steady state. A short mutex guards only the slot METADATA; the AU
-//! memcpy (producer) and the send (consumer) run OUTSIDE the lock, so neither realtime thread blocks
-//! on the other's data work. Full queue drops the OLDEST NON-KEYFRAME (keeps the decodable keyframe)
-//! and signals the caller to request an IDR.
+//! Bounded access-unit queue between the encode thread (producer) and the TX thread (consumer):
+//! a byte ring (contiguous AU regions) + a FIFO metadata ring. Sized to absorb >= 150 ms of TX stall
+//! at the route bitrate (default 16 MiB / 64 AUs ~ 2 s of a 60 Mbps 4K60 stream) so a hiccup never
+//! drops; bounded in BYTES and FRAMES. Allocation-free after init. A short spin lock guards only
+//! metadata; the AU memcpy (producer) and the send (consumer) run OUTSIDE the lock.
+//! Overflow policy: drop the OLDEST queued AU (FIFO head; never one being sent) and report it so the
+//! caller requests an IDR - dropping any AU of an inter-coded GOP breaks the rest of it anyway. If the
+//! head is in flight and still no room, the NEW AU is dropped (also reported).
 const std = @import("std");
 
 pub const flag_keyframe: u32 = 0x01;
 
-/// spinLock acquires a std.atomic.Mutex (tryLock/unlock only in 0.16). Critical sections here are tiny
-/// O(N) metadata scans (no I/O, no memcpy under the lock), so a spin is cheaper than a futex.
+/// spinLock acquires a std.atomic.Mutex (tryLock/unlock only in 0.16). Critical sections are tiny
+/// metadata updates (no I/O, no memcpy under the lock).
 pub fn spinLock(m: *std.atomic.Mutex) void {
     while (!m.tryLock()) std.atomic.spinLoopHint();
 }
 
 const State = enum { free, writing, ready, reading };
 
-const Slot = struct {
-    buf: []u8,
+pub const Slot = struct {
+    buf: []u8 = &.{}, // view into the byte ring (valid while the slot is ready/reading)
+    off: usize = 0,
     len: usize = 0,
     pts: i64 = 0,
     flags: u32 = 0,
-    order: u64 = 0,
     state: State = .free,
 };
 
 pub const AuQueue = struct {
     alloc: std.mem.Allocator,
-    slots: []Slot,
+    data: []u8,
+    meta: []Slot,
     mu: std.atomic.Mutex = .unlocked,
-    next_order: u64 = 0,
+    head: usize = 0, // meta index of the oldest entry
+    count: usize = 0,
+    tail_off: usize = 0, // next write offset in data
     dropped: u64 = 0,
 
-    pub fn init(alloc: std.mem.Allocator, n_slots: usize, slot_cap: usize) !AuQueue {
-        const slots = try alloc.alloc(Slot, n_slots);
-        errdefer alloc.free(slots);
-        var made: usize = 0;
-        errdefer for (slots[0..made]) |s| alloc.free(s.buf);
-        for (slots) |*s| {
-            s.* = .{ .buf = try alloc.alloc(u8, slot_cap) };
-            made += 1;
-        }
-        return .{ .alloc = alloc, .slots = slots };
+    /// init: max_frames AUs and cap_bytes of payload in flight.
+    pub fn init(alloc: std.mem.Allocator, max_frames: usize, cap_bytes: usize) !AuQueue {
+        const data = try alloc.alloc(u8, cap_bytes);
+        errdefer alloc.free(data);
+        const meta = try alloc.alloc(Slot, max_frames);
+        for (meta) |*m| m.* = .{};
+        return .{ .alloc = alloc, .data = data, .meta = meta };
     }
 
     pub fn deinit(q: *AuQueue) void {
-        for (q.slots) |s| q.alloc.free(s.buf);
-        q.alloc.free(q.slots);
+        q.alloc.free(q.data);
+        q.alloc.free(q.meta);
     }
 
-    /// submit copies one AU into a slot. Non-blocking. Returns true if an AU was DROPPED to make room
-    /// (the caller fires its IDR callback). An AU larger than slot_cap is truncated (sizing bug — size
-    /// slot_cap from the bitrate at open); never overflows.
+    /// depth is the number of queued AUs (incl. one in flight).
+    pub fn depth(q: *AuQueue) usize {
+        spinLock(&q.mu);
+        defer q.mu.unlock();
+        return q.count;
+    }
+
+    fn headOff(q: *const AuQueue) usize {
+        return q.meta[q.head].off;
+    }
+
+    // reserve finds a contiguous region of n bytes at the ring tail. Caller holds mu.
+    fn reserve(q: *AuQueue, n: usize) ?usize {
+        if (q.count == 0) {
+            q.tail_off = 0;
+            return if (n <= q.data.len) 0 else null;
+        }
+        const h = q.headOff();
+        if (q.tail_off >= h) {
+            if (q.tail_off + n <= q.data.len) return q.tail_off;
+            if (n < h) return 0; // wrap (strictly below head: tail==head means empty)
+            return null;
+        }
+        if (q.tail_off + n < h) return q.tail_off;
+        return null;
+    }
+
+    fn dropHeadLocked(q: *AuQueue) bool {
+        if (q.count == 0) return false;
+        const m = &q.meta[q.head];
+        if (m.state != .ready) return false; // in flight / being written: never evicted
+        m.state = .free;
+        q.head = (q.head + 1) % q.meta.len;
+        q.count -= 1;
+        q.dropped += 1;
+        return true;
+    }
+
+    /// submit copies one AU in. Non-blocking. Returns true if an AU was DROPPED (the caller fires its
+    /// IDR callback).
     pub fn submit(q: *AuQueue, au: []const u8, pts: i64, flags: u32) bool {
         spinLock(&q.mu);
         var dropped = false;
-        var idx = q.findFree();
-        if (idx == null) {
-            idx = q.evictOldest(); // prefer non-keyframe
+        var off: ?usize = null;
+        while (true) {
+            if (q.count < q.meta.len) {
+                off = q.reserve(au.len);
+                if (off != null) break;
+            }
+            if (!q.dropHeadLocked()) break; // head in flight: cannot make room
             dropped = true;
-            q.dropped += 1;
         }
-        const i = idx.?;
-        q.slots[i].state = .writing;
+        const o = off orelse {
+            q.dropped += 1; // the NEW AU is dropped
+            q.mu.unlock();
+            return true;
+        };
+        const idx = (q.head + q.count) % q.meta.len;
+        q.meta[idx] = .{ .buf = q.data[o..][0..au.len], .off = o, .len = au.len, .pts = pts, .flags = flags, .state = .writing };
+        q.count += 1;
+        q.tail_off = o + au.len;
         q.mu.unlock();
 
-        const n = @min(au.len, q.slots[i].buf.len);
-        @memcpy(q.slots[i].buf[0..n], au[0..n]); // outside the lock
-        q.slots[i].len = n;
-        q.slots[i].pts = pts;
-        q.slots[i].flags = flags;
+        @memcpy(q.data[o..][0..au.len], au); // outside the lock
 
         spinLock(&q.mu);
-        q.slots[i].order = q.next_order;
-        q.next_order += 1;
-        q.slots[i].state = .ready;
+        q.meta[idx].state = .ready;
         q.mu.unlock();
         return dropped;
     }
 
-    /// pop claims the oldest ready slot for sending (null if none). Caller MUST release() it after.
+    /// pop claims the oldest ready AU for sending (null if none). Caller MUST release() it after.
     pub fn pop(q: *AuQueue) ?usize {
         spinLock(&q.mu);
         defer q.mu.unlock();
-        var best: ?usize = null;
-        var best_order: u64 = std.math.maxInt(u64);
-        for (q.slots, 0..) |s, i| {
-            if (s.state == .ready and s.order < best_order) {
-                best = i;
-                best_order = s.order;
-            }
-        }
-        if (best) |i| q.slots[i].state = .reading;
-        return best;
+        if (q.count == 0 or q.meta[q.head].state != .ready) return null;
+        q.meta[q.head].state = .reading;
+        return q.head;
     }
 
     pub fn slot(q: *AuQueue, i: usize) *Slot {
-        return &q.slots[i];
+        return &q.meta[i];
     }
 
+    /// release frees the AU pop() returned (always the FIFO head).
     pub fn release(q: *AuQueue, i: usize) void {
         spinLock(&q.mu);
-        q.slots[i].state = .free;
-        q.mu.unlock();
-    }
-
-    fn findFree(q: *AuQueue) ?usize {
-        for (q.slots, 0..) |s, i| if (s.state == .free) return i;
-        return null;
-    }
-
-    // evictOldest frees the oldest READY slot, preferring a non-keyframe; returns its index. Reading/
-    // writing slots are never evicted (in use). Caller holds mu.
-    fn evictOldest(q: *AuQueue) ?usize {
-        var pick: ?usize = null;
-        var pick_order: u64 = std.math.maxInt(u64);
-        var pick_kf = true;
-        for (q.slots, 0..) |s, i| {
-            if (s.state != .ready) continue;
-            const kf = s.flags & flag_keyframe != 0;
-            // Prefer non-keyframe; among same class, the oldest.
-            const better = (pick == null) or (!kf and pick_kf) or (kf == pick_kf and s.order < pick_order);
-            if (better) {
-                pick = i;
-                pick_order = s.order;
-                pick_kf = kf;
-            }
+        defer q.mu.unlock();
+        q.meta[i].state = .free;
+        if (i == q.head and q.count > 0) {
+            q.head = (q.head + 1) % q.meta.len;
+            q.count -= 1;
         }
-        return pick;
     }
 };
 
@@ -146,21 +161,61 @@ test "submit/pop FIFO" {
     try std.testing.expectEqual(@as(?usize, null), q.pop());
 }
 
-test "full queue drops oldest non-keyframe, keeps keyframe" {
-    var q = try AuQueue.init(std.testing.allocator, 2, 16);
+test "absorbs 150 ms of TX stall at 4K60 bitrate without a drop" {
+    // 60 Mbps, 60 fps: 150 ms = 9 AUs (one IDR 900 kB + P 150 kB) ~ 2.2 MB << 16 MiB / 64 AUs.
+    var q = try AuQueue.init(std.testing.allocator, 64, 16 << 20);
     defer q.deinit();
-    try std.testing.expect(!q.submit("K", 1, flag_keyframe)); // keyframe
-    try std.testing.expect(!q.submit("p1", 2, 0)); // delta
-    // Full. Next submit must drop the delta (p1), keep the keyframe, and signal a drop.
-    try std.testing.expect(q.submit("p2", 3, 0));
-    try std.testing.expectEqual(@as(u64, 1), q.dropped);
-    // The two survivors are the keyframe + p2 (p1 gone).
+    const big = try std.testing.allocator.alloc(u8, 900_000);
+    defer std.testing.allocator.free(big);
+    var i: usize = 0;
+    while (i < 30) : (i += 1) { // 500 ms stall: consumer never pops
+        const n: usize = if (i % 60 == 0) 900_000 else 150_000;
+        try std.testing.expect(!q.submit(big[0..n], @intCast(i), if (i % 60 == 0) flag_keyframe else 0));
+    }
+    try std.testing.expectEqual(@as(usize, 30), q.depth());
+    // Drain in order.
+    i = 0;
+    while (q.pop()) |s| : (i += 1) {
+        try std.testing.expectEqual(@as(i64, @intCast(i)), q.slot(s).pts);
+        q.release(s);
+    }
+    try std.testing.expectEqual(@as(usize, 30), i);
+}
+
+test "overflow: drop oldest queued AU; if the oldest is in flight, drop the new one" {
+    var q = try AuQueue.init(std.testing.allocator, 8, 100);
+    defer q.deinit();
+    const blk = [_]u8{7} ** 40;
+    try std.testing.expect(!q.submit(&blk, 0, flag_keyframe));
+    try std.testing.expect(!q.submit(&blk, 1, 0));
+    const inflight = q.pop().?; // AU 0 being sent
+    try std.testing.expect(q.submit(&blk, 2, 0)); // no room, head in flight: AU 2 (new) dropped
+    q.release(inflight);
+    const s1 = q.pop().?;
+    try std.testing.expectEqual(@as(i64, 1), q.slot(s1).pts);
+    q.release(s1);
+    try std.testing.expect(!q.submit(&blk, 3, 0)); // [0,40)
+    try std.testing.expect(!q.submit(blk[0..30], 4, 0)); // [40,70)
+    try std.testing.expect(q.submit(blk[0..35], 5, 0)); // no room: oldest ready (3) dropped, 5 wraps to [0,35)
     const a = q.pop().?;
-    const sa = q.slot(a).buf[0..q.slot(a).len];
+    try std.testing.expectEqual(@as(i64, 4), q.slot(a).pts);
     q.release(a);
     const b = q.pop().?;
-    const sb = q.slot(b).buf[0..q.slot(b).len];
+    try std.testing.expectEqual(@as(i64, 5), q.slot(b).pts);
     q.release(b);
-    try std.testing.expect(std.mem.eql(u8, sa, "K") or std.mem.eql(u8, sb, "K"));
-    try std.testing.expect(!std.mem.eql(u8, sa, "p1") and !std.mem.eql(u8, sb, "p1"));
+    try std.testing.expectEqual(@as(u64, 2), q.dropped);
+}
+
+test "ring wraps to offset 0 below the head" {
+    var q = try AuQueue.init(std.testing.allocator, 8, 100);
+    defer q.deinit();
+    _ = q.submit(&([_]u8{1} ** 40), 0, 0);
+    _ = q.submit(&([_]u8{2} ** 40), 1, 0);
+    q.release(q.pop().?); // head now AU 1 at [40,80)
+    try std.testing.expect(!q.submit(&([_]u8{3} ** 30), 2, 0)); // wraps to [0,30)
+    try std.testing.expectEqual(@as(usize, 0), q.slot((q.head + 1) % 8).off);
+    q.release(q.pop().?);
+    const c = q.pop().?;
+    try std.testing.expectEqualSlices(u8, &([_]u8{3} ** 30), q.slot(c).buf);
+    q.release(c);
 }

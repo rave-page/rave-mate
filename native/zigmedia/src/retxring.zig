@@ -11,10 +11,17 @@ const Entry = struct {
     used: bool = false,
 };
 
+// Frame index: where each recent frame's fragment 0 landed, so get() is O(frames) not O(datagrams)
+// (a linear scan of 8192 slots per NACK item stalled the TX thread mid-keyframe).
+const frame_index = 512;
+const FrameRec = struct { stream: u16 = 0, frame_seq: u32 = 0, first: usize = 0, used: bool = false };
+
 pub const RetxRing = struct {
     alloc: std.mem.Allocator,
     entries: []Entry,
     head: usize = 0, // next write slot (ring)
+    frames: [frame_index]FrameRec = [_]FrameRec{.{}} ** frame_index,
+    fpos: usize = 0,
 
     pub fn init(alloc: std.mem.Allocator, n: usize, dg_cap: usize) !RetxRing {
         const e = try alloc.alloc(Entry, n);
@@ -37,6 +44,10 @@ pub const RetxRing = struct {
     pub fn add(r: *RetxRing, dg: []const u8, stream: u16, frame_seq: u32, frag_idx: u16) void {
         const e = &r.entries[r.head];
         if (dg.len > e.buf.len) return; // oversized (jumbo) — not retransmittable from this ring
+        if (frag_idx == 0) {
+            r.frames[r.fpos] = .{ .stream = stream, .frame_seq = frame_seq, .first = r.head, .used = true };
+            r.fpos = (r.fpos + 1) % frame_index;
+        }
         @memcpy(e.buf[0..dg.len], dg);
         e.len = dg.len;
         e.stream = stream;
@@ -48,10 +59,10 @@ pub const RetxRing = struct {
 
     /// get returns the stored datagram for (stream, frame_seq, frag_idx) if still in the ring.
     pub fn get(r: *RetxRing, stream: u16, frame_seq: u32, frag_idx: u16) ?[]const u8 {
-        for (r.entries) |*e| {
-            if (e.used and e.stream == stream and e.frame_seq == frame_seq and e.frag_idx == frag_idx) {
-                return e.buf[0..e.len];
-            }
+        for (r.frames) |f| { // fast path: fragments of one frame are contiguous in the ring
+            if (!f.used or f.stream != stream or f.frame_seq != frame_seq) continue;
+            const e = &r.entries[(f.first + frag_idx) % r.entries.len];
+            if (e.used and e.stream == stream and e.frame_seq == frame_seq and e.frag_idx == frag_idx) return e.buf[0..e.len];
         }
         return null;
     }

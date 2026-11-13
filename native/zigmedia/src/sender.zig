@@ -5,7 +5,10 @@
 //! media, keepalive, start-up-grace liveness. TCP + Windows priority are follow-ups; the UDP path is
 //! byte-exact with the Go receiver (goldens).
 const std = @import("std");
+const builtin = @import("builtin");
 const linux = std.os.linux;
+const sock = @import("sock.zig");
+const hrtimer = @import("hrtimer.zig");
 const keys = @import("keys.zig");
 const aead = @import("aead.zig");
 const wire = @import("wire.zig");
@@ -47,9 +50,12 @@ pub const Stats = struct {
     nacks_recv: u64 = 0,
 };
 
-const au_slots = 6;
-const au_slot_cap = 4 << 20; // 4 MiB per AU (4K keyframe headroom)
-const retx_slots = 2048;
+// TX queue: absorbs >= 150 ms of TX stall (4K60 ~60 Mbps: 150 ms ~ 1.2 MB) with wide margin;
+// bounded in frames AND bytes (auqueue.zig: drop-oldest + IDR request beyond it).
+const tx_queue_frames = 64;
+const tx_queue_bytes = 16 << 20;
+const au_slot_cap = 4 << 20; // max single AU (4K keyframe headroom); larger = dropped + IDR
+const retx_slots = 8192; // ~10 MB: >= 1 s of datagrams at 4K60 rates (stall + NACK round trip)
 const retx_dg_cap = 1500;
 const keepalive_ns: i64 = 100 * std.time.ns_per_ms;
 const liveness_ns: i64 = 2 * std.time.ns_per_s;
@@ -69,39 +75,26 @@ fn pacedRate(target_bps: f64) f64 {
     return if (r < pacer_min_rate_bytes) pacer_min_rate_bytes else r;
 }
 
-// ── Linux socket syscalls (this dev-Zig moved socket I/O out of std.posix) ────────────────────────
-pub fn udpSocket() !i32 {
-    const r = linux.socket(linux.AF.INET, linux.SOCK.DGRAM, 0);
-    if (linux.errno(r) != .SUCCESS) return error.Socket;
-    return @intCast(r);
+// ── socket + clock (sock.zig / hrtimer.zig: Linux syscalls or Winsock + QPC) ─────────────────────
+pub fn udpSocket() !sock.Fd {
+    return sock.udpSocket();
 }
-pub fn udpConnect(fd: i32, addr: *const anyopaque, len: u32) !void {
-    if (linux.errno(linux.connect(fd, addr, len)) != .SUCCESS) return error.Connect;
+pub fn udpConnect(fd: sock.Fd, addr: *const anyopaque, len: u32) !void {
+    return sock.connect(fd, addr, len);
 }
-fn sysSend(fd: i32, buf: []const u8) usize {
-    const r = linux.sendto(fd, buf.ptr, buf.len, 0, null, 0);
-    if (linux.errno(r) != .SUCCESS) return 0;
-    return r;
+fn sysSend(fd: sock.Fd, buf: []const u8) usize {
+    return sock.send(fd, buf);
 }
-fn sysRecv(fd: i32, buf: []u8) !usize {
-    const r = linux.recvfrom(fd, buf.ptr, buf.len, linux.MSG.DONTWAIT, null, null);
-    switch (linux.errno(r)) {
-        .SUCCESS => return r,
-        .AGAIN => return error.WouldBlock,
-        else => return error.Recv,
-    }
+fn sysRecv(fd: sock.Fd, buf: []u8) !usize {
+    return sock.recvFrom(fd, buf, null);
 }
-fn sysClose(fd: i32) void {
-    _ = linux.close(fd);
+pub fn closeFd(fd: sock.Fd) void {
+    sock.close(fd);
 }
-pub fn closeFd(fd: i32) void {
-    sysClose(fd);
-}
-
 pub const Sender = struct {
     alloc: std.mem.Allocator,
     cfg: Config,
-    fd: i32,
+    fd: sock.Fd,
     own_fd: bool,
 
     queue: auqueue.AuQueue,
@@ -133,11 +126,13 @@ pub const Sender = struct {
     s_seq: std.atomic.Value(u64) = .init(0),
     s_dead: std.atomic.Value(i32) = .init(0),
     s_nacks: std.atomic.Value(u64) = .init(0),
+    s_plis: std.atomic.Value(u64) = .init(0), // receiver keyframe requests honoured
+    last_pli_ns: i64 = 0,
 
     on_idr: ?*const fn (?*anyopaque) callconv(.c) void = null,
     idr_user: ?*anyopaque = null,
 
-    pub fn open(alloc: std.mem.Allocator, cfg: Config, fd: i32, own_fd: bool) !*Sender {
+    pub fn open(alloc: std.mem.Allocator, cfg: Config, fd: sock.Fd, own_fd: bool) !*Sender {
         const s = try alloc.create(Sender);
         errdefer alloc.destroy(s);
         s.* = .{
@@ -145,7 +140,7 @@ pub const Sender = struct {
             .cfg = cfg,
             .fd = fd,
             .own_fd = own_fd,
-            .queue = try auqueue.AuQueue.init(alloc, au_slots, au_slot_cap),
+            .queue = try auqueue.AuQueue.init(alloc, tx_queue_frames, tx_queue_bytes),
             .ring = try retxring.RetxRing.init(alloc, retx_slots, retx_dg_cap),
             .pacer = Pacer.init(pacedRate(cfg.rate_bps), nowNs()),
             .frame_buf = try alloc.alloc(u8, au_slot_cap + wire.frame_header_len),
@@ -163,7 +158,7 @@ pub const Sender = struct {
         s.sendBye();
         s.stop.store(true, .release);
         if (s.thread) |t| t.join();
-        if (s.own_fd) sysClose(s.fd);
+        if (s.own_fd) sock.close(s.fd);
         s.queue.deinit();
         s.ring.deinit();
         s.alloc.free(s.frame_buf);
@@ -174,7 +169,7 @@ pub const Sender = struct {
 
     pub fn submit(s: *Sender, au: []const u8, pts: i64, flags: u32) void {
         _ = s.s_submitted.fetchAdd(1, .monotonic);
-        const dropped = s.queue.submit(au, pts, flags);
+        const dropped = au.len > au_slot_cap or s.queue.submit(au, pts, flags);
         if (dropped) {
             _ = s.s_dropped.fetchAdd(1, .monotonic);
             if (s.on_idr) |cb| cb(s.idr_user);
@@ -196,6 +191,7 @@ pub const Sender = struct {
             .retransmits = s.s_retx.load(.monotonic),
             .seq = s.s_seq.load(.monotonic),
             .dead = s.s_dead.load(.monotonic),
+            .queue_depth = @intCast(s.queue.depth()),
             .nacks_recv = s.s_nacks.load(.monotonic),
         };
     }
@@ -332,8 +328,22 @@ pub const Sender = struct {
             wire.dg_type_pong => {},
             wire.dg_type_nack => s.handleNack(body),
             wire.dg_type_bye => s.stop.store(true, .release),
+            wire.dg_type_media => s.handleMeta(h, body, now),
             else => {},
         }
+    }
+
+    // handleMeta answers a receiver PLI (stream-0 meta NACK with pli=true, single fragment) by asking
+    // the encoder for an IDR via on_need_idr, rate-limited. Other meta (reports, rate hints) is
+    // ignored here (see ZIGMEDIA_TRANSPORT.md: rate hints on native routes are a known gap).
+    fn handleMeta(s: *Sender, h: wire.Header, body: []const u8, now: i64) void {
+        if (h.stream != 0 or h.frag_count != 1) return;
+        const f = wire.parseFrameForTest(body) catch return;
+        if (f.kind != 0 or std.mem.indexOf(u8, f.payload, "\"pli\":true") == null) return;
+        if (s.last_pli_ns != 0 and now - s.last_pli_ns < 250 * std.time.ns_per_ms) return;
+        s.last_pli_ns = now;
+        _ = s.s_plis.fetchAdd(1, .monotonic);
+        if (s.on_idr) |cb| cb(s.idr_user);
     }
 
     fn handleNack(s: *Sender, body: []const u8) void {
@@ -357,19 +367,25 @@ pub const Sender = struct {
 };
 
 pub fn nowNs() i64 {
-    var ts: linux.timespec = undefined;
-    _ = linux.clock_gettime(.MONOTONIC, &ts);
-    return @as(i64, @intCast(ts.sec)) * std.time.ns_per_s + @as(i64, @intCast(ts.nsec));
+    return hrtimer.nowMono();
 }
 
 fn sleepNs(ns: i64) void {
     if (ns <= 0) return;
-    var req = linux.timespec{ .sec = @intCast(@divTrunc(ns, std.time.ns_per_s)), .nsec = @intCast(@mod(ns, std.time.ns_per_s)) };
-    _ = linux.nanosleep(&req, null);
+    hrtimer.sleepUntil(hrtimer.nowMono() + ns);
 }
 
-// setThisThreadRealtime best-effort elevates the worker (SCHED_RR); EPERM is fine (unprivileged).
+// setThisThreadRealtime best-effort elevates the worker (Linux SCHED_RR; Windows TIME_CRITICAL).
 fn setThisThreadRealtime() void {
-    const param = linux.sched_param{ .priority = 10 };
-    _ = linux.sched_setscheduler(0, .{ .mode = .RR }, &param);
+    if (builtin.os.tag == .linux) {
+        const param = linux.sched_param{ .priority = 10 };
+        _ = linux.sched_setscheduler(0, .{ .mode = .RR }, &param);
+    } else if (builtin.os.tag == .windows) {
+        _ = win.SetThreadPriority(win.GetCurrentThread(), 15);
+    }
 }
+
+const win = struct {
+    extern "kernel32" fn GetCurrentThread() callconv(.winapi) *anyopaque;
+    extern "kernel32" fn SetThreadPriority(t: *anyopaque, prio: i32) callconv(.winapi) i32;
+};

@@ -12,6 +12,7 @@ const keys = @import("keys.zig");
 const aead = @import("aead.zig");
 const wire = @import("wire.zig");
 const snd = @import("sender.zig");
+const sock = @import("sock.zig");
 
 pub const abi_version: u32 = 3;
 
@@ -143,7 +144,7 @@ export fn rm_tx_open(p: ?*const RmOpenParams, on_need_idr: ?IdrCb, user: ?*anyop
     return RM_OK;
 }
 
-const FdRes = struct { fd: i32, own: bool };
+const FdRes = struct { fd: sock.Fd, own: bool };
 
 fn openSocket(p: *const RmOpenParams) !FdRes {
     if (p.socket_fd >= 0) return .{ .fd = @intCast(p.socket_fd), .own = false }; // Go handed a connected socket
@@ -221,7 +222,10 @@ test {
     _ = @import("auqueue.zig");
     _ = @import("retxring.zig");
     _ = @import("playout.zig");
+    _ = @import("chaos_test.zig");
     _ = @import("hrtimer.zig");
+    _ = @import("sock.zig");
+    _ = @import("e2e_test.zig");
     _ = @import("reassembler.zig");
     _ = @import("histogram.zig");
     _ = snd;

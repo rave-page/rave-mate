@@ -1,54 +1,60 @@
-//! Native receiver (increment 3). Single worker thread: non-blocking socket RX → authenticate/decode
-//! datagram (wire core) → reassemble → PTS-locked playout → deliver complete frames to the decoder.
-//! Also sends keepalive pings so the sender's liveness holds, and pongs the sender's pings. Mirrors the
-//! sender's single-worker model (no locks on reasm/playout). The socket layer here is Linux raw
-//! syscalls for the loopback milestone; the Windows build swaps in Winsock + CreateWaitableTimerEx
-//! (increment 3 platform wiring) behind the same pipeline. First-byte arrival is timestamped per
-//! datagram (the native equivalent of the Go `net` mark).
+//! Native receiver. Single worker thread: non-blocking socket RX (Linux syscalls / Winsock, large
+//! SO_RCVBUF) with a first-byte monotonic timestamp per datagram -> authenticate/decode (wire core)
+//! -> reassemble -> adaptive PTS-locked playout (playout.zig) -> deliver complete frames in cadence.
+//! Deadline-aware recovery: a PROVEN hole is NACKed at once (retransmit lands inside the playout
+//! margin); a frame still missing past the max margin is skipped, an inter-coded stream waits for a
+//! keyframe and a PLI (stream-0 meta NACK, pli=true - same wire as the Go jitter buffer) is sent,
+//! rate-limited; never a keyframe request while the frame can still arrive. Keepalive pings keep the
+//! sender's liveness; the sender's pings are ponged. Allocation-free after open; every pool bounded.
 const std = @import("std");
-const linux = std.os.linux;
 const keys = @import("keys.zig");
 const aead = @import("aead.zig");
 const wire = @import("wire.zig");
+const sock = @import("sock.zig");
 const reasm_mod = @import("reassembler.zig");
 const Reassembler = reasm_mod.Reassembler;
 const playout_mod = @import("playout.zig");
 const Playout = playout_mod.Playout;
 const hrtimer = @import("hrtimer.zig");
-
-fn setRcvBuf(fd: i32, bytes: i32) void {
-    const b = std.mem.asBytes(&bytes);
-    _ = linux.setsockopt(fd, linux.SOL.SOCKET, linux.SO.RCVBUF, b.ptr, @intCast(b.len));
-}
-
-const SockaddrIn = extern struct {
-    family: u16 = linux.AF.INET,
-    port: u16 = 0,
-    addr: u32 = 0,
-    zero: [8]u8 = [_]u8{0} ** 8,
-};
+const Hist = @import("histogram.zig").Hist;
+const spinLock = @import("auqueue.zig").spinLock;
 
 pub const RxConfig = struct {
     encrypt: bool,
     token: u32,
     open_key: [32]u8, // opens the sender's media (receiver's recv direction)
     open_prefix: u32,
-    send_key: [32]u8, // seals the receiver's control (keepalive/pong) to the sender
+    send_key: [32]u8, // seals the receiver's control (keepalive/pong/NACK/PLI) to the sender
     send_prefix: u32,
     body_max: usize = 1200,
     fps: f64 = 60,
     max_frame_bytes: usize = 4 << 20,
+    preset: playout_mod.Preset = playout_mod.balanced,
+    stream: u16 = 1, // media stream the PLI names
 };
 
 const keepalive_ns: i64 = 100 * std.time.ns_per_ms;
 const poll_ns: i64 = 2 * std.time.ns_per_ms; // max idle before re-polling the socket
-const rx_rcvbuf: i32 = 8 << 20; // large SO_RCVBUF so WE never drop under a burst (NIC drops are the enemy)
 const nack_interval_ns: i64 = 6 * std.time.ns_per_ms; // re-NACK a frame no faster than ~1 LAN RTT
+const pli_min_gap_ns: i64 = 250 * std.time.ns_per_ms;
 const nack_max = 85;
+
+/// Stats is the published snapshot (Go samples it at 1 Hz, off the realtime thread).
+pub const Stats = struct {
+    datagrams: u64 = 0,
+    delivered: u64 = 0,
+    nacks_sent: u64 = 0,
+    plis_sent: u64 = 0,
+    reasm_drops: u64 = 0,
+    slot_drops: u64 = 0,
+    playout: playout_mod.Stats = undefined,
+};
+
+pub const FrameCb = *const fn (user: ?*anyopaque, ptr: [*]const u8, len: usize, pts: i64, key: bool) callconv(.c) void;
 
 pub const Receiver = struct {
     alloc: std.mem.Allocator,
-    fd: i32,
+    fd: sock.Fd,
     cfg: RxConfig,
     reasm: Reassembler,
     playout: Playout,
@@ -59,10 +65,12 @@ pub const Receiver = struct {
     slot_len: []usize,
     slot_free: []bool,
 
-    peer: SockaddrIn = .{},
+    peer: sock.Addr4 = .{},
     have_peer: bool = false,
     seq: u64 = 0,
+    meta_seq: u32 = 0,
     last_ping: i64 = 0,
+    last_pli: i64 = 0,
     rx_buf: []u8,
     dg_buf: []u8,
 
@@ -70,18 +78,28 @@ pub const Receiver = struct {
     stop: std.atomic.Value(bool) = .init(false),
     delivered: std.atomic.Value(u64) = .init(0),
     net_marks: std.atomic.Value(u64) = .init(0),
+    nacks_sent: std.atomic.Value(u64) = .init(0),
+    plis_sent: std.atomic.Value(u64) = .init(0),
+    slot_drops: std.atomic.Value(u64) = .init(0),
+    publish: Hist = .{}, // release (publish) interval histogram - the acceptance metric
+    stats_mu: std.atomic.Mutex = .unlocked,
+    stats_snap: Stats = .{},
 
-    on_frame: ?*const fn (user: ?*anyopaque, ptr: [*]const u8, len: usize, pts: i64) callconv(.c) void = null,
+    on_frame: ?FrameCb = null,
     user: ?*anyopaque = null,
 
-    // test hook: drop the datagram matching (drop_frame, drop_frag) ONCE to simulate NIC loss; the
-    // retransmit (same ids) then passes. -1 = disabled.
+    // test hooks: drop the datagram (drop_frame, drop_frag) ONCE (NIC loss; the retransmit passes);
+    // stall_at_frame: the worker sleeps stall_ns once after reassembling that frame (host stall).
     drop_frame: i64 = -1,
     drop_frag: i32 = -1,
+    stall_at_frame: i64 = -1,
+    stall_ns: i64 = 0,
 
     const n_slots = 48;
 
-    pub fn open(alloc: std.mem.Allocator, fd: i32, cfg: RxConfig) !*Receiver {
+    /// open starts the receiver worker on an already-bound UDP socket (ownership stays with the
+    /// caller). cb is installed before the worker starts.
+    pub fn open(alloc: std.mem.Allocator, fd: sock.Fd, cfg: RxConfig, cb: ?FrameCb, user: ?*anyopaque) !*Receiver {
         const r = try alloc.create(Receiver);
         errdefer alloc.destroy(r);
         const pbuf = try alloc.alloc(playout_mod.Item, n_slots);
@@ -98,15 +116,17 @@ pub const Receiver = struct {
             .fd = fd,
             .cfg = cfg,
             .reasm = try Reassembler.init(alloc, 16, cfg.body_max, cfg.max_frame_bytes),
-            .playout = Playout.init(pbuf, cfg.fps),
+            .playout = Playout.initPreset(pbuf, cfg.fps, cfg.preset),
             .pbuf = pbuf,
             .slot_buf = sbuf,
             .slot_len = slen,
             .slot_free = sfree,
             .rx_buf = try alloc.alloc(u8, 2048),
-            .dg_buf = try alloc.alloc(u8, 2 + nack_max * 8 + wire.header_len + 32), // fits a full NACK
+            .dg_buf = try alloc.alloc(u8, 2 + nack_max * 8 + wire.header_len + 128), // fits a full NACK / PLI
+            .on_frame = cb,
+            .user = user,
         };
-        setRcvBuf(fd, rx_rcvbuf); // best-effort; never add our own drops
+        sock.setBufs(fd, 16 << 20, 0); // large SO_RCVBUF: a receiver-host stall must not overflow it
         r.thread = try std.Thread.spawn(.{}, worker, .{r});
         return r;
     }
@@ -129,52 +149,71 @@ pub const Receiver = struct {
         return r.delivered.load(.monotonic);
     }
 
-    fn worker(r: *Receiver) void {
-        while (!r.stop.load(.acquire)) {
-            const now = hrtimer.nowMono();
-            r.drainSocket(now);
-            r.scanAndNack(now); // immediate NACK on a proven hole (recover within the playout margin)
-            r.drainPlayout(now);
-            r.keepalive(now);
-            // Sleep until the next event: the playout deadline, the next keepalive, or a short poll.
-            var wake = now + poll_ns;
-            const nd = r.playout.nextDeadlineGap(); // accounts for a gap-held head (NACK window)
-            if (nd < wake) wake = nd;
-            const ka = r.last_ping + keepalive_ns;
-            if (ka < wake) wake = ka;
-            hrtimer.sleepUntil(wake);
-        }
+    /// stats returns the last snapshot the worker published (every 250 ms).
+    pub fn stats(r: *Receiver) Stats {
+        spinLock(&r.stats_mu);
+        defer r.stats_mu.unlock();
+        return r.stats_snap;
     }
 
-    fn drainSocket(r: *Receiver, now: i64) void {
-        while (true) {
-            var src: SockaddrIn = undefined;
-            var slen: linux.socklen_t = @sizeOf(SockaddrIn);
-            const rn = linux.recvfrom(r.fd, r.rx_buf.ptr, r.rx_buf.len, linux.MSG.DONTWAIT, @ptrCast(&src), &slen);
-            switch (linux.errno(rn)) {
-                .SUCCESS => {},
-                .AGAIN => return,
-                else => return,
+    fn worker(r: *Receiver) void {
+        var last_stats: i64 = 0;
+        while (!r.stop.load(.acquire)) {
+            const now = hrtimer.nowMono();
+            r.drainSocket();
+            r.scanAndNack(now);
+            r.drainPlayout();
+            r.keepalive(now);
+            if (now - last_stats >= 250 * std.time.ns_per_ms) {
+                last_stats = now;
+                r.publishStats(now);
             }
-            _ = r.net_marks.fetchAdd(1, .monotonic); // first bytes of this datagram off the socket
+            var wake = now + poll_ns;
+            wake = @min(wake, r.playout.nextWake());
+            wake = @min(wake, r.last_ping + keepalive_ns);
+            hrtimer.sleepUntil(wake);
+        }
+        r.publishStats(hrtimer.nowMono());
+    }
+
+    fn publishStats(r: *Receiver, now: i64) void {
+        const s = Stats{
+            .datagrams = r.net_marks.load(.monotonic),
+            .delivered = r.delivered.load(.monotonic),
+            .nacks_sent = r.nacks_sent.load(.monotonic),
+            .plis_sent = r.plis_sent.load(.monotonic),
+            .reasm_drops = r.reasm.droppedCount(),
+            .slot_drops = r.slot_drops.load(.monotonic),
+            .playout = r.playout.stats(now),
+        };
+        spinLock(&r.stats_mu);
+        r.stats_snap = s;
+        r.stats_mu.unlock();
+    }
+
+    fn drainSocket(r: *Receiver) void {
+        while (true) {
+            var src: sock.Addr4 = .{};
+            const n = sock.recvFrom(r.fd, r.rx_buf, &src) catch return;
+            const t = hrtimer.nowMono(); // first bytes of this datagram off the socket
+            _ = r.net_marks.fetchAdd(1, .monotonic);
             if (!r.have_peer) {
                 r.peer = src;
                 r.have_peer = true;
             }
-            r.handleDatagram(r.rx_buf[0..rn], now);
+            r.handleDatagram(r.rx_buf[0..n], t);
         }
     }
 
     fn handleDatagram(r: *Receiver, dg: []const u8, now: i64) void {
         const h = wire.Header.decode(dg) catch return;
         if (h.token != r.cfg.token) return;
-        const body: []const u8 = dg[wire.header_len..];
         if (r.cfg.encrypt) {
             var pt: [2048]u8 = undefined;
             const n = aead.open(&pt, dg[wire.header_len..], dg[0..wire.header_len], keys.nonce(r.cfg.open_prefix, h.seq), r.cfg.open_key) catch return;
             r.handleBody(h, pt[0..n], now);
         } else {
-            r.handleBody(h, body, now);
+            r.handleBody(h, dg[wire.header_len..], now);
         }
     }
 
@@ -182,35 +221,65 @@ pub const Receiver = struct {
         switch (h.typ) {
             wire.dg_type_media => {
                 if (r.drop_frame >= 0 and h.frame_seq == @as(u32, @intCast(r.drop_frame)) and h.frag_idx == @as(u16, @intCast(r.drop_frag))) {
-                    r.drop_frame = -1; // simulate a single NIC drop; the NACK-driven retransmit passes
+                    r.drop_frame = -1; // simulated single NIC drop; the NACK-driven retransmit passes
                     return;
                 }
                 const whole = r.reasm.accept(h.stream, h.frame_seq, h.frag_idx, h.frag_count, body) orelse return;
                 const f = wire.parseFrameForTest(whole) catch return;
-                // copy the AU into a free slot, push to playout keyed by the slot index.
-                const si = r.freeSlot() orelse return; // no slot: drop (bounded)
+                if (f.kind != 1) return; // video only
+                if (r.stall_at_frame >= 0 and f.seq == @as(u32, @intCast(r.stall_at_frame))) {
+                    r.stall_at_frame = -1; // simulated receiver-host stall: nothing is read meanwhile
+                    hrtimer.sleepUntil(hrtimer.nowMono() + r.stall_ns);
+                }
+                const si = r.freeSlot() orelse {
+                    _ = r.slot_drops.fetchAdd(1, .monotonic); // bounded: no slot -> drop
+                    return;
+                };
                 @memcpy(r.slot_buf[si][0..f.payload.len], f.payload);
                 r.slot_len[si] = f.payload.len;
                 r.slot_free[si] = false;
-                if (!r.playout.push(f.seq, f.pts, si, now)) {
-                    r.slot_free[si] = true; // dropped by playout (dup/too-old)
-                }
+                if (!r.playout.push(f.seq, f.pts, (f.flags & 0x01) != 0, si, now)) r.slot_free[si] = true;
             },
-            wire.dg_type_ping => r.sendCtrl(wire.dg_type_pong, body),
+            wire.dg_type_ping => r.sendCtrl(wire.dg_type_pong, 0, 0, body),
             else => {},
         }
     }
 
-    fn drainPlayout(r: *Receiver, now: i64) void {
-        while (r.playout.due(now)) |it| {
+    fn drainPlayout(r: *Receiver) void {
+        while (true) {
+            // Re-evaluated per release: a gap appears the moment its predecessor is released.
+            r.playout.recovering = r.playout.n > 0 and r.reasm.incompleteBefore(r.playout.next_seq, r.playout.buf[0].seq);
+            const it = r.playout.due(hrtimer.nowMono()) orelse break;
             const si: usize = @intCast(it.tag);
-            if (r.on_frame) |cb| cb(r.user, r.slot_buf[si].ptr, r.slot_len[si], it.pts_ns);
+            r.publish.mark(hrtimer.nowMono());
+            if (r.on_frame) |cb| cb(r.user, r.slot_buf[si].ptr, r.slot_len[si], it.pts_ns, it.key);
             r.slot_free[si] = true;
             _ = r.delivered.fetchAdd(1, .monotonic);
+        }
+        if (r.playout.pli_pending) {
+            r.playout.pli_pending = false;
+            r.reclaimSlots(); // frames skipped by the gap policy left their slots behind
+            r.sendPLI(hrtimer.nowMono());
+        }
+    }
+    // reclaimSlots frees every used slot no playout item references (bounded scan).
+    fn reclaimSlots(r: *Receiver) void {
+        for (r.slot_free, 0..) |*fr, i| {
+            if (fr.*) continue;
+            var live = false;
+            for (r.playout.buf[0..r.playout.n]) |it| {
+                if (it.tag == i) {
+                    live = true;
+                    break;
+                }
+            }
+            if (!live) fr.* = true;
         }
     }
 
     fn freeSlot(r: *Receiver) ?usize {
+        for (r.slot_free, 0..) |fr, i| if (fr) return i;
+        r.reclaimSlots();
         for (r.slot_free, 0..) |fr, i| if (fr) return i;
         return null;
     }
@@ -229,7 +298,21 @@ pub const Receiver = struct {
             std.mem.writeInt(u16, pl[off + 6 ..][0..2], it.frag_idx, .big);
             off += 8;
         }
-        r.sendCtrl(wire.dg_type_nack, pl[0..off]);
+        r.sendCtrl(wire.dg_type_nack, 0, 0, pl[0..off]);
+        _ = r.nacks_sent.fetchAdd(1, .monotonic);
+    }
+
+    // sendPLI sends a keyframe request as a stream-0 meta frame (medialink NACK, pli=true), rate-limited.
+    pub fn sendPLI(r: *Receiver, now: i64) void {
+        if (!r.have_peer or (r.last_pli != 0 and now - r.last_pli < pli_min_gap_ns)) return;
+        r.last_pli = now;
+        var js: [96]u8 = undefined;
+        const json = std.fmt.bufPrint(&js, "{{\"t\":\"nack\",\"stream\":{d},\"from\":1,\"to\":0,\"pli\":true}}", .{r.cfg.stream}) catch return;
+        var fr: [wire.frame_header_len + 96]u8 = undefined;
+        const n = wire.marshalFrame(&fr, .{ .stream = 0, .kind = 0, .codec = 0, .flags = 0, .seq = r.meta_seq, .pts = now }, json);
+        r.sendCtrl(wire.dg_type_media, 0, r.meta_seq, fr[0..n]);
+        r.meta_seq +%= 1;
+        _ = r.plis_sent.fetchAdd(1, .monotonic);
     }
 
     fn keepalive(r: *Receiver, now: i64) void {
@@ -237,13 +320,19 @@ pub const Receiver = struct {
         r.last_ping = now;
         var ts: [8]u8 = undefined;
         std.mem.writeInt(u64, &ts, @bitCast(now), .big);
-        r.sendCtrl(wire.dg_type_ping, &ts);
+        r.sendCtrl(wire.dg_type_ping, 0, 0, &ts);
     }
 
-    fn sendCtrl(r: *Receiver, typ: u8, payload: []const u8) void {
+    fn sendCtrl(r: *Receiver, typ: u8, stream: u16, frame_seq: u32, payload: []const u8) void {
         if (!r.have_peer) return;
         const flags: u8 = if (r.cfg.encrypt) wire.flag_aead else 0;
-        const hh = wire.Header{ .typ = typ, .flags = flags, .token = r.cfg.token, .seq = r.seq };
+        var hh = wire.Header{ .typ = typ, .flags = flags, .token = r.cfg.token, .seq = r.seq };
+        if (typ == wire.dg_type_media) {
+            hh.stream = stream;
+            hh.frame_seq = frame_seq;
+            hh.frag_idx = 0;
+            hh.frag_count = 1;
+        }
         hh.encode(r.dg_buf[0..wire.header_len]);
         var total: usize = wire.header_len;
         if (r.cfg.encrypt) {
@@ -253,6 +342,6 @@ pub const Receiver = struct {
             total += payload.len;
         }
         r.seq +%= 1;
-        _ = linux.sendto(r.fd, r.dg_buf.ptr, total, 0, @ptrCast(&r.peer), @sizeOf(SockaddrIn));
+        _ = sock.sendTo(r.fd, r.dg_buf[0..total], &r.peer);
     }
 };
