@@ -179,3 +179,60 @@ need, destination exists, CPU decode fps vs route fps, keyframe seen.
 (admission fallback to CPU need instead of HELD, rate-hint cap, H.264 re-offer, telemetry). GPU-free
 tests cover transitions/hysteresis/flapping/keyframe alignment/cap/CPU budget; the native sw path needs a
 rig run (card full now - not run).
+
+## Status 2026-11-13 (feat/vram-fullcard)
+
+| Unit | Commit | State |
+|---|---|---|
+| 0 facts + design | 09cb6422 | done |
+| 1c admission (vramPolicy, need + follow + margin, verified attempt, rate-ladder floor) | 3145e760 | merged to development (983732a1) |
+| 1d HELD visible (ctl routes / encoder-scan, hold JSON across the child RPC) | 3145e760 | merged |
+| 1e adaptive HW/CPU decode (zigenc proto v6 sw + keygate, decmode, sender cap) | 05e0db48, 169b6517 | GPU-unverified |
+| 1a claim remembered destinations at start, no TTL | e5de9e2f | GPU-unverified |
+| 1b sender keeper (rave-mate-keeper.exe, opt-in) | 12ea21e2 | GPU-unverified, default OFF |
+
+### Our VRAM per 4K route (estimates unless marked learned)
+
+| Path | Destination | Decode | Other | Total ours |
+|---|---|---|---|---|
+| before (SpoutLibrary GL sender + DXVA) | 31.6 MiB texture + ~48 GL ctx/interop/2 devices (est) | 114 learned (HEVC) | 2 x 33 MB host RAM (flip + park blank) | ~194 MB VRAM |
+| keeper + HW | 31.6 + device (few MB) in the keeper | 114 learned | none | ~150 MB |
+| keeper + CPU mode (coded 720p) | 31.6 | ~13 (NV12 upload + VP + device) | none | ~45 MB |
+The budget still estimates a NEW sender at 80 MB (GL path); with the keeper on that over-reserves ~45 MB
+until a measured sender cost exists (follow-up: sender cost observation / keeper-aware estimate).
+
+### Known gaps (honest)
+
+- Nothing in 1e/1a/1b ran on a GPU: the card was full (11.9/12.3 GB, Resolume live) the whole session.
+  No probe was run - the keeper's sender registration would appear in Resolume's source list, which is
+  not the "cannot disturb Resolume" class.
+- 1e mode switch = close + reopen on the same child session (destination kept, last picture held,
+  keyframe-gated) - not a dual-decoder hot swap; the new decoder waits for the sender's next natural IDR
+  (no explicit PLI from the decode child yet). H.264 renegotiation for CPU mode not implemented (the HEVC
+  software MFT from the installed HEVC Video Extension 2.5.48 is used; slower than H.264).
+- DecodeCapHeight is global (routeIO carries no destination identity): one CPU-mode route caps every
+  route's coded height. Fine for the one-heavy-route rig.
+- Sender live coded-height cap support on the Linux VAAPI sender (sus) is unverified - if it applies
+  MaxHeight only at open, CPU mode runs at the full coded size until the next re-offer.
+- Keeper: not embedded for self-update (sidecar must be shipped beside rave-mate.exe); Spout max-senders
+  fixed at 64 (registry MaxSenders not read); frame-count semaphore not created (receivers treat it as
+  "always new", same as the existing decode-into-sender path).
+- 1a only runs while the media child runs (it is demand-gated on a connected peer); with the keeper on,
+  destinations persist across child restarts anyway.
+
+### Rig checks (lead, DJ PC; build with `pwsh scripts/deploy-local.ps1 -Build` after `make zig`)
+
+1. 1c/1d: `ctl encoder-scan` header `policy=balanced ... margin=max(64MB,25% need)`. With Resolume loaded
+   and >= ~290 MB free the remembered 4K route opens (log `receive hold released` or `opened as a verified
+   attempt`); below it `ctl routes` shows `HELD ... free/needs/required/policy`. No Resolume interop dialog.
+2. 1e (default on): with the HW pipeline refused, log `opening in CPU decode mode` / `decode ... switching
+   hw -> cpu`; `ctl routes` engine `hwaccel=software (cpu mode)` + `degraded: VRAM: decode mode cpu ...
+   sender coded height capped at 720p`; picture moves in Resolume (bands correct: `RAVE_MATE_MFDEC_PROBE_BANDS=1`
+   once). Free VRAM back above HW need + 512 MB for 45 s -> `switching cpu -> hw`, cap lifted. Switch off
+   with `mediaLink.cpuDecodeFallback=false` if anything looks wrong.
+3. 1a: restart the app with Resolume open: log `remembered destination claimed at start` once per
+   remembered receive; Resolume's sender list keeps ONE `rave-mate link ...`.
+4. 1b (opt-in `mediaLink.senderKeeper=true`, ship `native/zigkeeper/zig-out/bin/rave-mate-keeper.exe` beside
+   rave-mate.exe): log `sender keeper up`; Spout sender list shows the destination with host path
+   rave-mate-keeper.exe; restart rave-mate -> `receive sink open (keeper-hosted GPU destination) adopted:true`,
+   Resolume does NOT re-follow (no flicker); kill the keeper -> one re-create, a second kill -> HELD.
