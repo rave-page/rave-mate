@@ -78,6 +78,14 @@ type NativeTX interface {
 	Close() error
 }
 
+// NativeRateHintPoller is the optional NativeTX capability that surfaces the receiver's MetaRate (the
+// native sender receives the route's control datagrams; the Go supervisor does not read meta there).
+// gen increments per received hint (0 = none). The router polls it (~10 Hz) and applies a new hint
+// to the source exactly as the Go pump's sendControl does (RateControlSource.SetRateHint).
+type NativeRateHintPoller interface {
+	PollRateHint() (h RateHint, gen uint64)
+}
+
 // NativeTXSource is the optional Source capability. A source that implements it can hand its encoded
 // AU stream to the native sender. AUs are submitted exactly as Frame.Payload carries them today
 // (Annex-B with in-band parameter sets; the caller sets the keyframe flag; no separate CONFIG AU).

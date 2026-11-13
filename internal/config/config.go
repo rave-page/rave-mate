@@ -394,7 +394,7 @@ type MediaLinkFeature struct {
 	// hardened: TCP ran a 7 h 4K60 route with zero drops, UDP still shows recovered-gap micro hangs.
 	Transport string `json:"transport,omitempty"`
 	// Playout is the recv playout-delay preset: "low-latency" (max 60 ms), "balanced" (default,
-	// max 150 ms), "smooth" (max 250 ms). Margin grows on a late frame, decays slowly.
+	// max 170 ms), "smooth" (max 250 ms). Margin grows on a late frame, decays slowly.
 	Playout string `json:"playout,omitempty"`
 	// LinkFracPct is the fraction of the interface link speed the auto budget treats as the static
 	// ceiling (0 = default 50%). Only binds on slow links; a 1 Gb LAN is far above the quality model.

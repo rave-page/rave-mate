@@ -43,8 +43,10 @@ pub const Preset = struct {
     start_at_max: bool,
 };
 
+// balanced max 170 ms (owner default ~150 + 20): covers the rig's worst arrival stall (140 ms) landing
+// on a 4K IDR (~15 ms serialization at the paced rate) plus one tail-loss NACK round trip.
 pub const low_latency = Preset{ .name = "low-latency", .max_ns = 60_000_000, .quantile = 0.99, .peak_hold = false, .window_ns = 120_000_000_000, .decay_step_ns = 5_000_000_000, .grow_factor = 1.0, .start_at_max = false };
-pub const balanced = Preset{ .name = "balanced", .max_ns = 150_000_000, .quantile = 0.999, .peak_hold = true, .window_ns = 300_000_000_000, .decay_step_ns = 30_000_000_000, .grow_factor = 1.25, .start_at_max = true };
+pub const balanced = Preset{ .name = "balanced", .max_ns = 170_000_000, .quantile = 0.999, .peak_hold = true, .window_ns = 300_000_000_000, .decay_step_ns = 30_000_000_000, .grow_factor = 1.25, .start_at_max = true };
 pub const smooth = Preset{ .name = "smooth", .max_ns = 250_000_000, .quantile = 0.9999, .peak_hold = true, .window_ns = 600_000_000_000, .decay_step_ns = 60_000_000_000, .grow_factor = 1.5, .start_at_max = true };
 
 /// presetByName maps a config value to a preset (unknown / empty = balanced).
@@ -267,6 +269,7 @@ pub const Playout = struct {
     have_miss: bool = false,
     margin_before_run: i64 = 0,
     last_grow: MarginEvent = .{},
+    last_miss_late: i64 = 0, // lateness of the last miss (telemetry)
     last_rel: i64 = 0,
     have_rel: bool = false,
 
@@ -388,6 +391,7 @@ pub const Playout = struct {
             p.long_peak_t = now;
         }
         if (late_by > 0) {
+            p.last_miss_late = lateness;
             if (!p.have_miss or now - p.last_miss > shift_win_ns) p.margin_before_run = p.margin_ns;
             p.misses += 1;
             p.misses10m.add(now, 1);

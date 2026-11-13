@@ -8,6 +8,9 @@
  * ABI v3 (2026-11-12): rm_open_params.media_clock_ns (PTS rebased into the Go media-clock domain,
  *   0 = sender-local monotonic as in v2); rm_tx_stats.nacks_recv. Callers recompile; no call-site
  *   change is required (both new fields keep v2 behaviour when zeroed).
+ * ABI v4 (2026-11-13): rm_tx_rate_hint - the receiver's MetaRate (congestion AIMD + VRAM governor +
+ *   adaptive budget) reaches the encoder on a native route; the sender also answers MetaSync and PLI
+ *   natively. Callers recompile; poll rm_tx_rate_hint (~10 Hz) and apply on a gen change.
  *
  * Ownership split: Go negotiates the route (Offer/Answer), derives the per-route keys + token, then
  * opens a native sender and hands it the derived material. The encode thread (Linux VA shim /
@@ -47,7 +50,7 @@
 extern "C" {
 #endif
 
-#define RM_ABI_VERSION 3u
+#define RM_ABI_VERSION 4u
 
 uint32_t rm_abi_version(void);
 int rm_wire_selftest(void); /* 0 = wire core matches its goldens (integration sanity) */
@@ -146,6 +149,18 @@ void rm_tx_set_rate(rm_sender *s, double bytes_per_sec);
 
 /* rm_tx_stats_get copies the current stats (lock-free). */
 void rm_tx_stats_get(rm_sender *s, rm_tx_stats *out);
+
+/* rm_rate_hint = medialink.RateHint (0 field = no cap on that axis / clear it) + generation counter. */
+typedef struct {
+    uint64_t gen;             /* increments per received MetaRate; 0 = none received yet */
+    int32_t max_bitrate_kbps; /* reduced FIRST */
+    int32_t max_fps;          /* reduced SECOND */
+    int32_t max_height;       /* LAST resort; 0 = native coded height */
+    int32_t quality;          /* constant-quality target 1..100; 0 = no change */
+} rm_rate_hint;
+
+/* rm_tx_rate_hint copies the last receiver rate hint (lock-free; any thread). */
+void rm_tx_rate_hint(rm_sender *s, rm_rate_hint *out);
 
 /* rm_tx_close stops the TX thread(s), sends a clean bye, and frees the sender. No callback fires
  * after it returns. */

@@ -433,6 +433,15 @@ func (t *pwNativeTX) Stats() medialink.NativeTXStats {
 	}
 }
 
+// PollRateHint implements medialink.NativeRateHintPoller: the receiver's last MetaRate as the native
+// sender received it (gen 0 = none yet). The router applies it via SetRateHint on a gen change.
+func (t *pwNativeTX) PollRateHint() (medialink.RateHint, uint64) {
+	var h C.rm_rate_hint
+	C.rpw_native_tx_rate_hint(t.s.h, &h)
+	return medialink.RateHint{Type: medialink.MetaRate, MaxBitrateKbps: int(h.max_bitrate_kbps), MaxFPS: int(h.max_fps),
+		MaxHeight: int(h.max_height), QualityTarget: int(h.quality)}, uint64(h.gen)
+}
+
 // stageSnap converts the natively computed stage distribution.
 func stageSnap(c *C.rpw_stage_snap) medialink.StageSnapshot {
 	return medialink.StageSnapshot{Count: uint64(c.count), MeanMs: float64(c.mean_ms), P50Ms: float64(c.p50_ms),

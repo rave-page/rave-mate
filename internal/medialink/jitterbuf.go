@@ -73,11 +73,15 @@ type PlayoutPreset struct {
 var (
 	PlayoutLowLatency = PlayoutPreset{Name: "low-latency", MaxNs: 60e6, Quantile: 0.99,
 		WindowNs: 120e9, DecayStepNs: 5e9, GrowFactor: 1}
-	PlayoutBalanced = PlayoutPreset{Name: "balanced", MaxNs: 150e6, Quantile: 0.999, PeakHold: true,
+	// balanced 170 ms: the rig's worst stall (140 ms) on a 4K IDR (~15 ms serialization) + one NACK RTT.
+	PlayoutBalanced = PlayoutPreset{Name: "balanced", MaxNs: 170e6, Quantile: 0.999, PeakHold: true,
 		WindowNs: 300e9, DecayStepNs: 30e9, GrowFactor: 1.25, StartAtMax: true}
 	PlayoutSmooth = PlayoutPreset{Name: "smooth", MaxNs: 250e6, Quantile: 0.9999, PeakHold: true,
 		WindowNs: 600e9, DecayStepNs: 60e9, GrowFactor: 1.5, StartAtMax: true}
 )
+
+// MaxMs is the preset bound in ms.
+func (p PlayoutPreset) MaxMs() float64 { return float64(p.MaxNs) / 1e6 }
 
 // ParsePlayoutPreset maps a config value to a preset ("" / unknown = balanced).
 func ParsePlayoutPreset(s string) PlayoutPreset {

@@ -140,7 +140,7 @@ func pct(xs []int64, q float64) int64 {
 
 // TestPlayoutRigProfile: this rig (arrival stalls 20-140 ms at 0.5-2/min, 0.03 % retransmit-
 // recovered loss, small jitter, mild reorder) on 60 fps for 10 min, balanced preset: after 10 s
-// zero release intervals > 1.5 frames, margin within the 150 ms bound. Several seeds.
+// zero release intervals > 1.5 frames, margin within the balanced bound. Several seeds.
 func TestPlayoutRigProfile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("10-min synthetic traces")
@@ -270,7 +270,7 @@ func TestPlayoutClockStepRebases(t *testing.T) {
 		if s.Rebases != 1 || s.Misses10m != 0 || s.Late != 0 {
 			t.Fatalf("step %d: %+v", step, s)
 		}
-		if s.PlayoutMs != 150 || len(r.rel) != len(arr) || s.PolicyDrops != 0 {
+		if s.PlayoutMs != PlayoutBalanced.MaxMs() || len(r.rel) != len(arr) || s.PolicyDrops != 0 {
 			t.Fatalf("step %d: margin/delivery after rebase: %+v released=%d/%d", step, s, len(r.rel), len(arr))
 		}
 	}
@@ -287,7 +287,7 @@ func TestPlayoutStartupSettlingNotCounted(t *testing.T) {
 	b := newJitterBuffer(60, false)
 	runSim(b, arr, p.transitNs, 0)
 	s := b.statsAt(20e9)
-	if s.Misses10m != 0 || s.PlayoutMs != 150 || s.Rebases != 1 {
+	if s.Misses10m != 0 || s.PlayoutMs != PlayoutBalanced.MaxMs() || s.Rebases != 1 {
 		t.Fatalf("startup settling counted: %+v", s)
 	}
 }

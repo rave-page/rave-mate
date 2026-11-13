@@ -115,6 +115,14 @@ func (n *cgoNativeSender) fullStats() NativeTXStats {
 		Dead: st.dead != 0, NacksRecv: uint64(st.nacks_recv)}
 }
 
+// rateHint returns the last receiver MetaRate the native sender received (gen 0 = none).
+func (n *cgoNativeSender) rateHint() (RateHint, uint64) {
+	var h C.rm_rate_hint
+	C.rm_tx_rate_hint(n.s, &h)
+	return RateHint{Type: MetaRate, MaxBitrateKbps: int(h.max_bitrate_kbps), MaxFPS: int(h.max_fps),
+		MaxHeight: int(h.max_height), QualityTarget: int(h.quality)}, uint64(h.gen)
+}
+
 // stats snapshots the lock-free counters.
 func (n *cgoNativeSender) stats() (sent, retransmits, seq uint64, dead bool) {
 	var st C.rm_tx_stats

@@ -1876,6 +1876,16 @@ void rpw_native_tx_set_rate(struct rpw_capture *c, double bytes_per_sec) {
 }
 
 /* rpw_native_tx_stats copies the sender's lock-free counters (zeroed if not attached). */
+/* rpw_native_tx_rate_hint copies the native sender's last receiver MetaRate (ABI v4; gen 0 = none). */
+void rpw_native_tx_rate_hint(struct rpw_capture *c, rm_rate_hint *out) {
+	if (!out)
+		return;
+	if (c && c->native_tx)
+		rm_tx_rate_hint(c->native_tx, out);
+	else
+		memset(out, 0, sizeof(*out));
+}
+
 void rpw_native_tx_stats(struct rpw_capture *c, rm_tx_stats *out) {
 	if (!out)
 		return;

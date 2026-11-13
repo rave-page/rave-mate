@@ -132,7 +132,7 @@ path (unchanged, wire-compatible, so native↔Go interoperate). Route telemetry 
 ## Resilience (2026-11-13, feat/zigmedia-resilience)
 - Playout (`playout.zig`, legacy mirror `internal/medialink/jitterbuf.go`): margin from measured lateness;
   miss -> grow to observed x factor (cap = preset max); decay <= interval/4 per step toward
-  quantile / worst-recent-stall target; presets low-latency 60 ms | balanced 150 ms (start at max,
+  quantile / worst-recent-stall target; presets low-latency 60 ms | balanced 170 ms (start at max,
   hold one 5-min window) | smooth 250 ms; anti-burst interval/2; base-shift re-anchor (clock / PTS
   step, not a stall); arrival + release on RAW monotonic clock (never the disciplined media clock).
 - Gap policy: hold for the retransmit up to max margin (+250 ms while the reassembler holds a partial
