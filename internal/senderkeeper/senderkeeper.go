@@ -123,7 +123,7 @@ func (c *lineConn) Ensure(name string, w, h int) (Sender, bool, error) {
 	if err != nil {
 		return Sender{}, false, err
 	}
-	return Sender{Name: name, W: r.W, H: r.H, Handle: r.Handle, Fmt: r.Fmt}, r.Created, nil
+	return Sender{Name: name, W: r.W, H: r.H, Handle: kmtHandle(r.Handle), Fmt: r.Fmt}, r.Created, nil
 }
 
 func (c *lineConn) List() ([]Sender, error) {
@@ -135,6 +135,9 @@ func (c *lineConn) List() ([]Sender, error) {
 		Senders []Sender `json:"senders"`
 	}
 	err = json.Unmarshal(raw, &l)
+	for i := range l.Senders {
+		l.Senders[i].Handle = kmtHandle(l.Senders[i].Handle)
+	}
 	return l.Senders, err
 }
 
@@ -152,3 +155,7 @@ func (c *lineConn) Close() error { return c.rw.Close() }
 
 // ErrUnavailable means no keeper could be reached or started (platform, missing exe, policy).
 var ErrUnavailable = errors.New("senderkeeper: keeper unavailable")
+
+// kmtHandle sign-extends a 32-bit legacy (KMT) share handle the way Windows and the Spout SDK
+// (LongToHandle) present it on 64-bit, so a keeper handle compares equal to the Spout registry view.
+func kmtHandle(h uint64) uint64 { return uint64(int64(int32(uint32(h)))) }
