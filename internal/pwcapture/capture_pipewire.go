@@ -408,7 +408,7 @@ func (s *pwSource) AttachNativeTX(p medialink.NativeTXParams) (medialink.NativeT
 		return nil, errors.New("pwcapture: AttachNativeTX before encode engaged")
 	}
 	host, port, err := net.SplitHostPort(p.PeerAddr)
-	if err != nil {
+	if err != nil && p.SocketFD < 0 {
 		return nil, fmt.Errorf("pwcapture: native TX peer %q: %w", p.PeerAddr, err)
 	}
 	chost, cport := C.CString(host), C.CString(port)
@@ -428,7 +428,7 @@ func (s *pwSource) AttachNativeTX(p medialink.NativeTXParams) (medialink.NativeT
 	if C.rpw_attach_native_tx(s.h, C.int(transport), C.int(p.Codec), C.int(p.Stream), C.int(p.BodyMax),
 		chost, cport, C.int(enc), sk, C.uint(p.SendPrefix), rk, C.uint(p.RecvPrefix),
 		C.uint(p.Token), rateBps, C.ulonglong(p.InitialSeq), C.int(p.FPS), C.longlong(int64(p.StartupGrace)),
-		C.longlong(p.MediaClockNs)) == 0 {
+		C.longlong(p.MediaClockNs), C.longlong(p.SocketFD)) == 0 {
 		return nil, errors.New("pwcapture: rpw_attach_native_tx failed")
 	}
 	s.natAUs, s.natBytes, s.natCapTick = int64(C.rpw_enc_aus(s.h)), int64(C.rpw_enc_bytes(s.h)), int64(C.rpw_cap_frames(s.h))

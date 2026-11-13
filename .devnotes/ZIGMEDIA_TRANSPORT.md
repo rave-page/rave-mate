@@ -221,3 +221,7 @@ sustain 60 (sender-side limit, not the receiver). Rig (after deploy, test source
 routes): `rave-mate ctl route-start <peer> "<test source> --transport udp"`, then `rave-mate ctl routes`
 -> recv `impl=native`, `native rx` line, `stage pub` p99 <= 18 ms / >25 = 0; toggle the receiver VRAM cap
 10x and confirm the republished Spout sender geometry stays 3840x2160.
+- D done (0d7ea9d9): native TCP sender (legacy Conn wire, `tcp_tx.zig`), Go `tryAttachNativeTCP` (Linux; File() dup,
+  only before any frame is exchanged), pwcapture passes socket_fd. Soaks `zig build test -Dsoak-seconds=600`:
+  Windows + Linux TCP 36000/36000, UDP 36000/36000, 0 drops, 0 allocations after open. TCP send is non-blocking
+  + stoppable (a dead reader hung rm_tx_close on Linux before). Container runs: always under `timeout`.

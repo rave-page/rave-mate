@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"rave.page/mate/internal/wirecrypto"
@@ -39,6 +40,18 @@ type Conn struct {
 	// TCP route is half-open - no FIN ever arrives and the read blocked forever, so the route never
 	// ended and nothing re-offered it. Needs a net.Conn underneath (deadline support).
 	idle time.Duration
+
+	frames atomic.Uint64 // frames written + read (handoffReady)
+}
+
+// handoffReady reports whether the connection can be handed to a native sender: no frame read or
+// written yet (both AEAD counters at 0) and nothing buffered ahead of the native reader.
+func (c *Conn) handoffReady() bool {
+	c.rmu.Lock()
+	defer c.rmu.Unlock()
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	return c.frames.Load() == 0 && c.br.Buffered() == 0
 }
 
 // SetIdleTimeout arms the per-frame read deadline (receive routes; 0 disables).
@@ -85,6 +98,7 @@ func (c *Conn) WriteFrame(f *Frame) error {
 		c.wout = append(c.wout, c.wscratch...)
 	}
 	binary.BigEndian.PutUint32(c.wout[:4], uint32(len(c.wout)-4))
+	c.frames.Add(1)
 	_, err := c.rw.Write(c.wout)
 	return err
 }
@@ -106,6 +120,7 @@ func (c *Conn) ReadFrame() (*Frame, error) {
 	if c.onFirstByte != nil {
 		c.onFirstByte() // first bytes of this frame are off the socket (before the body read)
 	}
+	c.frames.Add(1)
 	n := binary.BigEndian.Uint32(lp[:])
 	lo, hi := uint32(16), uint32(maxCipher) // sealed: min GCM tag, max cipher (frame + tag)
 	if c.recv == nil {

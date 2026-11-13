@@ -15,6 +15,7 @@ import (
 	"encoding/binary"
 	"math/rand"
 	"net"
+	"rave.page/mate/internal/wirecrypto"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -631,4 +632,114 @@ func TestNativeSenderMetaRateAndSync(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("no SyncPong from the native sender")
 	}
+}
+
+// TestNativeSenderTCPToGoConn: the native TCP sender (legacy Conn wire) -> a REAL Go medialink.Conn
+// (NewConn, the dialing/receiving end). 4K60-realistic AUs for 10 s: every frame decodes in order with
+// its payload intact; the receiver's MetaRate + MetaSync over the same connection reach the native
+// sender (rate hint, SyncPong).
+func TestNativeSenderTCPToGoConn(t *testing.T) {
+	master := testKey()
+	salt := []byte("medialink-interop-tcp-native")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	cli, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cli.Close()
+	srv, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	f, err := srv.(*net.TCPConn).File()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	a, _ := wirecrypto.HkdfSha256(master, salt, []byte("medialink c2s v1"), 32)
+	b, _ := wirecrypto.HkdfSha256(master, salt, []byte("medialink s2c v1"), 32)
+	var sk, rk [32]byte
+	copy(sk[:], b)
+	copy(rk[:], a)
+	clk := NewMonotonicClock()
+	ns, err := openCgoNativeSenderTCP(int(f.Fd()), true, sk, rk, byte(CodecHEVC), 1, clk.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	recv, err := NewConn(cli, master, salt, true) // receiving end dialed = initiator
+	if err != nil {
+		t.Fatal(err)
+	}
+	const n = 600
+	type got struct {
+		frames, bad int
+		pong        *SyncPong
+	}
+	res := make(chan got, 1)
+	go func() {
+		var g got
+		for g.frames < n || g.pong == nil {
+			fr, err := recv.ReadFrame()
+			if err != nil {
+				break
+			}
+			if p, err := DecodeSyncPong(fr); err == nil {
+				pp := p
+				g.pong = &pp
+				continue
+			}
+			if fr.Kind != KindVideo || fr.Seq != uint32(g.frames) || len(fr.Payload) < 5 || fr.Payload[0] != 0xA5 ||
+				binary.BigEndian.Uint32(fr.Payload[1:5]) != uint32(g.frames) {
+				g.bad++
+			}
+			g.frames++
+		}
+		res <- g
+	}()
+	buf := make([]byte, 1<<20)
+	start := time.Now()
+	for i := 0; i < n; i++ {
+		au, kf := realisticAU(i, buf)
+		au[0] = 0xA5
+		binary.BigEndian.PutUint32(au[1:5], uint32(i))
+		ns.submitAU(au, int64(i)*16_666_667, kf)
+		if i == 30 {
+			mf, _ := MetaFrame(RateHint{Type: MetaRate, MaxBitrateKbps: 15000, MaxFPS: 30}, clk.Now())
+			if err := recv.WriteFrame(mf); err != nil {
+				t.Fatal(err)
+			}
+			sp, _ := MetaFrame(SyncPing{Type: MetaSync, ID: 9, T1: clk.Now()}, clk.Now())
+			if err := recv.WriteFrame(sp); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if d := time.Until(start.Add(time.Duration(i+1) * 16_666_667)); d > 0 {
+			time.Sleep(d)
+		}
+	}
+	var g got
+	select {
+	case g = <-res:
+	case <-time.After(5 * time.Second):
+		t.Fatal("receiver did not finish")
+	}
+	h, gen := ns.rateHint()
+	ss := ns.fullStats()
+	t.Logf("tcp native: frames=%d/%d bad=%d sent=%d dropped=%d bytes=%.1fMB hint(gen=%d br=%d fps=%d) pong=%v",
+		g.frames, n, g.bad, ss.AUsSent, ss.AUsDropped, float64(ss.BytesSent)/1e6, gen, h.MaxBitrateKbps, h.MaxFPS, g.pong != nil)
+	if g.frames != n || g.bad != 0 || ss.AUsDropped != 0 {
+		t.Fatalf("frames %d/%d bad %d dropped %d", g.frames, n, g.bad, ss.AUsDropped)
+	}
+	if gen == 0 || h.MaxBitrateKbps != 15000 || h.MaxFPS != 30 {
+		t.Fatalf("MetaRate over TCP not surfaced: gen=%d %+v", gen, h)
+	}
+	if g.pong == nil || g.pong.ID != 9 {
+		t.Fatal("no SyncPong over TCP")
+	}
+	ns.close()
 }

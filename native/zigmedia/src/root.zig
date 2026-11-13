@@ -114,10 +114,12 @@ export fn rm_tx_open(p: ?*const RmOpenParams, on_need_idr: ?IdrCb, user: ?*anyop
     o.* = null;
     if (params.abi_version != abi_version) return RM_ERR_ARGS; // version skew: reject before any field use
     if (params.struct_size != @sizeOf(RmOpenParams)) return RM_ERR_ARGS; // layout skew (same-version build drift)
-    if (params.transport != 0) return RM_ERR_UNIMPL; // TCP: next follow-up
+    if (params.transport != 0 and params.transport != 1) return RM_ERR_ARGS;
+    const is_tcp = params.transport == 1;
+    if (is_tcp and params.socket_fd < 0) return RM_ERR_ARGS; // TCP: Go hands the accepted route connection
     const k = params.keys;
     const cfg = snd.Config{
-        .transport = .udp,
+        .transport = if (is_tcp) .tcp else .udp,
         .codec = @intCast(params.codec),
         .stream = params.stream,
         .body_max = if (params.body_max > 0) @intCast(params.body_max) else 1200,
@@ -363,6 +365,7 @@ test {
     _ = @import("hrtimer.zig");
     _ = @import("sock.zig");
     _ = @import("e2e_test.zig");
+    _ = @import("tcp_test.zig");
     _ = @import("reassembler.zig");
     _ = @import("histogram.zig");
     _ = @import("rx_lifecycle_test.zig");

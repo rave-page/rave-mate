@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"rave.page/mate/internal/wirecrypto"
 	"sort"
 	"strconv"
 	"strings"
@@ -1138,7 +1139,12 @@ func (rm *RouteManager) pumpSource(ctx context.Context, session string, pa *pend
 	// NOT run - the native sender owns its own socket, NACK, keepalive and liveness. The receiver rebinds
 	// its remote to the native socket on the native sender's first (strictly-newest) datagram. Anything
 	// unsupported (TCP, legacy peer, attach error) falls through to the Go pump unchanged.
-	if tx, ok := rm.tryAttachNativeTX(pa, udp, src); ok {
+	tx, ok := rm.tryAttachNativeTX(pa, udp, src)
+	var tcpHandle io.Closer // TCP: the dup'd socket handed to the native sender (closed after it)
+	if !ok && udp == nil {
+		tx, tcpHandle, ok = rm.tryAttachNativeTCP(pa, conn, src)
+	}
+	if ok {
 		st.setTransportImpl("native")
 		rm.infof("route up (send) [native tx]", map[string]any{"session": session, "peer": pa.peer,
 			"source": pa.offer.SourceID, "stream": pa.stream, "transport": transportName(udp)})
@@ -1147,6 +1153,9 @@ func (rm *RouteManager) pumpSource(ctx context.Context, session string, pa *pend
 		}
 		rm.superviseNativeTX(rctx, cancel, tx, rio, src)
 		_ = src.Close()
+		if tcpHandle != nil {
+			_ = tcpHandle.Close()
+		}
 		rm.endRoute(session, conn, tx.Err(), "send")
 		return
 	}
@@ -1206,6 +1215,64 @@ func (rm *RouteManager) tryAttachNativeTX(pa *pendingAnswer, udp *udpConn, src S
 		return nil, false
 	}
 	return tx, true
+}
+
+// tryAttachNativeTCP hands a TCP send route to the native sender: the accepted route connection
+// (preamble consumed, NO frame read or written yet - the per-direction AEAD counters start at 0 on
+// both ends) is duplicated and passed as socket_fd with the legacy Conn keys (HKDF medialink
+// c2s/s2c v1; the answerer seals s2c). Go stops using the conn; the native sender owns it until it
+// ends. Anything unsupported (no per-route salt, a non-TCP rw, bytes already buffered/exchanged, a
+// platform without fd dup) falls back to the Go pump.
+func (rm *RouteManager) tryAttachNativeTCP(pa *pendingAnswer, conn frameConn, src Source) (NativeTX, io.Closer, bool) {
+	nts, ok := src.(NativeTXSource)
+	if !ok || pa.salt == nil {
+		return nil, nil, false
+	}
+	tc, ok := conn.(*Conn)
+	if !ok || !tc.handoffReady() {
+		return nil, nil, false
+	}
+	nc, ok := tc.rw.(*net.TCPConn)
+	if !ok {
+		return nil, nil, false
+	}
+	f, err := nc.File() // dup (blocking mode); unsupported on Windows -> Go pump
+	if err != nil {
+		return nil, nil, false
+	}
+	var sk, rk [32]byte
+	if pa.encrypt {
+		sec, ok := rm.secrets.MediaSecret(pa.peer)
+		if !ok {
+			_ = f.Close()
+			return nil, nil, false
+		}
+		a, err1 := wirecrypto.HkdfSha256(sec, pa.salt, []byte("medialink c2s v1"), 32)
+		b, err2 := wirecrypto.HkdfSha256(sec, pa.salt, []byte("medialink s2c v1"), 32)
+		if err1 != nil || err2 != nil {
+			_ = f.Close()
+			return nil, nil, false
+		}
+		copy(sk[:], b) // answerer = accepting end: seals s2c
+		copy(rk[:], a) // opens the receiver's c2s meta
+	}
+	codec := CodecH264
+	if pa.choice != nil {
+		codec = pa.choice.Codec
+	}
+	params := NativeTXParams{
+		Transport: TransportTCP, Codec: codec, Stream: pa.stream, SocketFD: int64(f.Fd()),
+		Encrypt: pa.encrypt, SendKey: sk, RecvKey: rk, BitrateKbps: pa.offer.Bitrate, FPS: int(pa.srcDesc.FPS),
+		StartupGrace: udpDefStartupGrace,
+	}
+	params.MediaClockNs = rm.clock.Now()
+	tx, err := nts.AttachNativeTX(params)
+	if err != nil {
+		_ = f.Close()
+		rm.warnf("native tcp tx attach failed - Go pump fallback", map[string]any{"session": pa.offer.Session, "error": err.Error()})
+		return nil, nil, false
+	}
+	return tx, f, true
 }
 
 // superviseNativeTX supervises a native sender: 1 Hz stats into RouteStat, receiver rate hints

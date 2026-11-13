@@ -92,6 +92,32 @@ func openCgoNativeSenderClock(peerAddr []byte, token uint32, encrypt bool, sendK
 	return &cgoNativeSender{s: out}, nil
 }
 
+// openCgoNativeSenderTCP opens a TCP native sender on an already-connected socket (caller keeps
+// ownership of fd and closes it after close()).
+func openCgoNativeSenderTCP(fd int, encrypt bool, sendKey, recvKey [32]byte, codec uint8, stream uint16, mediaClockNs int64) (*cgoNativeSender, error) {
+	var p C.rm_open_params
+	p.abi_version = C.uint32_t(C.RM_ABI_VERSION)
+	p.struct_size = C.uint32_t(unsafe.Sizeof(p))
+	p.transport = C.RM_TRANSPORT_TCP
+	p.codec = C.rm_codec(codec)
+	p.stream = C.uint16_t(stream)
+	p.socket_fd = C.int64_t(fd)
+	if encrypt {
+		p.keys.encrypt = 1
+	}
+	for i := 0; i < 32; i++ {
+		p.keys.send_key[i] = C.uint8_t(sendKey[i])
+		p.keys.recv_key[i] = C.uint8_t(recvKey[i])
+	}
+	p.fps = 60
+	p.media_clock_ns = C.int64_t(mediaClockNs)
+	var out *C.rm_sender
+	if rc := C.rm_tx_open(&p, nil, nil, &out); rc != C.RM_OK {
+		return nil, fmt.Errorf("rm_tx_open(tcp): rc=%d", int(rc))
+	}
+	return &cgoNativeSender{s: out}, nil
+}
+
 // submitAU hands one encoded access unit to the native sender (non-blocking; copied synchronously).
 func (n *cgoNativeSender) submitAU(au []byte, ptsNs int64, keyframe bool) {
 	var ptr *C.uint8_t
