@@ -184,7 +184,7 @@ func (r *rememberingReceives) reconcile() {
 		b.liveSince = time.Time{} // not live: restart the stability clock for the next up period
 		if !avail[key] {
 			r.clearHold(key) // a hold is only meaningful while the source is offered
-			continue // source PC has not advertised it (yet): wait, do not burn a backoff step
+			continue         // source PC has not advertised it (yet): wait, do not burn a backoff step
 		}
 		if now.Before(b.next) {
 			continue // backing off from a recent attempt

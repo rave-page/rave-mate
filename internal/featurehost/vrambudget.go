@@ -95,7 +95,7 @@ func WireVramBudget(liveCfg func() config.MediaLinkFeature, sampler gpumem.Sampl
 		b.Observe(gpubudget.OpEncode, gpubudget.Geom{W: outW, H: outH, FPS: fps, Codec: codec}, mb)
 	}
 	return &VramBudget{
-		Budget: b,
+		Budget:      b,
 		AdmitSender: func(w, h int) mediaroute.Admission { return admission(b.AdmitSender(w, h)) },
 		// Codec unknown pre-offer: HEVC is the costlier learned 4K decode on the rig (114 vs 56 MB).
 		AdmitReceive: func(w, h, fps int, newSender bool) mediaroute.Admission {

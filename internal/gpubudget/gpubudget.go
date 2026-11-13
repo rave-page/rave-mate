@@ -296,7 +296,7 @@ func AdmitNeed(in Inputs, op Op, g Geom, cost Cost, followMB float64, pol Policy
 	}
 	margin := MarginMB(need, pol)
 	d.MarginMB = margin
-	d.ReserveMB = uint64(need + 0.5) + margin
+	d.ReserveMB = uint64(need+0.5) + margin
 	attemptFloor := need + float64(margin)/2
 	if mode == ModePermissive {
 		attemptFloor = need
