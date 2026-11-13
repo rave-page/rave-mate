@@ -164,3 +164,9 @@ meta mailbox, publish histogram), Linux + Windows, tested via the C ABI. Not yet
    socket handle: nonce reuse). RouteStat impl=native, playout + publish histogram on `ctl routes`.
 3. VRAM: mediaroute.StartReceive already admits sender + decoder BEFORE the offer (AdmitReceive); the
    child's Dec.open keeps its own admission (mfenc.DecAdmit).
+
+## Status 2026-11-13 (feat/zigmedia-resilience)
+- E done (07c1f200): peerlink ping-timeout dead-link close + mDNS-independent re-dial (peers.Peer.DialAddress),
+  discovery multicast re-join on interface change, TCP receive-route idle deadline (10 s), receive resume on peer up.
+- D next: native TCP sender path (sender side only, `sender.zig` + new files; rm_open_params.transport = TCP is
+  currently RM_ERR_UNIMPL) + soak with a failing-allocator guard. Receiver side belongs to feat/native-rx.
