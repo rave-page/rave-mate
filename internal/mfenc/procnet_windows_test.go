@@ -107,6 +107,7 @@ type txProc struct {
 	last  txStats
 	up    chan string
 	done  chan struct{}
+	pipe  bool // au "pipe": stdin carries AU records
 }
 
 type netKeys struct {
@@ -148,7 +149,7 @@ func startTx(t *testing.T, exe string, port int, k netKeys, extra map[string]any
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	tp := &txProc{cmd: cmd, stdin: stdin, up: make(chan string, 1), done: make(chan struct{})}
+	tp := &txProc{cmd: cmd, stdin: stdin, up: make(chan string, 1), done: make(chan struct{}), pipe: extra["au"] == "pipe"}
 	go func() {
 		defer close(tp.done)
 		sc := bufio.NewScanner(stdout)
@@ -186,7 +187,11 @@ func (tp *txProc) stats() txStats {
 }
 
 func (tp *txProc) quit() {
-	_, _ = tp.stdin.Write([]byte("quit\n"))
+	if tp.pipe {
+		_, _ = tp.stdin.Write(make([]byte, 4)) // zero-length record ends pipe mode
+	} else {
+		_, _ = tp.stdin.Write([]byte("quit\n"))
+	}
 	select {
 	case <-tp.done:
 	case <-time.After(5 * time.Second):
@@ -363,4 +368,37 @@ func TestNetRXSurvivesChildCrash(t *testing.T) {
 		t.Fatalf("session failed instead of re-attaching: %v", err)
 	}
 	t.Logf("re-attached: ctlSeq %d -> %d, published after restart %d", before.CtlSeq, after.CtlSeq, after.Published)
+}
+
+// TestNetRXPipeMode validates the GPU test's harness path without a GPU: AUs streamed on txtest's stdin
+// (the encoder pump format) reach the child's null-decode network session in order and cadence.
+func TestNetRXPipeMode(t *testing.T) {
+	_, txExe := netExes(t)
+	k := newNetKeys(t)
+	d, port := openNullNet(t, 0x6e657a, k, "low-latency")
+	tx := startTx(t, txExe, port, k, map[string]any{"au": "pipe"})
+	var hdr [16]byte
+	au := make([]byte, 5000)
+	t0 := time.Now()
+	for i := 0; i < 90; i++ {
+		binary.LittleEndian.PutUint32(hdr[0:], uint32(len(au)))
+		fl := uint32(0)
+		if i%30 == 0 {
+			fl = 1
+		}
+		binary.LittleEndian.PutUint32(hdr[4:], fl)
+		binary.LittleEndian.PutUint64(hdr[8:], uint64(int64(i)*16_666_667))
+		au[0] = byte(i)
+		if _, err := tx.stdin.Write(hdr[:]); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.stdin.Write(au); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Until(t0.Add(time.Duration(i+1) * time.Second / 60)))
+	}
+	s := waitNet(t, d, 5*time.Second, func(s NetRXStats) bool { return s.Published >= 90 && s.Delivered >= 90 })
+	if s.KeyWaits != 0 || s.Keyframes != 3 || s.MediaBytes != 90*5000 {
+		t.Fatalf("pipe mode: %+v", s)
+	}
 }
