@@ -215,9 +215,10 @@ test "native TCP sender: legacy Conn wire, every frame in order, receiver meta (
     writeAll(p.client, out[0 .. 4 + cl]);
     const dl = hrtimer.nowMono() + 3_000_000_000;
     while ((rd.frames.load(.monotonic) < 50 or s.rateHint().gen == 0) and hrtimer.nowMono() < dl) hrtimer.sleepUntil(hrtimer.nowMono() + 2_000_000);
-    s.close(); // caller-owned socket stays open; reader exits on our close below
-    sock.close(p.client);
+    s.close(); // caller-owned socket stays open (Go closes it after rm_tx_close)
+    tcp_tx.shutdownBoth(p.server); // route teardown: FIN -> the reader's blocked recv returns EOF
     th.join();
+    sock.close(p.client);
     try testing.expectEqual(@as(u32, 50), rd.frames.load(.monotonic));
     try testing.expectEqual(@as(u32, 0), rd.bad.load(.monotonic));
 }
@@ -251,13 +252,31 @@ test "soak TCP: 4K60 sizes, zero steady-state allocations (failing allocator arm
     const st = s.snapshot();
     g.armed.store(false, .monotonic);
     s.close();
-    sock.close(p.client);
+    tcp_tx.shutdownBoth(p.server);
     th.join();
+    sock.close(p.client);
     if (@import("build_options").chaos_report) std.debug.print("soak TCP {d}s: frames={d}/{d} bad={d} bytes={d}MB txDropped={d} allocHits={d}\n", .{ soak_seconds, rd.frames.load(.monotonic), n, rd.bad.load(.monotonic), rd.bytes.load(.monotonic) >> 20, st.aus_dropped, g.hits.load(.monotonic) });
     try testing.expectEqual(@as(u32, 0), g.hits.load(.monotonic));
     try testing.expectEqual(n, rd.frames.load(.monotonic));
     try testing.expectEqual(@as(u32, 0), rd.bad.load(.monotonic));
     try testing.expectEqual(@as(u64, 0), st.aus_dropped);
+}
+
+test "native TCP sender: close never hangs when the receiver stopped reading (half-open peer)" {
+    const fx = fixture();
+    const kS = tcp_tx.deriveTcp(&fx.master, &fx.salt, false);
+    const p = try tcpPair();
+    defer sock.close(p.client);
+    defer sock.close(p.server);
+    const s = try snd.Sender.open(testing.allocator, .{ .transport = .tcp, .send_key = kS.send, .recv_key = kS.recv }, p.server, false);
+    const big = try testing.allocator.alloc(u8, 900_000);
+    defer testing.allocator.free(big);
+    var i: u32 = 0;
+    while (i < 40) : (i += 1) s.submit(big, @as(i64, i) * 16_666_667, if (i == 0) snd.flag_keyframe else 0); // ~36 MB, nobody reads
+    hrtimer.sleepUntil(hrtimer.nowMono() + 300_000_000); // TX thread now stuck on a full socket buffer
+    const t0 = hrtimer.nowMono();
+    s.close();
+    try testing.expect(hrtimer.nowMono() - t0 < 1_000_000_000);
 }
 
 var g_udp_frames = std.atomic.Value(u32).init(0);

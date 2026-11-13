@@ -19,6 +19,7 @@ const win = struct {
     extern "ws2_32" fn recv(s: usize, buf: [*]u8, len: i32, flags: i32) callconv(.winapi) i32;
     extern "ws2_32" fn ioctlsocket(s: usize, cmd: i32, arg: *u32) callconv(.winapi) i32;
     extern "ws2_32" fn WSAGetLastError() callconv(.winapi) i32;
+    extern "ws2_32" fn shutdown(s: usize, how: i32) callconv(.winapi) i32;
     const FIONBIO: i32 = @bitCast(@as(u32, 0x8004667e));
     const WSAEWOULDBLOCK = 10035;
 };
@@ -66,7 +67,7 @@ pub const TcpTx = struct {
     }
 
     /// sendFrame seals (or not) one marshaled frame and writes it whole. false = connection dead.
-    pub fn sendFrame(t: *TcpTx, frame: []const u8, encrypt: bool, key: [32]u8) bool {
+    pub fn sendFrame(t: *TcpTx, frame: []const u8, encrypt: bool, key: [32]u8, stop: *const std.atomic.Value(bool)) bool {
         if (t.dead) return false;
         var n: usize = 0;
         if (encrypt) {
@@ -77,7 +78,7 @@ pub const TcpTx = struct {
             n = frame.len;
         }
         std.mem.writeInt(u32, t.out[0..4], @intCast(n), .big);
-        if (!sendAll(t.fd, t.out[0 .. 4 + n])) t.dead = true;
+        if (!sendAll(t.fd, t.out[0 .. 4 + n], stop)) t.dead = true;
         return !t.dead;
     }
 
@@ -116,21 +117,33 @@ pub const TcpTx = struct {
     }
 };
 
-fn sendAll(fd: sock.Fd, buf: []const u8) bool {
+// sendAll writes buf NON-BLOCKING (MSG_DONTWAIT / FIONBIO) so the TX thread can always stop: a
+// handed fd is blocking (Go File() dup) and a receiver that stops reading (half-open after a link
+// reset) would otherwise park the thread in the kernel forever and hang rm_tx_close. Gives up (dead)
+// on stop or after stall_dead_ns without progress.
+const stall_dead_ns: i64 = 5_000_000_000;
+
+fn sendAll(fd: sock.Fd, buf: []const u8, stop: *const std.atomic.Value(bool)) bool {
+    const hrt = @import("hrtimer.zig");
     var off: usize = 0;
+    var last_progress = hrt.nowMono();
     while (off < buf.len) {
+        if (stop.load(.acquire)) return false;
+        if (hrt.nowMono() - last_progress > stall_dead_ns) return false;
         if (is_windows) {
             const r = win.send(fd, buf[off..].ptr, @intCast(@min(buf.len - off, 1 << 30)), 0);
             if (r > 0) {
                 off += @intCast(r);
+                last_progress = hrt.nowMono();
                 continue;
             }
             if (win.WSAGetLastError() != win.WSAEWOULDBLOCK) return false;
         } else {
-            const r = linux.sendto(fd, buf[off..].ptr, buf.len - off, linux.MSG.NOSIGNAL, null, 0);
+            const r = linux.sendto(fd, buf[off..].ptr, buf.len - off, linux.MSG.NOSIGNAL | linux.MSG.DONTWAIT, null, 0);
             switch (linux.errno(r)) {
                 .SUCCESS => {
                     off += r;
+                    last_progress = hrt.nowMono();
                     continue;
                 },
                 .AGAIN, .INTR => {},
@@ -138,9 +151,19 @@ fn sendAll(fd: sock.Fd, buf: []const u8) bool {
             }
         }
         // Receiver not draining (TCP backpressure): wait briefly; the AU queue absorbs the stall.
-        @import("hrtimer.zig").sleepUntil(@import("hrtimer.zig").nowMono() + send_wait_ns);
+        hrt.sleepUntil(hrt.nowMono() + send_wait_ns);
     }
     return true;
+}
+
+/// shutdownBoth half-closes both directions: wakes any thread blocked on the socket (on Linux a
+/// close() from another thread does NOT wake a blocked recv) and sends FIN.
+pub fn shutdownBoth(fd: sock.Fd) void {
+    if (is_windows) {
+        _ = win.shutdown(fd, 2); // SD_BOTH
+    } else {
+        _ = linux.shutdown(fd, linux.SHUT.RDWR);
+    }
 }
 
 fn recvSome(fd: sock.Fd, buf: []u8) !usize {

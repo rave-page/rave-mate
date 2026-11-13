@@ -294,7 +294,7 @@ pub const Sender = struct {
         const wlen = wire.marshalFrame(s.frame_buf, m, slot.buf[0..slot.len]);
         const frame_wire = s.frame_buf[0..wlen];
         if (s.tcp) |*t| { // TCP: one length-prefixed sealed frame (TCP owns loss + congestion)
-            if (!t.sendFrame(frame_wire, s.cfg.encrypt, s.cfg.send_key)) {
+            if (!t.sendFrame(frame_wire, s.cfg.encrypt, s.cfg.send_key, &s.stop)) {
                 s.s_dead.store(1, .monotonic);
                 return;
             }
@@ -469,7 +469,7 @@ pub const Sender = struct {
         if (json.len > 192) return;
         const n = wire.marshalFrame(&fr, .{ .stream = 0, .kind = 0, .codec = 0, .flags = 0, .seq = s.meta_seq, .pts = pts }, json);
         if (s.tcp) |*t| {
-            _ = t.sendFrame(fr[0..n], s.cfg.encrypt, s.cfg.send_key);
+            _ = t.sendFrame(fr[0..n], s.cfg.encrypt, s.cfg.send_key, &s.stop);
             s.meta_seq +%= 1;
             return;
         }
