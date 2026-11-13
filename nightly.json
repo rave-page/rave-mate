@@ -1,13 +1,13 @@
 {
-  "version": "nightly-c65e32d",
-  "build": 454,
-  "commit": "c65e32d",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-454-20261113-c65e32d.exe",
-  "sha256": "d49fb0bf75fac1912b5b69ed910165f2e7a8f45a4b14d4dbf2a8fb22ec80e5b7",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-454-20261113-c65e32d.exe",
-  "installer_sha256": "5942c4da30e0e99ef18954d168145226e729f29f2b2b9462d59dfd9942050368",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-454-20261113-c65e32d",
-  "linux_sha256": "e62fac68498ffd54280b8559cf9172cc4e7f8fc842520d0d8e56ffe55bf73768",
+  "version": "nightly-d72839d",
+  "build": 455,
+  "commit": "d72839d",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-455-20261113-d72839d.exe",
+  "sha256": "f93de9c9ce7a2df65cbae51e204640505ad8084a3dbdad29ce6c3ae2d8d6ab8b",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-455-20261113-d72839d.exe",
+  "installer_sha256": "9d108e66246a68bd81c4a9e5aec475702647d25b794f474c76f798c2dbd2312d",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-455-20261113-d72839d",
+  "linux_sha256": "2ee6e756f362693706133b9886a53e1c9453a75910babe32afa1a8ad58115078",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-11-13T15:21:33Z",
-  "notes": "Merge feat/zigmedia-resilience: native TCP sender, non-blocking stop-safe sends, soaks, container test timeouts"
+  "released": "2026-11-13T21:03:21Z",
+  "notes": "chore(security): go 1.26.6 -> 1.26.11, x/net v0.55.0 -> v0.60.0"
 }
