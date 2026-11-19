@@ -1,13 +1,13 @@
 {
   "version": "nightly-d72839d",
-  "build": 460,
+  "build": 461,
   "commit": "d72839d",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-460-20261118-d72839d.exe",
-  "sha256": "d8b1480398fa7939f875220a57b986f76d4ffa5fecc60c4b1c570e4ba1a3ea0c",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-460-20261118-d72839d.exe",
-  "installer_sha256": "1f8abb96c0e14262bbbef3bd2256eeb619cf647d4d3d797860ec3a2c1bc358c1",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-460-20261118-d72839d",
-  "linux_sha256": "3b32a3faa3c5843de1c2eae2d0383e7ee014d1704f1e8ab4c7d85a33f79c9a04",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-461-20261119-d72839d.exe",
+  "sha256": "25b5cac00fac705c00ddae948224b49fc1876ba31c671a4d6afefe297e07fd02",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-461-20261119-d72839d.exe",
+  "installer_sha256": "f10fb6f64fd086dbb7d6274cccefcf5c50eb29591522577acf784a7337aa4d95",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-461-20261119-d72839d",
+  "linux_sha256": "9775a4453eb6cd5500df62ab46c0df656d3264c12ccf0867deb63a1a5b3f5057",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-11-18T13:43:28Z",
+  "released": "2026-11-19T14:10:41Z",
   "notes": "chore(security): go 1.26.6 -> 1.26.11, x/net v0.55.0 -> v0.60.0"
 }
