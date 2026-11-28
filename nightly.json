@@ -1,13 +1,13 @@
 {
-  "version": "nightly-63b450a",
-  "build": 474,
-  "commit": "63b450a",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-474-20261128-63b450a.exe",
-  "sha256": "6d5183f07d379b4902784019c11179ab8d008bb2e52a2702a029969f9df0786c",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-474-20261128-63b450a.exe",
-  "installer_sha256": "e21ab521c6318dea46525b17bf7be3fc76578c7e8955f670ae56b3d392f61cf0",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-474-20261128-63b450a",
-  "linux_sha256": "d8ec62be09c56107a1bd181bc99897a3ca514f2135d4f59caaca065c30158b80",
+  "version": "nightly-3007551",
+  "build": 475,
+  "commit": "3007551",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-475-20261128-3007551.exe",
+  "sha256": "0e7b6b8fe62975157f47030ce94f29504c015eb9898313892fb5f5e9ffd335de",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-475-20261128-3007551.exe",
+  "installer_sha256": "58d506c7188fea0f8f5e0398872d644ab9a5590f27315ae54255ec3b5bb42fc1",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-475-20261128-3007551",
+  "linux_sha256": "627ceeabf7959acbe7b04b2948adbcbda667c51fc40485b1a1812d4897996261",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -25,6 +25,6 @@
       "sha256": "bee3fbafcf518285939df89ac1fb672acf45d25ec6564de8b991f60eaed2f58f"
     }
   ],
-  "released": "2026-11-28T16:07:29Z",
-  "notes": "Merge perf/linuxupdate: unattended self-update on Linux (service mode), pipewire-capable nightly"
+  "released": "2026-11-28T16:50:08Z",
+  "notes": "pwcapture: RPW_RATEHINT_FPS rig knob for TestDMABufEncodeAPI (live fps cap verification)"
 }
