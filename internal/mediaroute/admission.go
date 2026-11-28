@@ -167,6 +167,71 @@ func (m *Manager) noteAttempt(sender string, ok bool, freeMB uint64, result stri
 	st.fails++
 }
 
+// hold release hysteresis: a held receive resumes only once free VRAM has stayed holdReleaseRiseMB above
+// what the refusal required for holdReleaseDwell. Incident 2026-11-28: free hovered around the hard
+// floor (admit at 338 MB, refuse at 217 MB) and two routes were offered + torn down every ~30 s - each
+// cycle a sender capture/encoder start and a Resolume source blink.
+const (
+	holdReleaseRiseMB = 128
+	holdReleaseDwell  = 15 * time.Second
+)
+
+// releaseState is per-sender hold-release bookkeeping (Manager.mu).
+type releaseState struct {
+	requiredMB uint64    // free VRAM the last refusal required (its free reading when unknown)
+	okSince    time.Time // admission has passed with the rise since (zero = not yet)
+}
+
+// gateRelease applies the release hysteresis: records refusals, and converts an admission that
+// follows a hold back into a hold until the rise has held for the dwell. Unknown headroom (FreeMB 0)
+// passes: admission failed open. Caller holds m.mu.
+func (m *Manager) gateRelease(sender string, a Admission, now time.Time) Admission {
+	st := m.release[sender]
+	if !a.Allow {
+		if st == nil {
+			if len(m.release) >= parkCap*2 { // bounded: one entry per held receive sender
+				for k := range m.release {
+					delete(m.release, k)
+					break
+				}
+			}
+			st = &releaseState{}
+			m.release[sender] = st
+		}
+		st.okSince = time.Time{}
+		if st.requiredMB = a.RequiredMB; st.requiredMB == 0 {
+			st.requiredMB = a.FreeMB
+		}
+		return a
+	}
+	if st == nil {
+		return a
+	}
+	if a.FreeMB == 0 {
+		delete(m.release, sender)
+		return a
+	}
+	want := st.requiredMB + holdReleaseRiseMB
+	if a.FreeMB < want {
+		st.okSince = time.Time{}
+		a.Allow = false
+		a.Reason = fmt.Sprintf("headroom recovering: free %d MB < %d MB (required %d + %d rise) - staying held", a.FreeMB, want, st.requiredMB, holdReleaseRiseMB)
+		a.RequiredMB = want
+		return a
+	}
+	if st.okSince.IsZero() {
+		st.okSince = now
+	}
+	if d := now.Sub(st.okSince); d < holdReleaseDwell {
+		a.Allow = false
+		a.Reason = fmt.Sprintf("headroom recovering: free %d MB >= %d MB for %s of %s - staying held", a.FreeMB, want, d.Round(time.Second), holdReleaseDwell)
+		a.RequiredMB = want
+		return a
+	}
+	delete(m.release, sender)
+	return a
+}
+
 // holdFor builds the Hold record for a refused admission (caller holds m.mu for attempt state).
 func (m *Manager) holdFor(sender, peer, sourceID string, a Admission, now time.Time) Hold {
 	h := Hold{Sender: sender, Peer: peer, SourceID: sourceID, Since: now, FreeMB: a.FreeMB, NeedMB: a.NeedMB,

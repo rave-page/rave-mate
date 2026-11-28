@@ -134,6 +134,7 @@ type Manager struct {
 	// of distinct receives (remembered set / medialink route cap), pruned by reapParked.
 	holds    map[string]Hold          // current holds (visible state)
 	holdLog  map[string]time.Time     // last hold log line per sender (rate limit)
+	release  map[string]*releaseState // hold-release hysteresis per held sender (bounded, gateRelease)
 	attempts map[string]*attemptState // failed verified attempts
 	pending  map[string]Admission     // NEW destination admitted pre-offer (tier + attempt), consumed at sink open
 	claimAt  map[string]time.Time     // last claim try per remembered destination (bounded by the remembered set)
@@ -174,7 +175,7 @@ func New(o Options) *Manager {
 		newSharedSnd: o.NewSharedSender, openSource: o.OpenSource, openSink: o.OpenSink,
 		shared: map[string]medialink.SourceDesc{}, receives: map[string]Receive{},
 		parked: map[string]*parkedSink{}, stopping: map[string]bool{}, now: time.Now,
-		holds: map[string]Hold{}, holdLog: map[string]time.Time{}, attempts: map[string]*attemptState{},
+		holds: map[string]Hold{}, holdLog: map[string]time.Time{}, release: map[string]*releaseState{}, attempts: map[string]*attemptState{},
 		pending: map[string]Admission{}, claimAt: map[string]time.Time{}, keeper: o.Keeper,
 	}
 	m.hub = newCaptureHub(o.Log, o.OpenReceiver, o.PutPix)
@@ -452,6 +453,7 @@ func (m *Manager) StartReceive(peer, sourceID string) (string, error) {
 	now = m.now()
 	m.mu.Lock()
 	a = m.gateAttempt(sender, a, now)
+	a = m.gateRelease(sender, a, now)
 	if !a.Allow {
 		hold := m.holdFor(sender, peer, sourceID, a, now)
 		m.holds[sender] = hold

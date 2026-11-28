@@ -655,12 +655,13 @@ func TestStartReceiveHeldForVRAM(t *testing.T) {
 	fr := newFakeRouter()
 	desc := medialink.SourceDesc{ID: "spout:VRC", Name: "VRC", Kind: medialink.KindVideo, Width: 3840, Height: 2160, FPS: 60}
 	fr.adverts["peerB"] = advertWith(desc, "hevc_vaapi")
-	allow := false
+	allow, free, now := false, uint64(123), time.Unix(1_000_000, 0)
 	m := New(Options{Log: logbus.New(16), Router: fr,
 		Cfg: func() config.MediaLinkFeature { return config.MediaLinkFeature{} }, // governor default ON
 		AdmitReceive: func(w, h, fps int, newSender bool) Admission {
-			return Admission{Allow: allow, Reason: "insufficient VRAM", Policy: "balanced", FreeMB: 123, NeedMB: 226, RequiredMB: 290}
+			return Admission{Allow: allow, Reason: "insufficient VRAM", Policy: "balanced", FreeMB: free, NeedMB: 226, RequiredMB: 290}
 		}})
+	m.now = func() time.Time { return now }
 	for i := 0; i < 3; i++ {
 		_, err := m.StartReceive("peerB", "spout:VRC")
 		if !IsHeld(err) {
@@ -680,7 +681,34 @@ func TestStartReceiveHeldForVRAM(t *testing.T) {
 	if n != 0 || s != 0 || len(m.Receives()) != 0 {
 		t.Fatalf("held receive offered/registered: offers=%d sinks=%d", n, s)
 	}
-	allow = true
+	// Release hysteresis (incident 2026-11-28): admitted again, but free must sit holdReleaseRiseMB
+	// above the refusal's requirement for holdReleaseDwell - a card hovering at the floor stays held.
+	allow, free = true, 300 // admitted, below 290 + 128
+	now = now.Add(time.Minute)
+	if _, err := m.StartReceive("peerB", "spout:VRC"); !IsHeld(err) {
+		t.Fatalf("admission without the rise must stay held, got %v", err)
+	}
+	free = 500 // risen: dwell starts
+	if _, err := m.StartReceive("peerB", "spout:VRC"); !IsHeld(err) {
+		t.Fatalf("rise must hold for the dwell first, got %v", err)
+	}
+	now = now.Add(holdReleaseDwell / 2)
+	free = 300 // dips: dwell restarts
+	if _, err := m.StartReceive("peerB", "spout:VRC"); !IsHeld(err) {
+		t.Fatalf("dip must stay held, got %v", err)
+	}
+	free = 500
+	now = now.Add(holdReleaseDwell)
+	if _, err := m.StartReceive("peerB", "spout:VRC"); !IsHeld(err) {
+		t.Fatalf("dwell restarted by the dip must not release yet, got %v", err)
+	}
+	fr.mu.Lock()
+	n = len(fr.offers)
+	fr.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("hysteresis leaked %d offers", n)
+	}
+	now = now.Add(holdReleaseDwell)
 	if _, err := m.StartReceive("peerB", "spout:VRC"); err != nil {
 		t.Fatal(err)
 	}
