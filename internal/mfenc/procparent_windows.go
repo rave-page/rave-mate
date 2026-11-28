@@ -102,6 +102,11 @@ const (
 	offFeedFails = 120
 	offBusyDrops = 124 // frames the encoder had no credit for in time (saturation, not breakage)
 
+	// New-frame gating (child-written, src:"spout"; mirrors zigenc off_dup_skips/off_src_frames).
+	offDupSkips         = 224 // tick slots skipped: sender frame counter had not advanced
+	offSrcFrames        = 232 // sender frame-counter advances seen = producer frames
+	capFlagFrameCounter = 1 << 4
+
 	// AU ring for a zero-copy session: half a second of bitstream, floor 4 MiB, ceiling
 	// 16 MiB - GEOMETRY-INDEPENDENT, so a sender resize costs zero SHM realloc.
 	ringKBMin = 4 * 1024
@@ -1056,6 +1061,7 @@ type ProcSession struct {
 	recycle    func(reason string)
 	downgrades atomic.Int32
 	capRate    counterRate
+	srcRate    counterRate
 	busyRate   busyMean
 
 	name  string
@@ -1922,6 +1928,10 @@ func (s *ProcSession) Stats() ProcStats {
 			}
 		}
 		st.CapFPS = s.capRate.sample(st.CapFrames, time.Now())
+		st.DupSkips = atomic.LoadUint64(s.shm.u64(offDupSkips))
+		if st.FrameCounter = st.CapFlags&capFlagFrameCounter != 0; st.FrameCounter {
+			st.SrcFPS = s.srcRate.sample(atomic.LoadUint64(s.shm.u64(offSrcFrames)), time.Now())
+		}
 		st.EncBusyMs = s.busyRate.mean(atomic.LoadUint64(s.shm.u64(56)), st.CapFrames)
 	}
 	s.child.mu.Lock()

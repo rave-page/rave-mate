@@ -399,9 +399,19 @@ Increment 3's other two items were measured and deliberately NOT built - see
 zero at 720p60 AND 4K60 (the 4K cost is encoder saturation, which a shared capture copy does not
 address and which would re-add 33 MB VRAM per adapter+sender), and a duplicate frame on a static
 sender costs 49 bytes - 0.12% of a 20 Mbps route - while keeping the peer's jitter buffer fed.
-Frame-new gating is also not reachable: this SpoutLibrary pairing returns junk from
-`GetSenderFrame` through a metadata-only receiver (the same late-vtable skew already documented
-for `GetSenderWidth`/`GetSenderHeight`).
+Frame-new gating through SpoutLibrary is not reachable (`GetSenderFrame` returns junk: the same
+late-vtable skew documented for `GetSenderWidth`/`GetSenderHeight`).
+
+**New-frame gating (2026-11-28) bypasses SpoutLibrary.** The bytes argument above missed the real
+cost: a 30 fps source on a 60 fps route was copied, converted, encoded and decoded TWICE per frame.
+Spout 2.007 senders keep a named semaphore `<sender>_Count_Semaphore` whose count is the frame
+number; the child reads it with `NtQuerySemaphore` (read-only, no GL, no pixels; `cap.FrameCounter`)
+and a due tick whose count has not moved skips copy + CSC + encode (`dupSkips`). Negotiated rate =
+ceiling; 2 fps keep-alive on a static source (parent frozen-source watch 2 s/3 s, receiver publish
+oracle 3 s, TCP idle 10 s); an IDR request bypasses the gate. No semaphore (registry `Framecount`
+off, pre-2.007, non-SDK sender) = blind pacing as before, per sender; capFlags bit 4 says which.
+mediaroute advertises the MEASURED producer rate (scan cadence, clamped 15..60) once known.
+Gate: `go test ./internal/mfenc -run TestZeroCopyFrameGate -v`.
 
 ### Produce paths (zigmedia increment 4)
 

@@ -33,6 +33,13 @@ extern "kernel32" fn OpenMutexW(u32, i32, [*:0]const u16) callconv(.winapi) ?*an
 extern "kernel32" fn WaitForSingleObject(*anyopaque, u32) callconv(.winapi) u32;
 extern "kernel32" fn ReleaseMutex(*anyopaque) callconv(.winapi) i32;
 extern "kernel32" fn CloseHandle(*anyopaque) callconv(.winapi) i32;
+extern "kernel32" fn OpenSemaphoreW(u32, i32, [*:0]const u16) callconv(.winapi) ?*anyopaque;
+// Read-only count query: never perturbs the semaphore (Spout's own receivers Wait+Release it, which
+// transiently dips the count under the sender's own Wait(0)). Stable ntdll export since NT 3.1.
+extern "ntdll" fn NtQuerySemaphore(*anyopaque, u32, *SemInfo, u32, ?*u32) callconv(.winapi) i32;
+
+const SemInfo = extern struct { cur: i32 = 0, max: i32 = 0 };
+const SEMAPHORE_QUERY_STATE: u32 = 0x0001;
 
 const SYNCHRONIZE: u32 = 0x00100000;
 const MUTEX_MODIFY_STATE: u32 = 1;
@@ -44,6 +51,7 @@ pub const flag_zerocopy: u32 = 1 << 0;
 pub const flag_keyed_mutex: u32 = 1 << 1;
 pub const flag_named_mutex: u32 = 1 << 2;
 pub const flag_unsynchronized: u32 = 1 << 3;
+pub const flag_frame_counter: u32 = 1 << 4; // sender's Spout frame counter readable: new-frame gating live
 
 // Acquire budget: a tick that cannot get the texture in this long is SKIPPED (mtxTimeouts++),
 // never retried in a spin - the pacing rate is the honest bound (design §6).
@@ -120,6 +128,7 @@ pub const Cap = struct {
     // partial-open path, releasing exactly what was created
     has_copy: bool = false, // same, for copy_tex
     reason: Reason = .open_shared, // last failure reason (valid when open/grab failed)
+    fc: FrameCounter = .{}, // sender's frame counter (new-frame gating); absent = blind pacing
     enc_rc: i32 = 0, // last encoder return code when feed returned .encfail (0 = none)
 
     /// open resolves the sender's texture and builds the VP input view over it. `want_w/h` are
@@ -144,7 +153,7 @@ pub const Cap = struct {
         if (mf.failed(dev.v.OpenSharedResource(@ptrCast(dev), @ptrFromInt(@as(usize, @intCast(share))), &mf.IID_ID3D11Texture2D, &raw)) or raw == null) {
             return error.CapOpenFailed;
         }
-        var c = Cap{ .tex = raw.?, .copy_tex = undefined, .view = undefined, .share = share, .flags = flag_zerocopy };
+        var c = Cap{ .tex = raw.?, .copy_tex = undefined, .view = undefined, .share = share, .flags = flag_zerocopy, .fc = FrameCounter.init(sname) };
         errdefer c.close();
 
         const tex: *mf.ID3D11Texture2D = @ptrCast(@alignCast(c.tex));
@@ -294,6 +303,7 @@ pub const Cap = struct {
     }
 
     pub fn close(c: *Cap) void {
+        c.fc.close();
         if (c.kmutex) |k| mf.release(k);
         c.kmutex = null;
         if (c.amutex) |m| _ = CloseHandle(m);
@@ -303,6 +313,102 @@ pub const Cap = struct {
         if (c.has_copy) mf.release(@as(*mf.IUnk, @ptrCast(@alignCast(c.copy_tex))));
         c.has_copy = false;
         mf.release(@as(*mf.IUnk, @ptrCast(@alignCast(c.tex))));
+    }
+};
+
+/// Fresh is one frame-counter poll's verdict.
+pub const Fresh = enum { new, same, unknown };
+
+/// FrameCounter reads a Spout 2.007 sender's frame counter WITHOUT a GL context or any pixel access:
+/// the sender keeps a named semaphore "<sender>_Count_Semaphore" whose COUNT is its frame number
+/// (SpoutFrameCount.cpp: created with count 1, SetNewFrame = Wait(0) + Release(2) per sent frame).
+/// Absent (registry "Framecount" off, pre-2.007 or non-SDK sender, app called DisableFrameCount) =
+/// `.unknown`, and the caller falls back to blind pacing. Allocation-free after init.
+///
+/// A frozen count while the semaphore exists is indistinguishable from a static picture; Spout's own
+/// receivers gate on the same signal (IsFrameNew), so a sender that pauses counting while still
+/// sending already freezes every Spout receiver. One case we CAN catch: a sender that closed its
+/// handle (DisableFrameCount) leaves the object alive only through OUR handle - so a counter that has
+/// not moved for `stuck_reopen_ns` is closed and reopened, which drops a dead object and falls back.
+pub const FrameCounter = struct {
+    name: [name_cap:0]u16 = undefined,
+    name_ok: bool = false,
+    sem: ?*anyopaque = null,
+    last: i64 = -1, // highest count seen (-1 = none: first poll is .new)
+    moved_ns: u64 = 0, // when `last` last advanced
+    next_try_ns: u64 = 0, // reopen backoff while absent
+    advances: u64 = 0, // new frames observed (producer-rate telemetry)
+
+    const name_cap = 256 + 16;
+    const suffix = "_Count_Semaphore";
+    pub const retry_ns: u64 = 2 * std.time.ns_per_s;
+    pub const stuck_reopen_ns: u64 = 2 * std.time.ns_per_s;
+    // A real reset (new object, count restarts at 1) vs the transient -1 dip of the sender's own
+    // Wait(0)+Release(2) and of other receivers' Wait+Release.
+    const reset_dip: i64 = 64;
+
+    pub fn init(sname: []const u8) FrameCounter {
+        var fc = FrameCounter{};
+        if (sname.len == 0 or sname.len + suffix.len >= name_cap) return fc;
+        var i: usize = 0;
+        for (sname) |ch| {
+            fc.name[i] = ch; // sender names are ASCII on this path (openAccessMutex does the same)
+            i += 1;
+        }
+        for (suffix) |ch| {
+            fc.name[i] = ch;
+            i += 1;
+        }
+        fc.name[i] = 0;
+        fc.name_ok = true;
+        return fc;
+    }
+
+    pub fn present(fc: *const FrameCounter) bool {
+        return fc.sem != null;
+    }
+
+    /// poll reads the counter once (one OpenSemaphore at most every retry_ns while absent).
+    pub fn poll(fc: *FrameCounter, now_ns: u64) Fresh {
+        if (fc.sem == null) {
+            if (!fc.name_ok or now_ns < fc.next_try_ns) return .unknown;
+            fc.next_try_ns = now_ns + retry_ns;
+            fc.sem = OpenSemaphoreW(SYNCHRONIZE | SEMAPHORE_QUERY_STATE, 0, @ptrCast(&fc.name));
+            if (fc.sem == null) return .unknown;
+            if (fc.moved_ns == 0) fc.moved_ns = now_ns;
+        }
+        var info = SemInfo{};
+        if (NtQuerySemaphore(fc.sem.?, 0, &info, @sizeOf(SemInfo), null) != 0) {
+            fc.drop(now_ns);
+            return .unknown;
+        }
+        const v = fc.classify(info.cur, now_ns);
+        if (v == .same and now_ns - fc.moved_ns >= stuck_reopen_ns) {
+            fc.drop(0); // stuck: release our hold so a dead object can vanish; reopen next poll
+            fc.moved_ns = now_ns;
+        }
+        return v;
+    }
+
+    /// classify maps one count reading to a verdict (pure; `last` survives a reopen of the same object).
+    pub fn classify(fc: *FrameCounter, cur: i64, now_ns: u64) Fresh {
+        if (cur > fc.last or cur < fc.last - reset_dip) {
+            fc.last = cur;
+            fc.moved_ns = now_ns;
+            fc.advances += 1;
+            return .new;
+        }
+        return .same;
+    }
+
+    fn drop(fc: *FrameCounter, retry_at: u64) void {
+        if (fc.sem) |h| _ = CloseHandle(h);
+        fc.sem = null;
+        fc.next_try_ns = retry_at;
+    }
+
+    pub fn close(fc: *FrameCounter) void {
+        fc.drop(0);
     }
 };
 
@@ -336,4 +442,55 @@ test "reason strings match the wire contract" {
     try std.testing.expectEqualStrings("fmt_unsupported", Reason.fmt_unsupported.text());
     try std.testing.expectEqualStrings("acquire_dead", Reason.acquire_dead.text());
     try std.testing.expectEqualStrings("copy_failed", Reason.copy_failed.text());
+}
+
+test "frame counter: first read new, repeat same, sender dip ignored, reset accepted" {
+    var fc = FrameCounter.init("s");
+    try std.testing.expectEqual(Fresh.new, fc.classify(5, 1));
+    try std.testing.expectEqual(Fresh.same, fc.classify(5, 2));
+    try std.testing.expectEqual(Fresh.same, fc.classify(4, 3)); // sender's Wait(0) before Release(2)
+    try std.testing.expectEqual(Fresh.new, fc.classify(6, 4));
+    try std.testing.expectEqual(Fresh.new, fc.classify(500, 5));
+    try std.testing.expectEqual(Fresh.new, fc.classify(1, 6)); // new object: count restarted
+    try std.testing.expectEqual(Fresh.same, fc.classify(1, 7));
+    try std.testing.expectEqual(@as(u64, 4), fc.advances);
+}
+
+test "frame counter name = <sender>_Count_Semaphore, refuses empty + oversize" {
+    const fc = FrameCounter.init("ab");
+    try std.testing.expect(fc.name_ok);
+    const want = std.unicode.utf8ToUtf16LeStringLiteral("ab_Count_Semaphore");
+    try std.testing.expectEqualSlices(u16, want, std.mem.sliceTo(@as([*:0]const u16, @ptrCast(&fc.name)), 0));
+    try std.testing.expect(!FrameCounter.init("").name_ok);
+    try std.testing.expect(!FrameCounter.init("x" ** 300).name_ok);
+}
+
+test "frame counter absent = unknown, no busy reopen" {
+    var fc = FrameCounter.init("rave-mate zigenc test no such sender 7f3a");
+    try std.testing.expectEqual(Fresh.unknown, fc.poll(10));
+    try std.testing.expectEqual(Fresh.unknown, fc.poll(11)); // inside retry_ns: no OpenSemaphore
+    try std.testing.expect(fc.next_try_ns == 10 + FrameCounter.retry_ns);
+}
+
+extern "kernel32" fn CreateSemaphoreW(?*anyopaque, i32, i32, [*:0]const u16) callconv(.winapi) ?*anyopaque;
+extern "kernel32" fn ReleaseSemaphore(*anyopaque, i32, ?*i32) callconv(.winapi) i32;
+
+test "frame counter reads a live Spout-shaped semaphore without perturbing it" {
+    // Sender side exactly as SpoutFrameCount.cpp: CreateSemaphore(initial 1, max LONG_MAX), then per
+    // frame Wait(0) + Release(2).
+    const sem = CreateSemaphoreW(null, 1, std.math.maxInt(i32), std.unicode.utf8ToUtf16LeStringLiteral("rave-mate zigenc fc gate_Count_Semaphore")) orelse return error.SkipZigTest;
+    defer _ = CloseHandle(sem);
+    var fc = FrameCounter.init("rave-mate zigenc fc gate");
+    defer fc.close();
+    try std.testing.expectEqual(Fresh.new, fc.poll(1));
+    try std.testing.expect(fc.present());
+    try std.testing.expectEqual(Fresh.same, fc.poll(2));
+    try std.testing.expectEqual(Fresh.same, fc.poll(3)); // query is read-only: count unchanged
+    _ = WaitForSingleObject(sem, 0);
+    _ = ReleaseSemaphore(sem, 2, null);
+    try std.testing.expectEqual(Fresh.new, fc.poll(4));
+    try std.testing.expectEqual(Fresh.same, fc.poll(5));
+    var prev: i32 = 0;
+    _ = ReleaseSemaphore(sem, 1, &prev);
+    try std.testing.expectEqual(@as(i32, 2), prev); // 1 + one frame, the poller never moved it
 }

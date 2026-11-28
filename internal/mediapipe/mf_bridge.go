@@ -313,6 +313,9 @@ func (b *mfBridge) routeTelemetry(ctx context.Context) {
 			// capSync is not cosmetic: it decides whether the shared-texture read is coherent at
 			// all, and only the log makes the field's branch visible.
 			"capture": captureLabel(b.zeroCopy), "capSync": st.CapSync, "device": st.DevPolicy,
+			// New-frame gating: capFps vs srcFps vs dupSkips says whether duplicates are skipped
+			// (srcFps > 0) or the sender is blind-paced (no Spout frame counter).
+			"capFps": fmt.Sprintf("%.1f", st.CapFPS), "srcFps": fmt.Sprintf("%.1f", st.SrcFPS), "dupSkips": st.DupSkips,
 			"mtxTimeouts": st.MtxTimeouts, "capStaleMs": fmt.Sprintf("%.0f", st.CapStaleMs),
 			"adapter": fmt.Sprintf("%#x %s", uint64(st.AdapterLUID), b.adapterName),
 			// The content oracle: a live picture cannot be a few hundred bytes per frame.
@@ -690,6 +693,7 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		Restarts: st.Restarts, LatP50Ms: st.LatP50Ms, LatP99Ms: st.LatP99Ms,
 		QueueDepth: st.QueueDepth, ChildCPUPct: st.ChildCPUPct,
 		ZeroCopy: st.ZeroCopy, CapFPS: st.CapFPS, CapSkips: st.CapSkips,
+		DupSkips: st.DupSkips, SrcFPS: st.SrcFPS,
 		MtxTimeouts: st.MtxTimeouts, SrcErrors: st.SrcErrors, CapStaleMs: st.CapStaleMs,
 		CapSync:      capSyncLabel(st.CapFlags),
 		AdapterMoved: st.AdapterMoved,

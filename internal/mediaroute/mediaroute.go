@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -36,7 +37,10 @@ const (
 	linkPrefix    = "rave-mate link " // receive-output sender names (excluded from sharing: loop guard)
 	camPrefix     = "rave-mate cam "  // the webcam feature's OWN capture sender - already a direct "webcam" source; re-sharing it double-advertises the camera
 	receiveGrace  = 30 * time.Second  // offered-but-never-up receives are cleaned after this
-	defaultFPSAdv = 60                // Spout carries no fps metadata; advertise the common case
+	defaultFPSAdv = 60                // Spout carries no fps metadata: initial advert + ceiling of a measured one
+	// minMeasuredFPS floors a MEASURED advert: the negotiated rate caps the route's capture, so a
+	// sender sampled during a slow spell must not pin a later-faster route to a crawl.
+	minMeasuredFPS = 15
 	// parkTTL bounds how long a kept-alive republish sender is held after its route ended before it
 	// is destroyed; parkCap bounds the held set (= medialink's concurrent-route cap). Both keep the
 	// VRAM-churn fix (kept senders survive a route restart, 12b25a7) from leaking DX11 textures.
@@ -78,6 +82,8 @@ type Options struct {
 
 	// Test seams (default: videoshare Spout backend).
 	ListSenders func() []string
+	// SenderFrame reads a sender's Spout frame counter (scan cadence only, never per frame).
+	SenderFrame func(name string) (frame int64, ok bool)
 	SenderSize  func(name string) (w, h int, ok bool)
 	// SenderShare resolves a sender's GPU shared-texture handle + DXGI format (zero-copy
 	// encode, zigmedia inc 1). Scalars only - no pixels, no capture opened.
@@ -140,6 +146,7 @@ type Manager struct {
 	claimAt  map[string]time.Time     // last claim try per remembered destination (bounded by the remembered set)
 
 	listSenders  func() []string
+	senderFrame  func(string) (int64, bool)
 	senderSize   func(string) (int, int, bool)
 	senderShare  func(string) (uint64, uint32, int, int, bool)
 	grabFrame    func(string, int, int) (*image.NRGBA, error)
@@ -153,6 +160,7 @@ type Manager struct {
 
 	mu       sync.Mutex
 	shared   map[string]medialink.SourceDesc // sender name → advertised desc
+	rates    map[string]*fpsObs              // sender name → frame-counter rate state (pruned with shared)
 	receives map[string]Receive              // session → state
 	tc       *testcard.Gen                   // running diagnostic generator (nil = off)
 	// parked holds republish senders whose route ended but whose Spout sender (+ DX11 shared
@@ -170,10 +178,10 @@ type Manager struct {
 func New(o Options) *Manager {
 	m := &Manager{
 		log: o.Log, router: o.Router, cfg: o.Cfg, sameHost: o.SameHost, headroom: o.Headroom, admitSndr: o.AdmitSender, admitRecv: o.AdmitReceive,
-		listSenders: o.ListSenders, senderSize: o.SenderSize, senderShare: o.SenderShare,
+		listSenders: o.ListSenders, senderFrame: o.SenderFrame, senderSize: o.SenderSize, senderShare: o.SenderShare,
 		grabFrame: o.GrabFrame, newFrameSnd: o.NewFrameSender,
 		newSharedSnd: o.NewSharedSender, openSource: o.OpenSource, openSink: o.OpenSink,
-		shared: map[string]medialink.SourceDesc{}, receives: map[string]Receive{},
+		shared: map[string]medialink.SourceDesc{}, rates: map[string]*fpsObs{}, receives: map[string]Receive{},
 		parked: map[string]*parkedSink{}, stopping: map[string]bool{}, now: time.Now,
 		holds: map[string]Hold{}, holdLog: map[string]time.Time{}, release: map[string]*releaseState{}, attempts: map[string]*attemptState{},
 		pending: map[string]Admission{}, claimAt: map[string]time.Time{}, keeper: o.Keeper,
@@ -184,6 +192,12 @@ func New(o Options) *Manager {
 	}
 	if m.senderSize == nil {
 		m.senderSize = videoshare.SenderSize
+	}
+	if m.senderFrame == nil {
+		m.senderFrame = func(n string) (int64, bool) {
+			f, _, ok := videoshare.SenderFrame(n)
+			return f, ok
+		}
 	}
 	if m.grabFrame == nil {
 		m.grabFrame = videoshare.GrabSenderFrame
@@ -256,22 +270,24 @@ func (m *Manager) scan() {
 		m.mu.Lock()
 		prev, had := m.shared[n]
 		m.mu.Unlock()
-		if had && prev.Width == w && prev.Height == h {
+		fps, measured, counter := m.advertFPS(n, prev, had)
+		if had && prev.Width == w && prev.Height == h && prev.FPS == fps {
 			continue
 		}
-		fps := float64(defaultFPSAdv)
-		if c := m.cfg().FPSCap(); c > 0 && float64(c) < fps {
-			fps = float64(c) // the sender-side cap is the real delivery rate - advertise it
-		}
-		// Spout carries no frame-rate metadata, so this number is an ASSUMPTION, and it is the one
-		// that decides how often we capture: a 30 fps canvas advertised at 60 is captured, converted
-		// and encoded twice per frame (measured on the 2-PC rig - a 30 fps source ran at wire 62 fps).
-		// Say so once per sender, with the lever, instead of letting it stay silent.
-		if fps > 30 {
-			m.log.Info(source, "sharing sender at an ASSUMED frame rate - Spout carries no fps metadata", map[string]any{
+		switch {
+		case measured > 0:
+			m.log.Info(source, "sharing sender at its MEASURED frame rate (Spout frame counter)", map[string]any{
+				"sender": n, "measuredFPS": fmt.Sprintf("%.1f", measured), "advertisedFPS": fps, "w": w, "h": h})
+		case !counter && fps > 30:
+			// No counter: Spout carries no frame-rate metadata, so this number is an ASSUMPTION, and
+			// zero-copy capture is BLIND-paced at it - a 30 fps canvas advertised at 60 is captured,
+			// converted and encoded twice per frame (measured on the 2-PC rig: wire 62 fps). With the
+			// counter the encoder child encodes only new frames and this rate is just a ceiling.
+			m.log.Info(source, "sharing sender at an ASSUMED frame rate - it publishes no Spout frame counter, so capture is blind-paced", map[string]any{
 				"sender": n, "assumedFPS": fps, "w": w, "h": h,
-				"hint": "if the source renders slower (a 30 fps OBS/Resolume canvas), set MediaLink " +
-					"frame-rate cap to match - otherwise every frame is captured and encoded twice"})
+				"hint": "enable frame counting for the sending app (SpoutSettings: frame count) so only new frames " +
+					"are encoded, or set the MediaLink frame-rate cap to the source's rate - otherwise a slower " +
+					"source is captured and encoded twice per frame"})
 		}
 		desc := medialink.SourceDesc{ID: "spout:" + n, Name: n, Kind: medialink.KindVideo,
 			Codec: medialink.CodecNRGBA, Width: w, Height: h, FPS: fps}
@@ -297,11 +313,58 @@ func (m *Manager) scan() {
 	}
 	for _, n := range gone {
 		delete(m.shared, n)
+		delete(m.rates, n)
 	}
 	m.mu.Unlock()
 	for _, n := range gone {
 		m.router.UnregisterSource("spout:" + n)
 	}
+}
+
+// fpsObs is one sender's frame-counter rate state (scan cadence: one reading per 2 s).
+type fpsObs struct {
+	frame int64
+	at    time.Time
+	fps   float64 // last measured producer rate; 0 = not measured yet
+}
+
+// advertFPS picks sender n's advertised rate. With a Spout frame counter: the MEASURED producer rate
+// once two readings exist (rounded, clamped to [minMeasuredFPS, defaultFPSAdv]; a reading with no
+// progress keeps the last rate - a static picture is not a slow source), re-advertised only on a
+// material change. Without one: the assumed defaultFPSAdv. The MediaLink fps cap always wins.
+// measured > 0 = the rate came from the counter; counter = the sender publishes one at all.
+func (m *Manager) advertFPS(n string, prev medialink.SourceDesc, had bool) (fps, measured float64, counter bool) {
+	fps = defaultFPSAdv
+	f, ok := m.senderFrame(n)
+	now := m.now()
+	m.mu.Lock()
+	o := m.rates[n]
+	switch {
+	case !ok:
+		delete(m.rates, n)
+	case o == nil:
+		m.rates[n] = &fpsObs{frame: f, at: now}
+	default:
+		dt := now.Sub(o.at).Seconds()
+		if df := f - o.frame; dt >= 1 && df > 0 {
+			if r := float64(df) / dt; r >= minMeasuredFPS/2 {
+				o.fps = r
+			}
+		}
+		o.frame, o.at = f, now
+		measured = o.fps
+	}
+	m.mu.Unlock()
+	if measured > 0 {
+		fps = math.Min(math.Max(math.Round(measured), minMeasuredFPS), defaultFPSAdv)
+		if had && math.Abs(fps-prev.FPS) < math.Max(2, prev.FPS/10) {
+			fps = prev.FPS // hysteresis: a 59/60/61 jitter must not re-advertise every scan
+		}
+	}
+	if c := m.cfg().FPSCap(); c > 0 && float64(c) < fps {
+		fps = float64(c) // the sender-side cap is the real delivery rate - advertise it
+	}
+	return fps, measured, ok
 }
 
 // cleanup unregisters per-receive sinks whose route never came up / already ended.
