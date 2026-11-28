@@ -226,6 +226,10 @@ type PipelineStats struct {
 	// constant-quality level (0 = CBR/VBR, i.e. fixed mode); BudgetKbps is the encode budget CEILING.
 	QualityTarget int
 	BudgetKbps    int
+	// RateControl names the rate-control mode the encoder actually engaged (native MF child: e.g.
+	// "lowdelay-vbr+qp-floor", "cbr"; "" = engine does not report) and RateCapKbps its LIVE cap.
+	RateControl string
+	RateCapKbps int
 	// PubStalledMs/PubChanges/PubHash are the receive side's CONTENT oracle: how long the
 	// published PICTURE has been identical, and how many times it actually changed. Every counter
 	// above is rate- or volume-shaped, and that is not enough - a 4K route republished ONE

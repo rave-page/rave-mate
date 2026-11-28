@@ -502,6 +502,9 @@ func formatRoutes(stats []medialink.RouteStat) string {
 				mode = fmt.Sprintf("auto (quality q%d, bitrate is the ceiling)", s.Pipe.QualityTarget)
 			}
 			line := fmt.Sprintf("    budget mode=%s ceil=%d kbps", mode, s.Pipe.BudgetKbps)
+			if s.Pipe.RateControl != "" {
+				line += fmt.Sprintf("  rc=%s cap=%d kbps", s.Pipe.RateControl, s.Pipe.RateCapKbps)
+			}
 			if fb := s.Pipe.Feedback; fb.Present {
 				line += fmt.Sprintf("  encoder qp=%.0f", fb.AvgQP)
 				if fb.RateLimited {
