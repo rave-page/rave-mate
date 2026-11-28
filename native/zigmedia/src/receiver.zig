@@ -5,7 +5,7 @@
 //! margin); a frame still missing past the max margin is skipped, an inter-coded stream waits for a
 //! keyframe and a PLI (stream-0 meta NACK, pli=true - same wire as the Go jitter buffer) is sent,
 //! rate-limited; never a keyframe request while the frame can still arrive. Keepalive pings keep the
-//! sender's liveness; the sender's pings are ponged. Allocation-free after open; every pool bounded.
+//! sender's liveness; the sender's pings are ponged. Allocation-free after open; every pool bounded (frame slots: SlotPool).
 const std = @import("std");
 const keys = @import("keys.zig");
 const aead = @import("aead.zig");
@@ -80,6 +80,71 @@ pub const meta_in_cap = 16;
 pub const meta_in_max = 512;
 const rebind_min_ns: i64 = 1_000_000_000; // = medialink udpRebindMin
 
+/// SlotPool holds reassembled AUs from reasm-complete until playout release. Two size classes, one
+/// slab committed at open, nothing allocated after (per-frame path = index scan + memcpy). A frame
+/// takes the smallest class that fits; small frames never take a large slot (keyframe headroom stays
+/// reserved). Class exhausted after reclaim -> frame dropped, counted in slot_drops (the playout gap
+/// policy then waits for a keyframe + PLIs). Caps: slots_small + slots_large = 48 frames;
+/// 44 x 256 KiB + 4 x max_frame_bytes (4 MiB) = 27 MiB committed (was 48 x 4 MiB = 192 MiB).
+/// Small class covers 4K60 P-frames (50 Mbps / 60 fps ~104 KB avg, 80-150 KB in the e2e model);
+/// keyframes (400-900 KB) + scene cuts land in the large class. Worker-thread only: no lock.
+pub const SlotPool = struct {
+    pub const slots_small = 44;
+    pub const slots_large = 4;
+    pub const n_slots = slots_small + slots_large;
+    pub const small_slot_bytes: usize = 256 << 10;
+
+    slab: []u8,
+    buf: [n_slots][]u8 = undefined,
+    len: [n_slots]usize = [_]usize{0} ** n_slots,
+    free: [n_slots]bool = [_]bool{true} ** n_slots,
+    n_small: usize, // slots [0, n_small) small class, [n_small, n_slots) large class
+    small_bytes: usize,
+    max_bytes: usize,
+
+    pub fn init(alloc: std.mem.Allocator, max_frame_bytes: usize) !SlotPool {
+        // max <= small class: one class of max_frame_bytes (no large slots needed).
+        const split = max_frame_bytes > small_slot_bytes;
+        const small = if (split) small_slot_bytes else max_frame_bytes;
+        const n_small: usize = if (split) slots_small else n_slots;
+        const slab = try alloc.alloc(u8, n_small * small + (n_slots - n_small) * max_frame_bytes);
+        var p = SlotPool{ .slab = slab, .n_small = n_small, .small_bytes = small, .max_bytes = max_frame_bytes };
+        var off: usize = 0;
+        for (&p.buf, 0..) |*b, i| {
+            const sz = if (i < n_small) small else max_frame_bytes;
+            b.* = slab[off..][0..sz];
+            off += sz;
+        }
+        return p;
+    }
+
+    pub fn deinit(p: *SlotPool, alloc: std.mem.Allocator) void {
+        alloc.free(p.slab);
+    }
+
+    /// committedBytes is the slab size (all slot memory of one receiver).
+    pub fn committedBytes(p: *const SlotPool) usize {
+        return p.slab.len;
+    }
+
+    /// take claims a free slot of the class fitting n bytes; null = class exhausted or n > max.
+    pub fn take(p: *SlotPool, n: usize) ?usize {
+        if (n > p.max_bytes) return null;
+        const lo: usize = if (n <= p.small_bytes) 0 else p.n_small;
+        const hi: usize = if (n <= p.small_bytes) p.n_small else n_slots;
+        for (lo..hi) |i| if (p.free[i]) {
+            p.free[i] = false;
+            p.len[i] = n;
+            return i;
+        };
+        return null;
+    }
+
+    pub fn release(p: *SlotPool, i: usize) void {
+        p.free[i] = true;
+    }
+};
+
 pub const FrameCb = *const fn (user: ?*anyopaque, ptr: [*]const u8, len: usize, pts: i64, key: bool) callconv(.c) void;
 
 pub const Receiver = struct {
@@ -90,10 +155,7 @@ pub const Receiver = struct {
     playout: Playout,
     pbuf: []playout_mod.Item,
 
-    // frame slots: hold a reassembled AU from reasm-complete until playout release.
-    slot_buf: [][]u8,
-    slot_len: []usize,
-    slot_free: []bool,
+    slots: SlotPool,
 
     peer: sock.Addr4 = .{},
     have_peer: bool = false,
@@ -163,7 +225,7 @@ pub const Receiver = struct {
     stall_at_frame: i64 = -1,
     stall_ns: i64 = 0,
 
-    const n_slots = 48;
+    const n_slots = SlotPool.n_slots;
 
     /// open starts the receiver worker on an already-bound UDP socket (ownership stays with the
     /// caller). cb is installed before the worker starts.
@@ -181,14 +243,6 @@ pub const Receiver = struct {
         const r = try alloc.create(Receiver);
         errdefer alloc.destroy(r);
         const pbuf = try alloc.alloc(playout_mod.Item, n_slots);
-        const sbuf = try alloc.alloc([]u8, n_slots);
-        const slen = try alloc.alloc(usize, n_slots);
-        const sfree = try alloc.alloc(bool, n_slots);
-        for (sbuf, 0..) |*s, i| {
-            s.* = try alloc.alloc(u8, cfg.max_frame_bytes);
-            slen[i] = 0;
-            sfree[i] = true;
-        }
         r.* = .{
             .alloc = alloc,
             .fd = fd,
@@ -196,9 +250,7 @@ pub const Receiver = struct {
             .reasm = try Reassembler.init(alloc, 16, cfg.body_max, cfg.max_frame_bytes),
             .playout = Playout.initPreset(pbuf, cfg.fps, cfg.preset),
             .pbuf = pbuf,
-            .slot_buf = sbuf,
-            .slot_len = slen,
-            .slot_free = sfree,
+            .slots = try SlotPool.init(alloc, cfg.max_frame_bytes),
             .seq = cfg.initial_seq,
             .rx_buf = try alloc.alloc(u8, 2048),
             .dg_buf = try alloc.alloc(u8, 2 + nack_max * 8 + wire.header_len + 128), // fits a full NACK / PLI
@@ -227,10 +279,7 @@ pub const Receiver = struct {
     pub fn close(r: *Receiver) void {
         r.halt();
         r.reasm.deinit();
-        for (r.slot_buf) |s| r.alloc.free(s);
-        r.alloc.free(r.slot_buf);
-        r.alloc.free(r.slot_len);
-        r.alloc.free(r.slot_free);
+        r.slots.deinit(r.alloc);
         r.alloc.free(r.pbuf);
         r.alloc.free(r.rx_buf);
         r.alloc.free(r.dg_buf);
@@ -368,16 +417,14 @@ pub const Receiver = struct {
                     r.stall_at_frame = -1; // simulated receiver-host stall: nothing is read meanwhile
                     hrtimer.sleepUntil(hrtimer.nowMono() + r.stall_ns);
                 }
-                const si = r.freeSlot() orelse {
-                    _ = r.slot_drops.fetchAdd(1, .monotonic); // bounded: no slot -> drop
+                const si = r.freeSlot(f.payload.len) orelse {
+                    _ = r.slot_drops.fetchAdd(1, .monotonic); // bounded: class exhausted -> drop
                     return;
                 };
-                @memcpy(r.slot_buf[si][0..f.payload.len], f.payload);
-                r.slot_len[si] = f.payload.len;
-                r.slot_free[si] = false;
+                @memcpy(r.slots.buf[si][0..f.payload.len], f.payload);
                 _ = r.media_bytes.fetchAdd(f.payload.len, .monotonic);
                 if ((f.flags & 0x01) != 0) _ = r.keyframes.fetchAdd(1, .monotonic);
-                if (!r.playout.push(f.seq, f.pts, (f.flags & 0x01) != 0, si, now)) r.slot_free[si] = true;
+                if (!r.playout.push(f.seq, f.pts, (f.flags & 0x01) != 0, si, now)) r.slots.release(si);
             },
             wire.dg_type_ping => r.sendCtrl(wire.dg_type_pong, 0, 0, body),
             wire.dg_type_bye => r.bye.store(true, .release), // clean end-of-stream from the sender
@@ -397,8 +444,8 @@ pub const Receiver = struct {
             const it = r.playout.due(hrtimer.nowMono()) orelse break;
             const si: usize = @intCast(it.tag);
             r.publish.mark(hrtimer.nowMono());
-            if (r.on_frame) |cb| cb(r.user, r.slot_buf[si].ptr, r.slot_len[si], it.pts_ns, it.key);
-            r.slot_free[si] = true;
+            if (r.on_frame) |cb| cb(r.user, r.slots.buf[si].ptr, r.slots.len[si], it.pts_ns, it.key);
+            r.slots.release(si);
             _ = r.delivered.fetchAdd(1, .monotonic);
         }
         if (r.playout.pli_pending) {
@@ -409,7 +456,7 @@ pub const Receiver = struct {
     }
     // reclaimSlots frees every used slot no playout item references (bounded scan).
     fn reclaimSlots(r: *Receiver) void {
-        for (r.slot_free, 0..) |*fr, i| {
+        for (&r.slots.free, 0..) |*fr, i| {
             if (fr.*) continue;
             var live = false;
             for (r.playout.buf[0..r.playout.n]) |it| {
@@ -422,11 +469,10 @@ pub const Receiver = struct {
         }
     }
 
-    fn freeSlot(r: *Receiver) ?usize {
-        for (r.slot_free, 0..) |fr, i| if (fr) return i;
+    fn freeSlot(r: *Receiver, n: usize) ?usize {
+        if (r.slots.take(n)) |i| return i;
         r.reclaimSlots();
-        for (r.slot_free, 0..) |fr, i| if (fr) return i;
-        return null;
+        return r.slots.take(n);
     }
 
     fn scanAndNack(r: *Receiver, now: i64) void {
@@ -601,3 +647,47 @@ pub const Receiver = struct {
         _ = sock.sendTo(r.fd, r.dg_buf[0..total], &r.peer);
     }
 };
+
+test "SlotPool: size classes, large-class exhaustion, reuse, committed bytes" {
+    const max: usize = 4 << 20;
+    var p = try SlotPool.init(std.testing.allocator, max);
+    defer p.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 44 * (256 << 10) + 4 * max), p.committedBytes());
+    try std.testing.expectEqual(@as(usize, 27 << 20), p.committedBytes());
+
+    // frame larger than the small class -> large slot; a full 4 MiB keyframe still fits.
+    const big = p.take(SlotPool.small_slot_bytes + 1).?;
+    try std.testing.expect(big >= p.n_small);
+    try std.testing.expectEqual(SlotPool.small_slot_bytes + 1, p.len[big]);
+    const full = p.take(max).?;
+    try std.testing.expect(full >= p.n_small);
+    try std.testing.expectEqual(max, p.buf[full].len);
+    try std.testing.expectEqual(@as(?usize, null), p.take(max + 1)); // beyond max: never accepted
+
+    // large-class exhaustion: 4 large slots; the 5th large frame drops while small slots stay free.
+    _ = p.take(max).?;
+    _ = p.take(max).?;
+    try std.testing.expectEqual(@as(?usize, null), p.take(1 << 20));
+    const small = p.take(100_000).?; // small frame unaffected, never borrows a large slot
+    try std.testing.expect(small < p.n_small);
+
+    // reuse: a released large slot is handed out again.
+    p.release(big);
+    try std.testing.expectEqual(@as(?usize, big), p.take(900_000));
+
+    // small-class exhaustion does not spill into the large class.
+    p.release(full);
+    var k: usize = 1; // `small` already taken
+    while (p.take(1000)) |_| k += 1;
+    try std.testing.expectEqual(@as(usize, SlotPool.slots_small), k);
+    try std.testing.expectEqual(@as(?usize, full), p.take(max)); // keyframe headroom kept
+}
+
+test "SlotPool: max_frame_bytes <= small class is one class" {
+    var p = try SlotPool.init(std.testing.allocator, 64 << 10);
+    defer p.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, SlotPool.n_slots * (64 << 10)), p.committedBytes());
+    var k: usize = 0;
+    while (p.take(64 << 10)) |_| k += 1;
+    try std.testing.expectEqual(@as(usize, SlotPool.n_slots), k);
+}
