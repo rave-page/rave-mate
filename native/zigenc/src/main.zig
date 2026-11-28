@@ -12,6 +12,8 @@
 //!    "dfmt":<DXGI fmt>,"dname":"<dest sender>","in_ring_kb":..}
 //!   {"op":"close","sid":1} | {"op":"bitrate","sid":1,"kbps":..} | {"op":"idr","sid":1}
 //!   {"op":"capheight","sid":1,"out_w":..,"out_h":..} (proto v4: live coded-resolution cap)
+//!   {"op":"fps","sid":1,"tick_n":..,"tick_d":..} (proto v7: live fps cap, 0 = clear; open takes the
+//!    same two fields as the initial cap)
 //!   proto v5 (network receive, netrx.zig): open gains "null_dec" (no decoder/destination: GPU-free
 //!   tests) + "net_blk" (512 B telemetry block after the inbound ring);
 //!   {"op":"netrx","sid":1,"pinfo":<hex WSAPROTOCOL_INFOW>,"peer":"a.b.c.d:p","enc":..,"token":..,
@@ -312,6 +314,12 @@ const Session = struct {
     // above source), so the child never computes geometry.
     want_cap_w: i32 = 0,
     want_cap_h: i32 = 0,
+    // want_tick_*: a pending LIVE frame-rate cap (proto v7 "fps" op; want_tick_set = pending; n 0 =
+    // clear, back to the negotiated rate). open's tick_n/d preload it: the cap a reopen after a child
+    // restart must keep. The session thread clamps to [1 fps, negotiated rate] (tickPeriod).
+    want_tick_n: i32 = 0,
+    want_tick_d: i32 = 1,
+    want_tick_set: bool = false,
     closing: bool = false,
 
     thread: ?std.Thread = null,
@@ -574,33 +582,34 @@ fn sessionMain(s: *Session) void {
     var fed_frames: u64 = 0;
     var feed_fails: u32 = 0;
     var busy_drops: u32 = 0;
+    // Live fps cap (proto v7): the parent pushes frames at ITS rate; a capped session encodes at most
+    // one per `period` (base = the negotiated rate, never exceeded) and consumes the rest unencoded.
+    const base: u64 = @intCast(@max(@divTrunc(std.time.ns_per_s * @as(i64, @max(s.fps_d, 1)), @max(@as(i64, s.fps_n), 1)), 1_000_000));
+    var period = base; // an open-time cap arrives through the mailbox (want_tick_set at open)
+    var next_due: u64 = 0;
     while (true) {
         _ = WaitForSingleObject(s.ev_frame, 20);
-        var want_idr = false;
-        var want_kbps: u32 = 0;
-        var cap_w: i32 = 0;
-        var cap_h: i32 = 0;
-        var closing = false;
-        {
-            s.mu.lock();
-            defer s.mu.unlock();
-            want_idr = s.want_idr;
-            want_kbps = s.want_kbps;
-            cap_w = s.want_cap_w;
-            cap_h = s.want_cap_h;
-            closing = s.closing;
-            s.want_idr = false;
-            s.want_kbps = 0;
-            s.want_cap_w = 0;
-            s.want_cap_h = 0;
-        }
-        if (closing) break;
-        if (want_idr) enc.forceIDR();
-        if (want_kbps > 0) _ = enc.setBitrate(want_kbps);
-        if (cap_w > 0 and cap_h > 0 and enc.reconfigureOutput(cap_w, cap_h, sink) == -2) break; // device lost
+        const m = drainMailbox(s);
+        if (m.closing) break;
+        if (m.idr) enc.forceIDR();
+        if (m.kbps > 0) _ = enc.setBitrate(m.kbps);
+        if (m.cap_w > 0 and m.cap_h > 0 and enc.reconfigureOutput(m.cap_w, m.cap_h, sink) == -2) break; // device lost
+        if (m.tick_set) period = tickPeriod(base, m.tick_n, m.tick_d);
         const seq = s.hdr.frameSeq();
         if (seq != last_seq) {
             last_seq = seq;
+            if (period > base) {
+                // A quarter-period tolerance keeps a 60 -> 30 cap at every 2nd frame despite capture
+                // jitter; a late frame resyncs the grid instead of bursting to catch up.
+                const now = qpcNs();
+                if (now + period / 4 < next_due) {
+                    s.hdr.setConsSeq(seq);
+                    _ = SetEvent(s.ev_cons);
+                    continue;
+                }
+                const nd = next_due + period;
+                next_due = if (nd + period < now) now + period else nd;
+            }
             fed_frames += 1;
             s.fed += 1;
             if (fault_after_frames > 0 and fed_frames == fault_after_frames) {
@@ -645,17 +654,38 @@ fn sessionMain(s: *Session) void {
 }
 
 // Mailbox is one drained control snapshot (stdin thread â†’ session thread).
-const Mailbox = struct { idr: bool, kbps: u32, cap_w: i32, cap_h: i32, closing: bool };
+const Mailbox = struct { idr: bool, kbps: u32, cap_w: i32, cap_h: i32, closing: bool, tick_set: bool, tick_n: i32, tick_d: i32 };
 
 fn drainMailbox(s: *Session) Mailbox {
     s.mu.lock();
     defer s.mu.unlock();
-    const m = Mailbox{ .idr = s.want_idr, .kbps = s.want_kbps, .cap_w = s.want_cap_w, .cap_h = s.want_cap_h, .closing = s.closing };
+    const m = Mailbox{ .idr = s.want_idr, .kbps = s.want_kbps, .cap_w = s.want_cap_w, .cap_h = s.want_cap_h, .closing = s.closing, .tick_set = s.want_tick_set, .tick_n = s.want_tick_n, .tick_d = s.want_tick_d };
     s.want_idr = false;
     s.want_kbps = 0;
     s.want_cap_w = 0;
     s.want_cap_h = 0;
+    s.want_tick_set = false;
     return m;
+}
+
+// tickPeriod is the capture/encode tick period for a live fps cap n/d, bounded to [base, 1 s]: never
+// faster than the negotiated rate (base = its period), never slower than 1 fps. n <= 0 = no cap.
+// The encoder's own frame rate attribute stays the negotiated one: a cap only spaces the samples
+// (PTS is the capture clock), so no media-type change, no reopen and no keyframe is involved.
+fn tickPeriod(base: u64, n: i32, d: i32) u64 {
+    if (n <= 0) return base;
+    const dd: u64 = @intCast(@max(d, 1));
+    const p = std.time.ns_per_s * dd / @as(u64, @intCast(n));
+    return std.math.clamp(p, base, std.time.ns_per_s);
+}
+
+test "tickPeriod: bounded to [negotiated rate, 1 fps]" {
+    const base: u64 = std.time.ns_per_s / 60;
+    try std.testing.expectEqual(base, tickPeriod(base, 0, 1)); // clear
+    try std.testing.expectEqual(std.time.ns_per_s / 30, tickPeriod(base, 30, 1));
+    try std.testing.expectEqual(base, tickPeriod(base, 240, 1)); // above negotiated: clamped down
+    try std.testing.expectEqual(@as(u64, std.time.ns_per_s), tickPeriod(base, 1, 10)); // 0.1 fps: clamped to 1
+    try std.testing.expectEqual(@as(u64, 1001 * std.time.ns_per_s / 30000), tickPeriod(base, 30000, 1001));
 }
 
 // spoutLoop is the zero-copy session body: pace, capture only what is NEW, encode. ALLOCATION-FREE
@@ -687,10 +717,12 @@ const keepalive_ns: u64 = 500 * std.time.ns_per_ms; // 2 fps: 4x margin under th
 fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
     const cap_n: i64 = if (s.cap_n > 0) @intCast(s.cap_n) else @intCast(s.fps_n);
     const cap_d: i64 = if (s.cap_d > 0) @intCast(s.cap_d) else 1;
-    const period: u64 = @intCast(@max(@divTrunc(std.time.ns_per_s * cap_d, @max(cap_n, 1)), 1_000_000));
+    // base = the negotiated rate's period (the ceiling); period = the live tick, base..1 s (proto v7 "fps").
+    const base: u64 = @intCast(@max(@divTrunc(std.time.ns_per_s * cap_d, @max(cap_n, 1)), 1_000_000));
+    var period = base; // an open-time cap (reopen after a restart) arrives through the mailbox
     // Poll cadence while a due tick waits for a new frame: a new frame is encoded within ~2 ms of
     // publish at 60 fps, and an idle session costs a few hundred cheap syscalls/s.
-    const poll_ms: u32 = @intCast(std.math.clamp(period / 8 / std.time.ns_per_ms, 1, 4));
+    var poll_ms: u32 = @intCast(std.math.clamp(period / 8 / std.time.ns_per_ms, 1, 4));
     const qpc0 = qpcNs();
     var next = qpc0;
     var live = true; // false after srcgone: session + encoder stay alive, capture stops
@@ -701,7 +733,7 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
     var polling = false; // a due tick is waiting for a new frame
     // Compare verdict budget: a third of a tick, 2..8 ms. A 4K verdict is ~1 ms on this rig; an
     // unready one encodes (never a missed change), and the tick is resynced, never caught up.
-    const cmp_budget: u64 = std.math.clamp(period / 3, 2 * std.time.ns_per_ms, 8 * std.time.ns_per_ms);
+    var cmp_budget: u64 = std.math.clamp(period / 3, 2 * std.time.ns_per_ms, 8 * std.time.ns_per_ms);
     while (true) {
         // Sleep only up to the next tick (1..20 ms) - prompt for close/idr/bitrate, and never
         // a hot spin. timeBeginPeriod(1) is already set, so Sleep granularity is ~1 ms.
@@ -722,6 +754,17 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
         }
         if (m.kbps > 0) _ = enc.setBitrate(m.kbps);
         if (m.cap_w > 0 and m.cap_h > 0 and enc.reconfigureOutput(m.cap_w, m.cap_h, sink) == -2) break; // device lost
+        if (m.tick_set) {
+            // Live fps cap: only the tick spacing changes. The next tick moves to last + new period
+            // (a lowered cap does not fire early, a raised one does not wait out the old period).
+            const p = tickPeriod(base, m.tick_n, m.tick_d);
+            if (p != period) {
+                next = next - period + p;
+                period = p;
+                poll_ms = @intCast(std.math.clamp(period / 8 / std.time.ns_per_ms, 1, 4));
+                cmp_budget = std.math.clamp(period / 3, 2 * std.time.ns_per_ms, 8 * std.time.ns_per_ms);
+            }
+        }
         if (!live) {
             _ = enc.pump(sink); // async MFT events still arrive; keep draining the tail
             continue;
@@ -1118,6 +1161,9 @@ const Cmd = struct {
     spfx: u32 = 0,
     body_max: u32 = 0,
     rfps: f64 = 0,
+    // proto v7 live fps cap: open (initial cap) + "fps" op. tick_n 0 = no cap / clear.
+    tick_n: i32 = 0,
+    tick_d: i32 = 1,
     preset: []const u8 = "",
     stream: u16 = 1,
     iseq: u64 = 0,
@@ -1215,7 +1261,7 @@ pub fn main(init: std.process.Init) !void {
     // parent version-gates sending it rather than relying on the silent-ignore alone.
     emit(struct {
         ev: []const u8 = "hello",
-        ver: u32 = 6, // v6: dir:"dec" sw (software decode) + threads + keygate
+        ver: u32 = 7, // v7: live fps cap ("fps" op + open tick_n/tick_d); v6: dir:"dec" sw + threads + keygate
         luid: i64,
         // Active policies: the only channel that says WHICH code path this child is running.
         dev: []const u8,
@@ -1302,6 +1348,9 @@ pub fn main(init: std.process.Init) !void {
                 .net_blk = dir_dec and cmd.net_blk,
                 .dec_threads = if (dir_dec) @min(cmd.threads, 16) else 0,
                 .keygate = dir_dec and (cmd.keygate or cmd.sw),
+                .want_tick_n = cmd.tick_n,
+                .want_tick_d = cmd.tick_d,
+                .want_tick_set = !dir_dec and cmd.tick_n > 0,
             };
             s.thread = try std.Thread.spawn(.{}, sessionMain, .{s});
             try sessions.put(cmd.sid, s);
@@ -1343,6 +1392,14 @@ pub fn main(init: std.process.Init) !void {
             // seq/nonce counter. Bounded mailbox; a full one drops (the parent re-sends on its cadence).
             s.mu.lock();
             if (s.net) |n| _ = n.rx.sendMeta(cmd.m);
+            s.mu.unlock();
+        } else if (std.mem.eql(u8, cmd.op, "fps")) {
+            // Live frame-rate cap (proto v7): tick_n/tick_d, 0 = clear. Changes only the tick period
+            // (no reopen, no IDR); the session clamps it to [1 fps, negotiated rate].
+            s.mu.lock();
+            s.want_tick_n = cmd.tick_n;
+            s.want_tick_d = cmd.tick_d;
+            s.want_tick_set = true;
             s.mu.unlock();
         } else if (std.mem.eql(u8, cmd.op, "capheight")) {
             // Live coded-resolution cap (proto v4). out_w/out_h carry the new even target dims the

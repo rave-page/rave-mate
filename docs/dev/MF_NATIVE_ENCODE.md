@@ -436,6 +436,15 @@ Shaders: `framecmp.hlsl`, committed DXBC (no d3dcompiler at runtime). Self-teste
 Gate: `go test ./internal/mfenc -run 'TestZeroCopyFrameCompare' -v`; Zig: `zig build test` (exactness +
 4K cost).
 
+**Live fps cap (proto v7, 2026-11-28).** `RateHint.MaxFPS` (receiver governor's fps rung) reaches a
+running native session: `mfBridge.SetRateHint` -> `ProcSession.SetMaxFPS` -> child op
+`{"op":"fps","sid":..,"tick_n":..,"tick_d":1}` -> session mailbox -> `tickPeriod` clamps to [1 fps,
+negotiated rate]. Zero-copy: the tick period changes in place; readback: frames pushed faster than the
+cap are consumed unencoded. No reopen, no IDR; the encoder's media type keeps the negotiated rate (PTS
+is the capture clock). The cap rides `open` as `tick_n` so a reopen after a child restart keeps it.
+GOP stays in frames, so a lower cap stretches the keyframe interval in time. Older child (< v7):
+logged once, cap not applied. Gate: `go test ./internal/mfenc -run TestLiveFPSCap -v`.
+
 ### Produce paths (zigmedia increment 4)
 
 The produce side (webcam, deckcard, VRSL) publishes INTO Spout, so increment 1 already covers a

@@ -73,6 +73,7 @@ type mfBridge struct {
 	baseOutW   int
 	baseOutH   int
 	resCap     *resCapGate
+	lastMaxFPS atomic.Int64 // last live fps cap the child accepted (0 = negotiated rate)
 	subOnce    sync.Once
 	sub        atomic.Pointer[encoder]
 	subReady   chan struct{} // closed when sub is live (or when substitution gave up)
@@ -644,8 +645,8 @@ func (b *mfBridge) RequestKeyframe() {
 // Ladder order (RateHint doc): BITRATE is the live lever (b.enc.SetBitrate, no reopen) and clears
 // most congestion; RESOLUTION is now LIVE too - the Zig child re-types its encoder MFT + NV12 pool to
 // the capped coded size (the republished destination geometry is unchanged). resCap rate-limits the
-// change so it cannot flap, and the cap never exceeds the open-time coded size. FPS stays reserved
-// (logged, never silently dropped). A mid-route ffmpeg substitute gets the hint too.
+// change so it cannot flap, and the cap never exceeds the open-time coded size. FPS is LIVE as well
+// (tick period in the child). A mid-route ffmpeg substitute gets the hint too.
 func (b *mfBridge) SetRateHint(h medialink.RateHint) {
 	if sub := b.sub.Load(); sub != nil {
 		sub.SetRateHint(h) // substituted: the hint must reach the engine actually running
@@ -667,9 +668,13 @@ func (b *mfBridge) SetRateHint(h medialink.RateHint) {
 			}
 		}
 	}
-	if h.MaxFPS > 0 {
-		b.log.Debug(source, "rate hint: fps cap not yet live on the native path (reserved); applied bitrate + resolution", map[string]any{
-			"maxFPS": h.MaxFPS, "maxHeight": h.MaxHeight, "maxBitrateKbps": h.MaxBitrateKbps})
+	// FPS is live too (proto v7): the child changes only its capture/encode tick period, clamped to
+	// [1, negotiated rate] - no reopen, no IDR. MaxFPS 0 (or >= negotiated) restores the negotiated
+	// rate; SetMaxFPS dedupes repeats, so the governor's steady-state hints cost nothing.
+	if b.enc != nil && int64(h.MaxFPS) != b.lastMaxFPS.Load() && b.enc.SetMaxFPS(h.MaxFPS) {
+		b.lastMaxFPS.Store(int64(h.MaxFPS))
+		b.log.Info(source, "rate hint: fps cap applied live (native MF)", map[string]any{
+			"maxFPS": h.MaxFPS, "negotiatedFPS": b.spec.FPS})
 	}
 }
 
