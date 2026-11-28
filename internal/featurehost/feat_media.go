@@ -154,6 +154,14 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 		BudgetLinkFracPct:  func() int { return liveCfg().LinkFractionPct() },
 		PlayoutPreset:      func() string { return liveCfg().PlayoutPreset() },
 		RecvImpl:           func() string { return liveCfg().RecvImplPref() },
+		// Per-source caps: f.routes holds the daemon's live pushes (mSourceCaps) over the spawn snapshot.
+		// Set before Start, so route goroutines (started later) always see it.
+		RouteCaps: func(peer, src string) (int, int) {
+			if f.routes == nil {
+				return liveCfg().SourceCaps(peer, src)
+			}
+			return f.routes.SourceCaps(peer, src)
+		},
 	})
 	if len(in.Encoders) > 0 || len(in.Decoders) > 0 {
 		f.router.SetCodecCaps(withVAAPINativeEncoders(in.Encoders), in.Decoders)
@@ -283,6 +291,12 @@ func (f *mediaFeature) Handle(_ context.Context, method string, params json.RawM
 			return nil, err
 		}
 		return json.Marshal(startReceiveResp{Session: sess})
+	case mSourceCaps:
+		var req sourceCapsReq
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		return nil, f.routes.SetSourceCaps(req.Peer, req.SourceID, req.Kbps, req.FPS)
 	case mTransportOv:
 		var req transportOverrideReq
 		if err := json.Unmarshal(params, &req); err != nil {

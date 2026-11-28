@@ -129,6 +129,7 @@ const (
 	mFrameShot    = "frameShot"         // frameShotReq → FrameShotResult
 	mTestcard     = "testcard"          // testcardReq → TestcardResult
 	mTransportOv  = "transportOverride" // transportOverrideReq → (ok/err)
+	mSourceCaps   = "sourceCaps"        // sourceCapsReq → (ok/err)
 )
 
 // frameShotReq samples a LOCAL video-share sender's CURRENT content N times and reports whether it
@@ -162,6 +163,14 @@ type transportOverrideReq struct {
 	Peer     string `json:"peer"`
 	SourceID string `json:"sourceId"`
 	Mode     string `json:"mode"`
+}
+
+// sourceCapsReq sets one received source's live per-source caps (0 = none on that axis).
+type sourceCapsReq struct {
+	Peer     string `json:"peer"`
+	SourceID string `json:"sourceId"`
+	Kbps     int    `json:"kbps,omitempty"`
+	FPS      int    `json:"fps,omitempty"`
 }
 
 type startReceiveReq struct {

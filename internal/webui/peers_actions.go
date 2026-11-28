@@ -57,6 +57,10 @@ func init() {
 		u.toast("Encryption " + onOff(!off))
 	})
 
+	// ── per-source receive caps (Peers → Receive video; ctl twin: route-cap) ──
+	onPrefix("media-cap-kbps:", func(u *UI, m actMsg) { u.mediaSetCap(m.arg("media-cap-kbps:"), m.Val, true) })
+	onPrefix("media-cap-fps:", func(u *UI, m actMsg) { u.mediaSetCap(m.arg("media-cap-fps:"), m.Val, false) })
+
 	// ── webcam ──
 	onPrefix("peers-cam-refresh:", func(u *UI, m actMsg) {
 		u.camCommand(webcam.Cmd{Target: m.arg("peers-cam-refresh:"), Action: webcam.ActRefresh})

@@ -132,39 +132,50 @@ func minRateHint(a, b RateHint) RateHint {
 // RateHint, min()-combined with the VRAM governor's ladder (bitrate first, then fps; resolution is
 // the VRAM governor's last resort). Emits only on a change (dedup). The sender applies it through
 // SetRateHint (RateControlSource) exactly like the VRAM backpressure.
-func (rm *RouteManager) congestGovernor(ctx context.Context, rio *routeIO, udp statsSource, stream uint16, budget func(codedH int) int, baseFPS int, decCap func() int) {
+func (rm *RouteManager) congestGovernor(ctx context.Context, rio *routeIO, udp statsSource, stream uint16, budget func(codedH int) int, baseFPS int, decCap func() int, caps func() (int, int)) {
 	ceil := budget(0)
 	if ceil <= 0 {
 		ceil = defaultCongestCeilKbps
 	}
 	assertBudgetSane(rm, stream, ceil)
-	cc := newCongestController(congestConfig{CeilKbps: ceil, BaseFPS: baseFPS, Stream: stream})
+	capK, capF := readSourceCaps(caps)
+	cc := newCongestController(congestConfig{CeilKbps: minCap(ceil, capK), BaseFPS: minCap(baseFPS, capF), Stream: stream})
 	t := time.NewTicker(rm.reportEvery)
 	defer t.Stop()
 	var last RateHint
 	var sent bool
+	immediate := capK > 0 || capF > 0 // a capped route gets its first hint at route-up, not a tick later
 	prev := time.Now()
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
+		if !immediate {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
 		}
+		immediate = false
 		now := time.Now()
 		dt := now.Sub(prev).Seconds()
 		prev = now
+		// Per-source caps are live: they bound the controller's probe ceiling + fps rung every tick.
+		capK, capF = readSourceCaps(caps)
+		cc.cfg.CeilKbps, cc.cfg.BaseFPS = minCap(ceil, capK), minCap(baseFPS, capF)
 		s := udp.Stats()
 		h := cc.update(dt, s.LossPct/100, s.OwdNs)
 		// Fold in the VRAM governor (when present + enabled) by taking the more restrictive cap.
 		if rm.headroom != nil && (rm.governorOn == nil || rm.governorOn()) {
 			if free, ok := rm.headroom(); ok {
-				h = minRateHint(h, rateLadder(free, rm.govFloorMB, ceil, baseFPS, stream))
+				h = minRateHint(h, rateLadder(free, rm.govFloorMB, cc.cfg.CeilKbps, cc.cfg.BaseFPS, stream))
 			}
 		}
 		applyDecodeCap(&h, decCap)   // THIS route's CPU decode mode: a coded size its software decoder sustains
 		capBudgetToCoded(&h, budget) // item 2: a resolution cap lowers the bitrate to the coded-size model
+		applySourceCaps(&h, capK, capF)
 		h.Type, h.Stream = MetaRate, stream
-		rio.st.setBudget(rm.budgetModeStr(), h.MaxBitrateKbps, ceil, 0, budgetReason(h, ceil, baseFPS)) // item 5
+		rio.st.setSourceCaps(capK, capF)
+		rio.st.setBudget(rm.budgetModeStr(), h.MaxBitrateKbps, ceil, 0,
+			sourceCapReason(h, capK, capF, budgetReason(h, ceil, baseFPS))) // item 5
 		if sent && h == last {
 			continue
 		}

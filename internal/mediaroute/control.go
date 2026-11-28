@@ -30,3 +30,12 @@ type TransportOverrider interface {
 }
 
 var _ TransportOverrider = (*Manager)(nil)
+
+// SourceCapper sets one received source's per-source caps (kbps, fps; 0 = none) in the media plane,
+// live: running routes pick them up on the next governor tick, new offers carry them. Optional
+// capability: *Manager and the media-child proxy implement it. Persistence is the daemon's job.
+type SourceCapper interface {
+	SetSourceCaps(peer, sourceID string, kbps, fps int) error
+}
+
+var _ SourceCapper = (*Manager)(nil)

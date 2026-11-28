@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -101,6 +102,32 @@ func (r *rememberingReceives) SetTransportOverride(peer, sourceID, mode string) 
 	}
 	return errors.New("per-route transport override unsupported by this media plane")
 }
+
+// SetSourceCaps persists one received source's per-source caps (0 = none on that axis) with its
+// remembered receive and pushes them to the media plane, where a running route applies them on the
+// next governor tick. A source that is not received (not remembered) is refused: caps live with it.
+func (r *rememberingReceives) SetSourceCaps(peer, sourceID string, kbps, fps int) error {
+	if !config.ValidSourceCaps(kbps, fps) {
+		return fmt.Errorf("caps out of range: kbps 0 or %d..%d, fps 0 or %d..%d",
+			config.SourceCapMinKbps, config.SourceCapMaxKbps, config.SourceCapMinFPS, config.SourceCapMaxFPS)
+	}
+	r.mu.Lock()
+	changed, found := r.cfg.Features.MediaLink.SetSourceCaps(peer, sourceID, kbps, fps)
+	r.mu.Unlock()
+	if !found {
+		return errors.New("source is not being received - start the route first")
+	}
+	if changed {
+		r.save()
+		r.log.Info("mediaroute", "per-source caps saved", map[string]any{"peer": peer, "source": sourceID, "maxKbps": kbps, "maxFps": fps})
+	}
+	if sc, ok := r.ReceiveControl.(mediaroute.SourceCapper); ok {
+		return sc.SetSourceCaps(peer, sourceID, kbps, fps)
+	}
+	return nil // media plane without live caps: the next offer reads them from config
+}
+
+var _ mediaroute.SourceCapper = (*rememberingReceives)(nil)
 
 func (r *rememberingReceives) StartReceive(peer, sourceID string) (string, error) {
 	sess, err := r.ReceiveControl.StartReceive(peer, sourceID)

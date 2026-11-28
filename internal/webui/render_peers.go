@@ -3,6 +3,7 @@ package webui
 import (
 	"fmt"
 	"html"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -81,6 +82,10 @@ type peerRecvRowSt struct {
 	Mark string `json:"mark"`
 	Line string `json:"line"`
 	Btn  uiBtn  `json:"btn"`
+	// Caps = an active receive: per-source max bitrate + max fps selects under the row.
+	Caps bool     `json:"caps"`
+	Kbps selState `json:"kbps"`
+	FPS  selState `json:"fps"`
 }
 
 // peerRecvSt is the "Receive video" block (hidden when nothing is offered or active).
@@ -88,6 +93,7 @@ type peerRecvSt struct {
 	Show bool            `json:"show"`
 	Head string          `json:"head"`
 	Rows []peerRecvRowSt `json:"rows,omitempty"`
+	Note string          `json:"note"` // what the caps do + when they apply ("" = no active receive)
 }
 
 // peerMediaSt is the media plane: clock/sync/TC-master lines + per-route telemetry.
@@ -566,11 +572,18 @@ func (u *UI) peerRecvState(resolve func(string) string) peerRecvSt {
 	receiving := map[string]bool{}
 	for _, r := range recvs {
 		receiving[r.Peer+"\x00"+r.Name] = true
+		kbps, fps := u.sourceCaps(r.Peer, r.SourceID)
 		st.Rows = append(st.Rows, peerRecvRowSt{
 			Mark: "◂ ",
 			Line: i18n.T("peers.receiveVideoLine", i18n.A{"name": r.Name, "peer": resolve(r.Peer)}),
 			Btn:  uiBtn{Label: i18n.T("player.stop"), Variant: "destructive", Act: "media-stop:" + r.Session},
+			Caps: true,
+			Kbps: resolveSelectBox(i18n.T("peers.capBitrate"), "media-cap-kbps:"+r.Peer+"/"+r.SourceID, capKbpsOptions(kbps), strconv.Itoa(kbps)),
+			FPS:  resolveSelectBox(i18n.T("peers.capFps"), "media-cap-fps:"+r.Peer+"/"+r.SourceID, capFPSOptions(fps), strconv.Itoa(fps)),
 		})
+	}
+	if len(recvs) > 0 {
+		st.Note = i18n.T("peers.capsNote")
 	}
 	for _, s := range srcs {
 		if receiving[s.Peer+"\x00"+s.Desc.Name] {
@@ -582,6 +595,41 @@ func (u *UI) peerRecvState(resolve func(string) string) peerRecvSt {
 		})
 	}
 	return st
+}
+
+// sourceCaps reads a received source's stored per-source caps (0 = none).
+func (u *UI) sourceCaps(peer, sourceID string) (kbps, fps int) {
+	if u.svc.Cfg == nil {
+		return 0, 0
+	}
+	return u.svc.Cfg.Features.MediaLink.SourceCaps(peer, sourceID)
+}
+
+// capKbpsOptions lists the per-source bitrate caps (kbps values, Mbps labels). A value set via ctl
+// that is no preset is kept, in order, so the select shows the truth.
+func capKbpsOptions(cur int) [][2]string {
+	return capOptions(cur, []int{4000, 8000, 12000, 20000, 30000, 50000}, func(k int) string {
+		return i18n.T("peers.capMbps", i18n.A{"n": strconv.FormatFloat(float64(k)/1000, 'f', -1, 64)})
+	})
+}
+
+// capFPSOptions lists the per-source fps caps (same keep-the-truth rule).
+func capFPSOptions(cur int) [][2]string {
+	return capOptions(cur, []int{24, 25, 30, 50, 60}, strconv.Itoa)
+}
+
+// capOptions builds "no cap" + presets, inserting a non-preset current value in order.
+func capOptions(cur int, presets []int, label func(int) string) [][2]string {
+	opts := [][2]string{{"0", i18n.T("peers.capNone")}}
+	vals := presets
+	if cur > 0 && !slices.Contains(presets, cur) {
+		vals = append(slices.Clone(presets), cur)
+		slices.Sort(vals)
+	}
+	for _, v := range vals {
+		opts = append(opts, [2]string{strconv.Itoa(v), label(v)})
+	}
+	return opts
 }
 
 func (u *UI) peerCamState(resolve func(string) string) peerCamSt {
@@ -948,6 +996,12 @@ func peerRecvHTML(st peerRecvSt) string {
 	for _, r := range st.Rows {
 		b.WriteString(`<div class=row><span class=row-label>` + r.Mark + html.EscapeString(r.Line) + `</span>` +
 			btnRow(r.Btn.html()) + `</div>`)
+		if r.Caps {
+			b.WriteString(`<div class=fpair>` + selHTML(r.Kbps) + selHTML(r.FPS) + `</div>`)
+		}
+	}
+	if st.Note != "" {
+		b.WriteString(`<div class=media-sub>` + html.EscapeString(st.Note) + `</div>`)
 	}
 	b.WriteString(`</div>`)
 	return b.String()

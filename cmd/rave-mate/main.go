@@ -527,6 +527,7 @@ func runCtl(args []string) int {
 			"                       tc-status|tc-start|tc-stop|ablelink-status|ablelink-resync|\n"+
 			"                       pw-nodes|peers|pair <nodeID|name|host:port>|pair-confirm <nodeID> yes|no|unpair <nodeID|name>|\n"+
 			"                       media-sources|routes|route-start <peer> <source> [--transport udp|tcp|auto]|route-stop <peer> <source|all>|\n"+
+			"                       route-cap <peer> <source> [--kbps N|none] [--fps N|none]|\n"+
 			"                       encoder-scan|remote-encoder-scan [NODEID]|\n"+
 			"                       frame-shot OUT.PNG [GRABS] [X,Y,W,H] SENDER...|remote-frame-shot OUT.PNG [GRABS] [X,Y,W,H] [@NODEID] SENDER...|\n"+
 			"                       testcard [start [WxH@fps]|stop|stats|reset]|remote-testcard [@NODEID] ...|\n"+
@@ -629,6 +630,17 @@ func runCtl(args []string) int {
 			return 2
 		}
 		resp, err := app.Send("ROUTE-START " + args[1] + " " + strings.Join(args[2:], " "))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
+	case "route-cap": // receiving side: show/set a received source's per-source caps (<peer> <source> [--kbps N|none] [--fps N|none])
+		if len(args) < 3 {
+			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl route-cap <peer> <source name> [--kbps N|none] [--fps N|none]")
+			return 2
+		}
+		resp, err := app.Send("ROUTE-CAP " + args[1] + " " + strings.Join(args[2:], " "))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ctl:", err)
 			return 1

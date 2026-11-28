@@ -3,11 +3,13 @@ package webui
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/mediaroute"
 	"rave.page/mate/internal/obscontrol"
 )
 
@@ -176,6 +178,31 @@ func (u *UI) mediaReceive(arg string) {
 			u.toast(err.Error()) // refusals carry the actionable reason (codec probe, ffmpeg, raw guard)
 		}
 		u.logErr("media receive", err)
+	})
+}
+
+// mediaSetCap sets one axis of a received source's per-source caps (arg "<peer>/<sourceID>", val in
+// kbps or fps, "0" = no cap); the other axis keeps its stored value. Persisted + applied live by the
+// remembering wrapper (mediaroute.SourceCapper) - an RPC to the media child, so off the UI lane.
+func (u *UI) mediaSetCap(arg, val string, isKbps bool) {
+	sc, ok := u.svc.MediaRoutes.(mediaroute.SourceCapper)
+	peer, src, found := strings.Cut(arg, "/")
+	v, err := strconv.Atoi(strings.TrimSpace(val))
+	if !ok || !found || err != nil || u.svc.Cfg == nil {
+		return
+	}
+	k, f := u.sourceCaps(peer, src)
+	if isKbps {
+		k = v
+	} else {
+		f = v
+	}
+	u.bg(func() {
+		if err := sc.SetSourceCaps(peer, src, k, f); err != nil {
+			u.toast(err.Error())
+		}
+		u.logErr("media cap", err)
+		u.patchMain()
 	})
 }
 
