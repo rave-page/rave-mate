@@ -3,7 +3,8 @@
 # zigdsp zigui zigvr encembed shellembed, mingw + pinned Zig - same recipe as the internal deploy
 # pipeline; the two embeds carry the encoder + window child inside the exe for self-update;
 # the video-effects child ships as an updater-managed sidecar),
-# the Linux binary (zig tags too), and the NSIS installer, then rolls the single "nightly" prerelease with the complete self-update feed:
+# the Linux binary (pipewire + zig tags, pinned contrib/linux-build box; self-updates via
+# linux_url/linux_sha256), and the NSIS installer, then rolls the single "nightly" prerelease with the complete self-update feed:
 # versioned + stable binaries, runtime DLLs, and latest.json (Ed25519-signed when the
 # signing key secret is provisioned). The binary's updater polls
 #   https://github.com/<repo>/releases/download/nightly/latest.json
@@ -202,31 +203,17 @@ jobs:
             dist/openvr_api.dll
             dist/rave-mate-vfx.exe
 
+  # Linux = the headless SENDER binary (PipeWire capture + native VA-API encode, tag pipewire) and
+  # its self-update payload. Built in the pinned box (contrib/linux-build: Debian 13 trixie digest +
+  # apt snapshot, SHA-pinned Go + Zig) - the pipewire shim's CFLAGS hardcode Debian include dirs,
+  # so it builds nowhere else - giving one reproducible recipe shared with scripts/build-linux.ps1.
+  # glibc baseline = trixie's 2.41 (Arch/sus is newer); the box prints the max GLIBC_ symbol the
+  # binary needs. pipewire/VA/EGL/gbm are dlopen'ed: absent libs degrade, never block launch.
   build-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Linux GL/X11 deps (Fyne)
-        run: |
-          sudo apt-get update || sudo apt-get update || true # third-party repo flake (packages.microsoft.com) must not fail the job; ubuntu archive lists still land
-          sudo apt-get install -y --no-install-recommends gcc pkg-config libgl1-mesa-dev xorg-dev libasound2-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libegl1-mesa-dev libx11-xcb-dev libxcursor-dev libxfixes-dev
-      - name: Install Zig (pinned, checksum-verified)
-        run: |
-          NAME="zig-x86_64-linux-${ZIG_VERSION}"
-          curl -fsSLo zig-dl.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/${NAME}.tar.xz"
-          echo "${ZIG_SHA256_LINUX}  zig-dl.tar.xz" | sha256sum -c -
-          mkdir -p "$HOME/zig-toolchain"
-          tar -xJf zig-dl.tar.xz -C "$HOME/zig-toolchain"
-          rm -f zig-dl.tar.xz
-          echo "$HOME/zig-toolchain/$NAME" >> "$GITHUB_PATH"
-      - name: Build Zig libs
-        run: |
-          zig version
-          bash scripts/build-zig.sh
-      - name: Build rave-mate-linux
+      - name: Build rave-mate-linux (pinned box; tags pipewire zigdsp zigui zigvr; updater-armed)
         env:
           UPDATE_SIGNING_KEY_PEM: ${{ secrets.UPDATE_SIGNING_KEY_PEM }}
         run: |
@@ -234,14 +221,16 @@ jobs:
           # doesn't (fork/unsigned builds keep the sha256 + same-origin fallback).
           EXTRA_LDFLAGS=""
           [ -n "${UPDATE_SIGNING_KEY_PEM:-}" ] || EXTRA_LDFLAGS="-X rave.page/mate/internal/version.UpdatePubKey="
-          LDFLAGS="-s -w \
-            -X rave.page/mate/internal/version.Version=nightly-${GITHUB_SHA::7} \
-            -X rave.page/mate/internal/version.Commit=${GITHUB_SHA::7} \
-            -X rave.page/mate/internal/version.Build=${GITHUB_RUN_NUMBER} \
-            -X rave.page/mate/internal/version.Channel=nightly \
-            -X rave.page/mate/internal/version.FeedURL=${FEED} \
-            ${EXTRA_LDFLAGS}"
-          go build -tags "zigdsp zigui zigvr" -ldflags "$LDFLAGS" -o dist/rave-mate-linux ./cmd/rave-mate
+          docker build -t rave-mate-linux-build contrib/linux-build
+          mkdir -p dist/linux
+          # Same stamps as the Windows exe (Version/Commit/Build/Channel/FeedURL) via the box's
+          # RM_* env; the box links libravemedia (zigmedia) for pipewire + builds the zig libs.
+          docker run --rm -v "$PWD:/src:ro" -v "$PWD/dist/linux:/out" \
+            -e RM_SHA="${GITHUB_SHA::7}" -e RM_BUILD="${GITHUB_RUN_NUMBER}" \
+            -e RM_VERSION="nightly-${GITHUB_SHA::7}" -e RM_CHANNEL=nightly -e RM_FEEDURL="${FEED}" \
+            -e RM_EXTRA_LDFLAGS="${EXTRA_LDFLAGS}" -e RM_TAGS="pipewire zigdsp zigui zigvr" \
+            rave-mate-linux-build
+          cp dist/linux/rave-mate dist/rave-mate-linux
       - uses: actions/upload-artifact@v4
         with:
           name: linux
