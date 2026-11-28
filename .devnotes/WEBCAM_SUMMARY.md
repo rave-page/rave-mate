@@ -17,7 +17,14 @@ build / missing DLL → clear reason string, no capture. Network route = P4 (cap
 ## Enumeration
 
 `ffmpeg -list_devices` + per-device `-list_options` stderr parse (tagged + legacy sectioned
-formats; modes deduped by size, max fps wins). Windows-only.
+formats; modes deduped by size, max fps wins).
+
+Linux (2026-11-28, `devices_v4l2.go`): sysfs `/sys/class/video4linux` (capture node = `index` 0,
+friendly name, ` #N` on duplicates) + `v4l2-ctl --list-formats-ext` modes (ffmpeg
+`-f v4l2 -list_formats` fallback: no fps, 30 assumed). MJPEG wins per size. Capture =
+`-f v4l2 -input_format <fmt> -i /dev/videoN`, name → node re-resolved per ffmpeg spawn. No Spout
+locally: capture feeds network taps only. UVC control still Windows-only. Still the legacy ffmpeg
+→ Go pipe; native (Zig/C) V4L2 capture is the follow-up per the realtime rule.
 
 ## UVC control
 
