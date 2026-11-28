@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -176,7 +177,15 @@ func (c *capture) run(ctx context.Context, ffmpeg string) {
 
 // runOnce runs one capture process to completion, emitting frames newest-wins.
 func (c *capture) runOnce(ctx context.Context, ffmpeg string) error {
-	cmd := exec.CommandContext(ctx, ffmpeg, captureArgs(c.desc)...)
+	input := c.desc.Device
+	if runtime.GOOS == "linux" { // re-resolved per spawn: a replug can renumber /dev/videoN
+		p, err := v4l2Path(input)
+		if err != nil {
+			return err
+		}
+		input = p
+	}
+	cmd := exec.CommandContext(ctx, ffmpeg, captureArgsFor(runtime.GOOS, c.desc, input)...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("stdout pipe: %w", err)
@@ -291,10 +300,18 @@ func releaseFrame(f *medialink.Frame) {
 }
 
 // captureArgs builds the dshow → raw RGBA pipe argv.
-func captureArgs(d capDesc) []string {
+func captureArgs(d capDesc) []string { return captureArgsFor("windows", d, d.Device) }
+
+// captureArgsFor builds the capture → raw RGBA pipe argv for goos. input is the resolved device:
+// the dshow friendly name on Windows, the /dev/videoN node on Linux (V4L2).
+func captureArgsFor(goos string, d capDesc, input string) []string {
+	demux, in := "dshow", "video="+input
+	if goos == "linux" {
+		demux, in = "v4l2", input
+	}
 	args := []string{
 		"-hide_banner", "-loglevel", "error", "-fflags", "nobuffer",
-		"-f", "dshow",
+		"-f", demux,
 		"-video_size", fmt.Sprintf("%dx%d", d.W, d.H),
 	}
 	if d.FPS > 0 {
@@ -304,7 +321,7 @@ func captureArgs(d capDesc) []string {
 		args = append(args, "-input_format", d.InputFormat)
 	}
 	return append(args,
-		"-i", "video="+d.Device,
+		"-i", in,
 		"-an", "-pix_fmt", "rgba", "-f", "rawvideo", "-")
 }
 

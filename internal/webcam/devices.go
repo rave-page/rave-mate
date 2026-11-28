@@ -19,14 +19,17 @@ import (
 // option lists to stderr and exits non-zero - expected; we parse stderr regardless. The pure
 // parsers below are unit-tested against captured fixtures.
 
-// enumerateDevices lists dshow video devices with their capture modes (Windows-only).
+// enumerateDevices lists video capture devices with their modes (Windows dshow, Linux V4L2).
 func enumerateDevices(ctx context.Context) ([]DeviceInfo, error) {
-	if runtime.GOOS != "windows" {
-		return nil, fmt.Errorf("webcam: device enumeration is Windows-only")
+	if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
+		return nil, fmt.Errorf("webcam: device enumeration is unsupported on %s", runtime.GOOS)
 	}
 	ffmpeg, ok := mediatools.Resolve("ffmpeg")
 	if !ok {
 		return nil, fmt.Errorf("webcam: ffmpeg not found (install it in Settings → Library & media, or add to PATH)")
+	}
+	if runtime.GOOS == "linux" {
+		return enumerateV4L2(ctx, ffmpeg), nil
 	}
 	names := parseDshowVideoDevices(runFFStderr(ctx, ffmpeg,
 		"-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"))
