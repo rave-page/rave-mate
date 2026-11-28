@@ -39,6 +39,27 @@ type Config struct {
 	SystemFloorMB uint64
 	StarveDwell   time.Duration // default 15 s
 	AvgWindow     time.Duration // free-VRAM averaging window (default 10 s; free swings GBs per second)
+	// YieldMinGainMB is the VRAM a yield must actually free (HW need - CPU need) to be worth the CPU
+	// decode it costs (default 64: the rig's learned 4K HEVC pool, 114 vs 16 MB, still yields). Incident 2026-11-28: a 4K route gave up 34 MB HW for 20 MB CPU on
+	// a card another app had filled - 14 MB freed, 27 min of software 4K decode on a struggling host.
+	YieldMinGainMB uint64
+}
+
+const defaultYieldMinGainMB = 64
+
+func (c Config) yieldMinGainMB() uint64 {
+	if c.YieldMinGainMB > 0 {
+		return c.YieldMinGainMB
+	}
+	return defaultYieldMinGainMB
+}
+
+// yieldGainMB is the VRAM a HW -> CPU demotion frees.
+func yieldGainMB(in Input) uint64 {
+	if in.HWNeedMB <= in.CPUNeedMB {
+		return 0
+	}
+	return in.HWNeedMB - in.CPUNeedMB
 }
 
 const (
@@ -223,7 +244,9 @@ func (c *Controller) Tick(in Input) *Switch {
 		}
 		// Yield to starved neighbours: averaged free VRAM below the system floor for StarveDwell while we
 		// hold a DXVA pool => demote and release it, BEFORE Resolume/Parsec fail (incident 2026-11-13).
-		if in.Present && c.cfg.SystemFloorMB > 0 && c.avgFree < c.cfg.SystemFloorMB {
+		// Only when the yield frees a meaningful amount: trading a few MB for CPU decode starves the
+		// host's CPU instead and helps nobody (YieldMinGainMB).
+		if in.Present && c.cfg.SystemFloorMB > 0 && c.avgFree < c.cfg.SystemFloorMB && yieldGainMB(in) >= c.cfg.yieldMinGainMB() {
 			if c.starveSince.IsZero() {
 				c.starveSince = in.Now
 			}

@@ -307,3 +307,23 @@ func TestNoYieldOnBriefDip(t *testing.T) {
 		}
 	}
 }
+
+// Incident 2026-11-28: HW 34 MB vs CPU 20 MB on a card another app filled. Yielding frees 14 MB and
+// costs software 4K decode - the HW decoder stays, however long the card is starved.
+func TestNoYieldWhenGainIsTrivial(t *testing.T) {
+	c := New(Config{SystemFloorMB: 700}, HW, t0, "start")
+	now := t0
+	for k := 0; k < 300; k++ {
+		now = now.Add(2 * time.Second)
+		i := Input{Now: now, Present: true, FreeMB: 200, HWAdmit: true, HWNeedMB: 34, CPUNeedMB: 20, DestOK: true}
+		if sw := drive(c, i); sw != nil {
+			t.Fatalf("yielded for a 14 MB gain: %+v", sw)
+		}
+	}
+	// A failed HW pipeline still demotes at once (safety rule is not gated by the gain).
+	now = now.Add(2 * time.Second)
+	i := Input{Now: now, Present: true, FreeMB: 300, HWAdmit: true, HWFailed: true, HWNeedMB: 34, CPUNeedMB: 20, DestOK: true}
+	if sw := drive(c, i); sw == nil || sw.To != CPU {
+		t.Fatalf("HW failure must still demote, got %+v", sw)
+	}
+}
