@@ -370,6 +370,7 @@ test {
     _ = @import("histogram.zig");
     _ = @import("rx_lifecycle_test.zig");
     _ = snd;
+    _ = rx; // receiver.zig unit tests (SlotPool)
     if (builtin.os.tag == .linux) _ = @import("interop_test.zig"); // socket loopback: Linux only
 }
 

@@ -38,7 +38,10 @@ runs in the MEDIA CHILD):
   `wglDXOpenDeviceNV` interop device + `wglDXRegisterObjectNV` on the texture, named access mutex,
   `SpoutSenderNames` registration + `<name>` info map.
 - A: Spout GL upload path may hold PBOs (w*h*4 each) - not measured.
-- K: CPU: 33 MB `flip_buf` (zeroed open frame) + 33 MB transparent `blank` per kept 4K sender.
+- K: CPU: 33 MB `flip_buf` (zeroed open frame) per kept 4K sender; the transparent park frame is ONE shared
+  zero buffer per media child (was a 33 MB `blank` per kept sender, 2026-11-28).
+- Parked senders without an active route are released oldest-first under sustained pressure (free < system
+  floor for 6 s, until floor + 256 MB; remembered destinations exempt) - `mediaroute/pressure.go`.
 - Budget estimate: 48 MB interop/device + 31.6 MiB texture = 80 MB at 4K (estimate, never measured).
 
 Pure-D3D11 sender (SpoutDX protocol, `spoutDirectX::CreateSharedDX11Texture` + `spoutSenderNames::CreateSender`

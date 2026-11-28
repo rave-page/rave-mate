@@ -3,10 +3,15 @@
 //! open) - allocation-free in steady state; drop-oldest on overflow; a bounded done-set rejects late
 //! stragglers of completed/evicted frames (never resurrects one). The sender fragments at a fixed
 //! body_max, so fragment i lands at offset i*body_max (contiguous), the last fragment shorter.
+//! Two entry size classes (frag_count * body_max picks one at the first fragment): large_entries x
+//! max_frame_bytes, the rest x small_entry_bytes; drop-oldest within the class. Receiver default
+//! (16 entries, 4 MiB max): 12 x 256 KiB + 4 x 4 MiB = 19 MiB committed (was 16 x 4 MiB = 64 MiB).
 const std = @import("std");
 
 const max_frags = 8192;
 const done_ring = 512;
+pub const small_entry_bytes: usize = 256 << 10;
+pub const large_entries = 4;
 
 const Entry = struct {
     active: bool = false,
@@ -43,7 +48,9 @@ const Ghost = struct { stream: u16 = 0, fs: u32 = 0, born: i64 = 0, last_nack: i
 
 pub const Reassembler = struct {
     alloc: std.mem.Allocator,
-    entries: []Entry,
+    entries: []Entry, // [0, n_small) small class, [n_small, len) large class
+    n_small: usize,
+    small_bytes: usize,
     body_max: usize,
     done: [done_ring]u64 = [_]u64{0} ** done_ring,
     done_used: [done_ring]bool = [_]bool{false} ** done_ring,
@@ -64,11 +71,15 @@ pub const Reassembler = struct {
             alloc.free(e.buf);
             alloc.free(e.present);
         };
-        for (es) |*e| {
-            e.* = .{ .buf = try alloc.alloc(u8, max_frame_bytes), .present = try alloc.alloc(u64, max_frags / 64) };
+        // Split only when it saves memory and leaves both classes non-empty; else one class of max.
+        const split = max_frame_bytes > small_entry_bytes and n_entries > large_entries;
+        const n_small: usize = if (split) n_entries - large_entries else n_entries;
+        const small = if (split) small_entry_bytes else max_frame_bytes;
+        for (es, 0..) |*e, i| {
+            e.* = .{ .buf = try alloc.alloc(u8, if (i < n_small) small else max_frame_bytes), .present = try alloc.alloc(u64, max_frags / 64) };
             made += 1;
         }
-        return .{ .alloc = alloc, .entries = es, .body_max = body_max };
+        return .{ .alloc = alloc, .entries = es, .n_small = n_small, .small_bytes = small, .body_max = body_max };
     }
 
     pub fn deinit(r: *Reassembler) void {
@@ -88,7 +99,7 @@ pub const Reassembler = struct {
         if (r.isDone(key)) return null;
 
         var e = r.find(key) orelse blk: {
-            const ne = r.alloc_entry(key, frag_count);
+            const ne = r.alloc_entry(key, frag_count, @as(usize, frag_count) * r.body_max);
             ne.nacked = r.ghostNacked(key); // a NACKed wholly-missing frame now arriving
             break :blk ne;
         };
@@ -139,10 +150,12 @@ pub const Reassembler = struct {
         return null;
     }
 
-    fn alloc_entry(r: *Reassembler, key: u64, count: u16) *Entry {
+    // alloc_entry picks a free entry of the class fitting need bytes, else evicts that class's oldest.
+    fn alloc_entry(r: *Reassembler, key: u64, count: u16, need: usize) *Entry {
+        const cls = if (need <= r.small_bytes or r.n_small == r.entries.len) r.entries[0..r.n_small] else r.entries[r.n_small..];
         var pick: ?*Entry = null;
         var oldest: u64 = std.math.maxInt(u64);
-        for (r.entries) |*e| {
+        for (cls) |*e| {
             if (!e.active) {
                 pick = e;
                 break;
@@ -397,4 +410,33 @@ test "NACK accounting: a retransmit that lands counts recovered, an evicted NACK
     _ = r.accept(1, 4, 0, 2, "FFFF");
     _ = r.accept(1, 5, 0, 2, "GGGG"); // pool of 2: frames 2 + 3 evicted, at least frame 2 NACKed
     try std.testing.expect(r.nack_expired >= 1);
+}
+
+test "size classes: large frame takes a large entry, drop-oldest within its class, entries reused" {
+    // 6 entries, small class 256 KiB, max 1 MiB -> 2 small + 4 large.
+    var r = try Reassembler.init(std.testing.allocator, 6, 1024, 1 << 20);
+    defer r.deinit();
+    try std.testing.expectEqual(@as(usize, 2), r.n_small);
+    var total: usize = 0;
+    for (r.entries) |e| total += e.buf.len;
+    try std.testing.expectEqual(@as(usize, 2 * (256 << 10) + 4 * (1 << 20)), total);
+    // 1000 frags x 1024 > 256 KiB: large class; completes with 1 MiB-class buffer.
+    var chunk: [1024]u8 = undefined;
+    @memset(&chunk, 0x11);
+    var i: u16 = 0;
+    while (i < 999) : (i += 1) try std.testing.expectEqual(@as(?[]const u8, null), r.accept(1, 1, i, 1000, &chunk));
+    const out = r.accept(1, 1, 999, 1000, chunk[0..10]).?;
+    try std.testing.expectEqual(@as(usize, 999 * 1024 + 10), out.len);
+    // small frames fill the small class; a third evicts the oldest small one, large entries untouched.
+    _ = r.accept(1, 2, 0, 2, &chunk);
+    _ = r.accept(1, 3, 0, 2, &chunk);
+    try std.testing.expectEqual(@as(u64, 0), r.droppedCount());
+    _ = r.accept(1, 4, 0, 2, &chunk);
+    try std.testing.expectEqual(@as(u64, 1), r.droppedCount());
+    // 4 in-flight large frames fit; a 5th evicts the oldest large one.
+    var f: u32 = 10;
+    while (f < 14) : (f += 1) _ = r.accept(1, f, 0, 500, &chunk);
+    try std.testing.expectEqual(@as(u64, 1), r.droppedCount());
+    _ = r.accept(1, 14, 0, 500, &chunk);
+    try std.testing.expectEqual(@as(u64, 2), r.droppedCount());
 }
