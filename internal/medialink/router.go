@@ -1727,7 +1727,11 @@ func (s jbSink) Close() error         { return nil }
 // down (conn close unblocks the recv loop).
 func (rm *RouteManager) runJitter(ctx context.Context, conn frameConn, jb *jitterBuffer, sink Sink, st *routeStat) {
 	const hitchNs = int64(50 * time.Millisecond) // log playout stalls above this (the rare long hitches)
+	// One line per hitchLogGap per route, carrying the count since the last line: a 30 fps source one
+	// frame late once a second logged 5,000 warnings in a 90 min set (2026-11-28).
+	const hitchLogGap = int64(30 * time.Second)
 	var lastRel, lastHitch, prevWriteNs int64
+	var hitches, worstGap int64 // since the last logged line
 	for {
 		if ctx.Err() != nil {
 			return
@@ -1738,9 +1742,13 @@ func (rm *RouteManager) runJitter(ctx context.Context, conn frameConn, jb *jitte
 			st.stages.JBRelease.Mark(now) // STEP-0: jitter buffer released a frame for playout
 			// Hitch log: a release interval > 50ms, attributing it to the prior sink write (decode/
 			// publish backpressure) vs a late wake/arrival - with the wall time, to correlate the rare
-			// long hitches against periodic tasks (gpumem sweep, 1Hz emit, Defender). Rate-limited 1/s.
+			// long hitches against periodic tasks (gpumem sweep, 1Hz emit, Defender). Rate-limited (hitchLogGap).
 			if lastRel != 0 {
-				if gap := now - lastRel; gap > hitchNs && now-lastHitch > int64(time.Second) {
+				if gap := now - lastRel; gap > hitchNs {
+					hitches++
+					worstGap = max(worstGap, gap)
+				}
+				if gap := now - lastRel; gap > hitchNs && (lastHitch == 0 || now-lastHitch > hitchLogGap) {
 					lastHitch = now
 					cause := "wake/arrival (frame not ready at deadline)"
 					if prevWriteNs > hitchNs {
@@ -1753,8 +1761,10 @@ func (rm *RouteManager) runJitter(ctx context.Context, conn frameConn, jb *jitte
 					}
 					rm.warnf("playout hitch", map[string]any{"session": st.session, "stream": st.stream,
 						"gapMs": gap / 1e6, "prevWriteMs": prevWriteNs / 1e6, "cause": cause,
+						"hitches": hitches, "worstGapMs": worstGap / 1e6, // since the previous line
 						"marginBeforeMs": before / 1e6, "marginAfterMs": after / 1e6,
 						"wall": time.Now().Format("15:04:05.000")})
+					hitches, worstGap = 0, 0
 				}
 			}
 			w0 := monoNs()
