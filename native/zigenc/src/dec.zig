@@ -118,10 +118,11 @@ const ViewEntry = struct { tex: ?*anyopaque = null, sub: u32 = 0, view: ?*anyopa
 pub const Dec = struct {
     gpa: std.mem.Allocator,
 
-    // GPU: own device (the decoder MFT gets it through the device manager), video processor and
-    // the destination view. Deliberately NOT shared with Enc: an encode session's pipeline is the
-    // parity reference and inc 1's proven path, so the decode side builds its own rather than
-    // refactoring it.
+    // GPU: the child's SHARED device + device manager (mf.leaseChildDevice - the same singleton
+    // encode sessions lease; one device per child instead of one per session, ~40 MB VRAM each), or
+    // a private one when the lease is refused (policy `session`, other adapter, WARP singleton).
+    // Per-session: video processor, destination view, decoder MFT.
+    lease: ?*mf.SharedDev = null,
     dev: *mf.ID3D11Device = undefined,
     ctx: *mf.ID3D11DeviceContext = undefined,
     devmgr: *mf.IMFDXGIDeviceManager = undefined,
@@ -203,6 +204,11 @@ pub const Dec = struct {
 
     pub fn name(d: *const Dec) []const u8 {
         return d.name_buf[0..d.name_len];
+    }
+
+    /// devShared reports whether this session leased the child's shared device.
+    pub fn devShared(d: *const Dec) bool {
+        return d.lease != null;
     }
 
     /// auCapFor sizes the pooled input buffers from the inbound ring (a quarter of it), clamped.
@@ -319,6 +325,15 @@ pub const Dec = struct {
     // encode path (deliberate adapter pick, VIDEO_SUPPORT, SetMultithreadProtected before the
     // device manager) - a decoder MFT's worker threads share this device too.
     fn openDevice(d: *Dec, luid: i64) OpenErr!void {
+        if (mf.leaseChildDevice(luid)) |sd| {
+            d.lease = sd;
+            d.dev = sd.dev;
+            d.ctx = sd.ctx;
+            d.vdev = sd.vdev;
+            d.vctx = sd.vctx;
+            d.devmgr = sd.devmgr;
+            return;
+        }
         var vendor: u32 = 0;
         var adapter = mf.Enc.findAdapter(luid, &vendor);
         if (adapter == null) adapter = mf.Enc.pickDefaultAdapter(&vendor);
@@ -1208,6 +1223,8 @@ pub const Dec = struct {
             mf.release(d.dev);
         }
         d.has_dev = false;
+        if (d.lease) |sd| mf.releaseShared(sd); // shared device: drop the lease, siblings keep it
+        d.lease = null;
         const gpa = d.gpa;
         gpa.destroy(d);
     }

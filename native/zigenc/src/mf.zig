@@ -596,9 +596,11 @@ const Lock = struct {
     }
 };
 
-// SharedDev is the child's ONE device + device manager (device_policy == .child). Refcounted:
-// the last session out tears it down, so an idle child holds no GPU device.
-const SharedDev = struct {
+// SharedDev is the child's ONE device + device manager (device_policy == .child), leased by encode
+// AND decode sessions (dec.zig). Refcounted: the last lease out tears it down, so an idle child holds
+// no GPU device. Heap-allocated so a LOST device can be detached from `shared_dev` (new sessions get a
+// fresh one) while sessions still holding it release their own lease later.
+pub const SharedDev = struct {
     dev: *ID3D11Device,
     ctx: *ID3D11DeviceContext,
     vdev: *ID3D11VideoDevice,
@@ -608,11 +610,97 @@ const SharedDev = struct {
     res_luid: i64,
     adapter_buf: [128]u8,
     adapter_len: usize,
+    warp: bool, // software rasterizer (encode sw tier only): decode never leases it
     refs: u32,
 };
 
 var shared_lock: Lock = .{};
-var shared_dev: ?SharedDev = null;
+var shared_dev: ?*SharedDev = null;
+
+// ID3D11Device::GetDeviceRemovedReason is vtable slot 39 (zigd3d's view stops at 28).
+const DevRemovedView = extern struct {
+    v: *const extern struct {
+        _p: [39]VOP,
+        GetDeviceRemovedReason: *const fn (*anyopaque) callconv(.winapi) HRESULT,
+    },
+};
+
+// devLost: the device was removed/reset (TDR, driver update, hung). Open-time check only.
+fn devLost(dev: *ID3D11Device) bool {
+    const v: *DevRemovedView = @ptrCast(@alignCast(dev));
+    return failed(v.v.GetDeviceRemovedReason(@ptrCast(v)));
+}
+
+// detachLostLocked (shared_lock held): a lost singleton is unlinked so the next lease builds a fresh
+// device; current holders keep their lease and free it on close (their sessions fail and the parent
+// re-establishes them - the encode recovery path, now reaching a WORKING device).
+fn detachLostLocked() void {
+    const sd = shared_dev orelse return;
+    if (!devLost(sd.dev)) return;
+    trace("device: shared D3D11 device lost (refs={d}) - detached, next session builds a fresh one", .{sd.refs});
+    shared_dev = null;
+}
+
+// publishSharedLocked (shared_lock held) turns a freshly built Enc-owned device into the singleton.
+fn publishSharedLocked(e: *const Enc) ?*SharedDev {
+    const sd = std.heap.page_allocator.create(SharedDev) catch return null;
+    sd.* = .{
+        .dev = e.dev,
+        .ctx = e.ctx,
+        .vdev = e.vdev,
+        .vctx = e.vctx,
+        .devmgr = e.devmgr,
+        .vendor = e.vendor,
+        .res_luid = e.res_luid,
+        .adapter_buf = e.adapter_buf,
+        .adapter_len = e.adapter_len,
+        .warp = e.warp,
+        .refs = 1,
+    };
+    shared_dev = sd;
+    return sd;
+}
+
+/// releaseShared drops one lease; the last one releases the COM objects and frees the slot.
+pub fn releaseShared(sd: *SharedDev) void {
+    shared_lock.lock();
+    defer shared_lock.unlock();
+    if (sd.refs > 1) {
+        sd.refs -= 1;
+        return;
+    }
+    release(sd.devmgr);
+    release(sd.vctx);
+    release(sd.vdev);
+    release(sd.ctx);
+    release(sd.dev);
+    if (shared_dev == sd) shared_dev = null;
+    std.heap.page_allocator.destroy(sd);
+}
+
+/// leaseChildDevice gives a DECODE session the child's shared hardware device (+ its one device
+/// manager), creating it when absent. null = build a private device instead: policy `session`, a
+/// different adapter, a WARP singleton, or no hardware video device. Open-time only (takes the lock).
+pub fn leaseChildDevice(adapter_luid: i64) ?*SharedDev {
+    if (device_policy != .child) return null;
+    shared_lock.lock();
+    defer shared_lock.unlock();
+    detachLostLocked();
+    if (shared_dev) |sd| {
+        if (sd.warp) return null;
+        if (adapter_luid != 0 and sd.res_luid != 0 and adapter_luid != sd.res_luid) return null;
+        sd.refs += 1;
+        trace("device: decode session reusing the child's shared D3D11 device (refs={d})", .{sd.refs});
+        return sd;
+    }
+    var tmp = Enc{ .gpa = std.heap.page_allocator, .in_w = 0, .in_h = 0, .out_w = 0, .out_h = 0, .fps_n = 0, .fps_d = 1, .dur100 = 0 };
+    tmp.createDevice(adapter_luid, false) catch return null;
+    if (publishSharedLocked(&tmp)) |sd| return sd;
+    release(tmp.devmgr);
+    tmp.releaseVideoDevice();
+    tmp.releaseDevice();
+    return null;
+}
 
 pub const AuSink = struct {
     ctx: *anyopaque,
@@ -700,8 +788,10 @@ pub const Enc = struct {
     adapter_len: usize = 0,
     vendor: u32 = 0,
     // owns_device: this Enc created the device/manager and must release them. false = the device
-    // is the child's shared singleton and close() only drops a reference.
+    // is the child's shared singleton (shared_ref) and close() only drops that lease.
     owns_device: bool = true,
+    shared_ref: ?*SharedDev = null,
+    warp: bool = false,
 
     pub fn name(e: *const Enc) []const u8 {
         return e.name_buf[0..e.name_len];
@@ -841,6 +931,7 @@ pub const Enc = struct {
         if (failed(hr) or dev == null or dctx == null) return e.setErr("D3D11CreateDevice", hr);
         e.dev = dev.?;
         e.ctx = dctx.?;
+        e.warp = warp;
         // Multithread protection BEFORE the device manager: MFT worker threads share this
         // device; without it they race the immediate context (audit fix, kept from shim).
         var mtraw: ?*anyopaque = null;
@@ -925,7 +1016,8 @@ pub const Enc = struct {
         if (device_policy == .child) {
             shared_lock.lock();
             defer shared_lock.unlock();
-            if (shared_dev) |*sd| {
+            detachLostLocked();
+            if (shared_dev) |sd| {
                 // The child is per-adapter, so every session in it wants the same GPU. If a
                 // session ever asks for a DIFFERENT resolvable adapter, build it its own device
                 // instead of silently binding the wrong one: feeding an MFT textures from a
@@ -940,26 +1032,16 @@ pub const Enc = struct {
                 return;
             }
             try e.createDevice(adapter_luid, allow_sw);
-            const sd = SharedDev{
-                .dev = e.dev,
-                .ctx = e.ctx,
-                .vdev = e.vdev,
-                .vctx = e.vctx,
-                .devmgr = e.devmgr,
-                .vendor = e.vendor,
-                .res_luid = e.res_luid,
-                .adapter_buf = e.adapter_buf,
-                .adapter_len = e.adapter_len,
-                .refs = 1,
-            };
-            shared_dev = sd;
+            const sd = publishSharedLocked(e) orelse return; // no slot: this Enc keeps owning it
+            e.shared_ref = sd;
             e.owns_device = false; // the singleton owns it; close() drops a reference
             return;
         }
         try e.createDevice(adapter_luid, allow_sw);
     }
 
-    fn adoptShared(e: *Enc, sd: *const SharedDev) void {
+    fn adoptShared(e: *Enc, sd: *SharedDev) void {
+        e.shared_ref = sd;
         e.dev = sd.dev;
         e.ctx = sd.ctx;
         e.vdev = sd.vdev;
@@ -969,25 +1051,8 @@ pub const Enc = struct {
         e.res_luid = sd.res_luid;
         e.adapter_buf = sd.adapter_buf;
         e.adapter_len = sd.adapter_len;
+        e.warp = sd.warp;
         e.owns_device = false;
-    }
-
-    // releaseSharedDevice drops one reference to the child's shared device; the last one out
-    // tears it down, so an idle child holds no GPU device.
-    fn releaseSharedDevice() void {
-        shared_lock.lock();
-        defer shared_lock.unlock();
-        const sd = if (shared_dev) |*p| p else return;
-        if (sd.refs > 1) {
-            sd.refs -= 1;
-            return;
-        }
-        release(sd.devmgr);
-        release(sd.vctx);
-        release(sd.vdev);
-        release(sd.ctx);
-        release(sd.dev);
-        shared_dev = null;
     }
 
     // createDevice runs the adapter ladder and builds a device this Enc owns.
@@ -1907,8 +1972,8 @@ pub const Enc = struct {
             release(e.devmgr);
             e.releaseVideoDevice();
             e.releaseDevice();
-        } else {
-            releaseSharedDevice();
+        } else if (e.shared_ref) |sd| {
+            releaseShared(sd);
         }
         if (e.swz) |s| e.gpa.free(s);
         e.st(.close_done);
@@ -1916,6 +1981,11 @@ pub const Enc = struct {
         gpa.destroy(e);
     }
 };
+
+test "GetDeviceRemovedReason vtable slot" {
+    const vt = @typeInfo(@FieldType(DevRemovedView, "v")).pointer.child;
+    try std.testing.expectEqual(@as(usize, 39), @offsetOf(vt, "GetDeviceRemovedReason") / @sizeOf(VOP));
+}
 
 test "h264 level table" {
     try std.testing.expectEqual(@as(u32, 52), h264LevelFor(3840, 2160, 60, 1));

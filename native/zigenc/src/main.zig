@@ -746,7 +746,7 @@ fn decSessionMain(s: *Session) void {
     };
     s.dec_open = d;
     s.hdr.setU32At(off_dec_flags, d.flags);
-    emit(OpenedEv{ .sid = s.sid, .ok = true, .name = d.name(), .dir = "dec", .cap = if (s.sw_req) "software" else "zerocopy" });
+    emit(OpenedEv{ .sid = s.sid, .ok = true, .name = d.name(), .dir = "dec", .cap = if (s.sw_req) "software" else "zerocopy", .dev_shared = d.devShared() });
     decLoop(s, d);
     const rc = d.drain();
     std.debug.print("mfenc session {d} (decode): fed={d} published={d} drain_rc={d}\n", .{ s.sid, d.fed_n, d.pub_n, rc });

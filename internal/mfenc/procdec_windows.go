@@ -125,7 +125,8 @@ type ProcDecSession struct {
 	ringSize             uint64
 	ringOff              uintptr
 
-	name string
+	name      string
+	devShared bool // child leased its shared D3D11 device (one per child, shared with encode)
 
 	// destination identity - SCALARS only, never a pixel
 	dstMu       sync.Mutex
@@ -279,6 +280,7 @@ func OpenProcDecSession(o ProcDecOpts) (*ProcDecSession, error) {
 			return nil, errors.New("mfenc: native decode open failed: " + ev.Err)
 		}
 		d.name = ev.Name
+		d.devShared = ev.DevShared
 		child.mu.Lock()
 		child.decs[sid] = d
 		child.mu.Unlock()
@@ -315,6 +317,9 @@ func (d *ProcDecSession) destHandle() (uint64, uint32, string) {
 
 // Name returns the decoder MFT friendly name.
 func (d *ProcDecSession) Name() string { return d.name }
+
+// DevShared reports whether the child serves this session from its shared device.
+func (d *ProcDecSession) DevShared() bool { return d.devShared }
 
 // Decode appends one access unit to the inbound ring and wakes the child.
 //
