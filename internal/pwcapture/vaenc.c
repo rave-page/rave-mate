@@ -485,6 +485,7 @@ struct rva_enc {
 	int fd;
 	VADisplay dpy;
 	int in_w, in_h, out_w, out_h, fps, kbps;
+	int rc_fps; /* rate-control frame rate (<= fps under a receiver fps cap); fps keeps SPS level + GOP */
 	int rc_dirty; /* kbps changed via rva_enc_set_bitrate: re-send the RC misc param next frame */
 	int codec;    /* 0 = H.264, 1 = HEVC */
 	/* closed-loop bitrate corrector: a 1s sliding window over emitted AU bits. radeonsi's RC (esp.
@@ -933,6 +934,7 @@ rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps,
 	e->out_w = out_w;
 	e->out_h = out_h;
 	e->fps = fps > 0 ? fps : 60;
+	e->rc_fps = e->fps;
 	e->qc_sub = e->fps / 4 > 0 ? e->fps / 4 : 1; /* ~4 ceiling checks/s: fast raise, slow release */
 	e->kbps = bitrate_kbps > 0 ? bitrate_kbps : 20000;
 	e->mbw = (out_w + 15) / 16;
@@ -1058,7 +1060,7 @@ static void append_rc_misc(struct rva_enc *e, VABufferID *bufs, int *pnb) {
 		mb->type = VAEncMiscParameterTypeFrameRate;
 		VAEncMiscParameterFrameRate *fr = (VAEncMiscParameterFrameRate *)mb->data;
 		memset(fr, 0, sizeof(*fr));
-		fr->framerate = (unsigned)e->fps;
+		fr->framerate = (unsigned)e->rc_fps;
 		VA.UnmapBuffer(e->dpy, frb);
 		bufs[(*pnb)++] = frb;
 	}
@@ -1454,7 +1456,7 @@ static int enc_emit(rva_enc *e, VASurfaceID sync, int pidx, int pidr, unsigned c
 		 * undershoots), and over a ~250ms sub-window raise cur_qp toward 51 when the rate would exceed the
 		 * ceiling, releasing slowly toward target_qp when comfortably under. The next frame re-emits the
 		 * PPS with the new QP (no reopen). rate_limited = held above the quality target by the ceiling. */
-		if (off > 0 && e->fps > 0) {
+		if (off > 0 && e->rc_fps > 0) {
 			/* IDR bits are amortized over the GOP (they are on the wire once per GOP): fed raw, one IDR
 			 * makes its sub-window read ~2x and the proportional step would pump quality every GOP. */
 			if (pidr)
@@ -1466,7 +1468,7 @@ static int enc_emit(rva_enc *e, VASurfaceID sync, int pidx, int pidr, unsigned c
 				if (e->qc_pframes > 0) {
 					long long eq = e->qc_bits * e->qc_frames / e->qc_pframes +
 					               e->qc_idr_bits * e->qc_frames / (e->gop > 0 ? e->gop : e->fps);
-					e->cur_qp = rva_qp_next(e->cur_qp, e->target_qp, eq, e->qc_frames, e->fps,
+					e->cur_qp = rva_qp_next(e->cur_qp, e->target_qp, eq, e->qc_frames, e->rc_fps,
 						(long long)e->kbps * 1000, &e->qc_under);
 					e->rate_limited = e->cur_qp > e->target_qp;
 				}
@@ -1475,12 +1477,12 @@ static int enc_emit(rva_enc *e, VASurfaceID sync, int pidx, int pidr, unsigned c
 				e->qc_pframes = 0;
 			}
 		}
-	} else if (off > 0 && e->fps > 0) {
+	} else if (off > 0 && e->rc_fps > 0) {
 		/* closed-loop bitrate corrector (legacy CBR): a 1s window over emitted AU bits. Scale the
 		 * EFFECTIVE budget sent to the driver so the MEASURED output lands on the real budget - lowers
 		 * rc_scale when the driver overshoots, raises it (toward 100%) when well under. */
 		e->win_bits += (long long)off * 8;
-		if (++e->win_frames >= e->fps) {
+		if (++e->win_frames >= e->rc_fps) {
 			long long budget = (long long)e->kbps * 1000;
 			int cur = e->rc_scale_pct > 0 ? e->rc_scale_pct : 100;
 			int ns = cur;
@@ -1725,6 +1727,23 @@ void rva_enc_set_bitrate(rva_enc *e, int kbps) {
 	e->win_frames = 0;
 	e->rc_dirty = 1; /* re-send the CBR rate-control misc param on the next frame */
 }
+
+void rva_enc_set_fps(rva_enc *e, int fps) {
+	if (!e || fps <= 0)
+		return;
+	if (fps > e->fps)
+		fps = e->fps; /* bounded to the open-time (negotiated) rate */
+	if (fps == e->rc_fps)
+		return;
+	e->rc_fps = fps;
+	e->qc_sub = fps / 4 > 0 ? fps / 4 : 1;
+	e->qc_bits = e->qc_frames = e->qc_pframes = 0; /* windows restart at the new frame count */
+	e->win_bits = 0;
+	e->win_frames = 0;
+	e->rc_dirty = 1; /* re-send the framerate (+ RC) misc params on the next frame */
+}
+
+int rva_enc_rc_fps(rva_enc *e) { return e ? e->rc_fps : 0; }
 
 /* rva_enc_set_quality updates the live constant-quality target QP (quality mode only; no reopen). */
 void rva_enc_set_quality(rva_enc *e, int target_qp) {

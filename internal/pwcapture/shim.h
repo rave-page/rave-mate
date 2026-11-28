@@ -126,6 +126,19 @@ long rpw_ring_overflow(struct rpw_capture *c);
 long rpw_cap_drops(struct rpw_capture *c);
 long rpw_grid_drops(struct rpw_capture *c);
 
+/* PTS-grid gate state (loop thread). next = next grid PTS (0 = unprimed); src_iv = source interval EMA. */
+struct rpw_grid {
+	long long next, last_pts, src_iv;
+};
+/* rpw_grid_gate decides one source frame (pts ns) against the 1/fps grid: 1 = encode, 0 = pace out.
+ * capped = a receiver fps cap below the negotiated rate binds: always gate (no pass-through heuristic).
+ * Pure (no capture state) - unit-tested. */
+int rpw_grid_gate(struct rpw_grid *g, long long pts, int fps, int capped);
+/* rpw_eff_fps is the encode rate in force: min(negotiated, receiver cap), clamped to [1, negotiated]. */
+int rpw_eff_fps(int enc_fps, int cap_fps);
+int rpw_cur_eff_fps(struct rpw_capture *c);
+int rpw_cur_cap_fps(struct rpw_capture *c);
+
 /* ---- native realtime TX (unit 3) ---- */
 /* rpw_attach_native_tx opens a native sender + routes the encode thread to it. 1 = native engaged,
  * 0 = failure (keep the Go-ring fallback). transport 0=UDP/1=TCP; codec 4=H264/5=HEVC/6=AV1. */

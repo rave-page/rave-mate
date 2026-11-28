@@ -502,8 +502,7 @@ struct rpw_capture {
 	 * 60), emit the newest frame per 1/fps grid slot by capture PTS, so the output is evenly spaced in
 	 * source time (not bunched by the callback's own timing). grid_drops = sub-grid frames paced out
 	 * (deliberate rate-cap, PRE-encode -> no reference break, no IDR; surfaced as RateCapped). */
-	long long enc_grid_next; /* next grid PTS (ns); 0 = uninitialised */
-	long long grid_last_pts, grid_src_iv; /* loop thread: last frame PTS + source interval EMA (ns) */
+	struct rpw_grid grid; /* loop thread: next grid PTS + last frame PTS + source interval EMA (ns) */
 	long grid_drops;
 	int enc_src_w, enc_src_h; /* source dims the encoder was built for (recreate on change) */
 	/* robustness (encode thread writes, getters read): */
@@ -1141,9 +1140,7 @@ static void on_param_changed(void *data, uint32_t id, const struct spa_pod *para
 	c->is_dmabuf = (pmod != NULL);
 	c->force_idr = 1; /* (re)negotiated = new producer/pool: resume on an IDR */
 	pthread_mutex_unlock(&c->mu);
-	c->enc_grid_next = 0; /* loop-thread-owned: re-prime the PTS grid (new producer = new PTS origin) */
-	c->grid_last_pts = 0;
-	c->grid_src_iv = 0;
+	memset(&c->grid, 0, sizeof(c->grid)); /* loop-thread-owned: re-prime (new producer = new PTS origin) */
 	DBG("format: %dx%d fmt=%d dmabuf=%d mod=0x%llx\n", c->width, c->height, c->fmt, c->is_dmabuf, (unsigned long long)c->modifier);
 	request_buffers(c, c->is_dmabuf);
 }
@@ -1193,6 +1190,8 @@ static int enc_ensure(struct rpw_capture *c) {
 	int newkbps = c->pending_kbps; c->pending_kbps = 0;
 	int newmaxh = c->pending_maxh; c->pending_maxh = -1;
 	int newqual = c->pending_quality; c->pending_quality = 0;
+	if (newkbps > 0)
+		c->enc_kbps = newkbps; /* live ceiling survives a recreate (coded-size cap / auto step / mode switch) */
 	pthread_mutex_unlock(&c->mu);
 	if (newkbps > 0)
 		rva_enc_set_bitrate(c->enc, newkbps);
@@ -1230,6 +1229,11 @@ static int enc_ensure(struct rpw_capture *c) {
 			}
 		}
 	}
+	/* RC frame rate = the rate in force: under an fps cap the driver's bits/frame and the corrector's
+	 * 1 s windows must count capped frames, else a 15 fps cap of a 60 route lands at ~1/4 of the budget */
+	int ef = rpw_cur_eff_fps(c);
+	if (c->enc && ef > 0 && ef != rva_enc_rc_fps(c->enc))
+		rva_enc_set_fps(c->enc, ef);
 	return idr;
 }
 
@@ -1473,8 +1477,9 @@ static void enc_mark_steps(struct rpw_capture *c) {
 static void enc_emit_au(struct rpw_capture *c, rm_sender *tx, unsigned char *au, int aulen, int kf, long long pts, int real) {
 	rpw_hist_mark(&c->h_enc, mono_ns());
 	fz_au(c, aulen, kf, pts, real);
-	if (c->last_emit_pts > 0 && c->enc_fps > 0) { /* wall cadence hides a skipped source frame; PTS does not */
-		long long period = 1000000000LL / c->enc_fps, d = pts - c->last_emit_pts;
+	int efps = rpw_cur_eff_fps(c);
+	if (c->last_emit_pts > 0 && efps > 0) { /* wall cadence hides a skipped source frame; PTS does not */
+		long long period = 1000000000LL / efps, d = pts - c->last_emit_pts;
 		if (d > period * 3 / 2) {
 			c->pts_gaps++;
 			c->pts_skipped += (d + period / 2) / period - 1;
@@ -1532,7 +1537,10 @@ static void *enc_thread_main(void *arg) {
 	int enc_pend = 0; /* encoder holds a submitted, not yet emitted frame */
 	struct rva_enc *enc_seen = NULL;
 	for (;;) {
-		long long period = 1000000000LL / (c->enc_fps > 0 ? c->enc_fps : 60);
+		/* cadence at the rate in force: an fps cap must also slow the repeats, else the even fill
+		 * re-pads a decimated route back to the negotiated rate (cap 15 -> wire ~30 on the rig) */
+		int efps = rpw_cur_eff_fps(c);
+		long long period = 1000000000LL / (efps > 0 ? efps : 60);
 		long long dl = 0;
 		pthread_mutex_lock(&c->enc_mu);
 		for (;;) {
@@ -1769,39 +1777,13 @@ static void on_process(void *data) {
 				long long gpts = buffer_pts(sb);
 				if (gpts <= 0)
 					gpts = mono_ns();
-				int gfps = c->enc_fps;
 				int capf = __atomic_load_n(&c->cap_fps, __ATOMIC_RELAXED);
-				if (capf > 0 && (gfps <= 0 || capf < gfps))
-					gfps = capf; /* governor fps rung: same grid, coarser slot */
-				if (gfps > 0) {
-					long long period = 1000000000LL / gfps;
-					long long tol = period / 4;
-					/* source interval EMA (clamped to 2p): decimate ONLY a source that really runs
-					 * faster than the rate (VRChat 120 -> 60). A ~rate source with arrival jitter (no
-					 * header PTS: the arrival clock) must pass every frame - gating it on the grid
-					 * dropped every other frame of a 4K60 libfunnel source (capFps 30). */
-					if (c->grid_last_pts > 0 && gpts > c->grid_last_pts) {
-						long long iv = gpts - c->grid_last_pts;
-						if (iv > 2 * period)
-							iv = 2 * period;
-						c->grid_src_iv = c->grid_src_iv ? (c->grid_src_iv * 7 + iv) / 8 : iv;
-					}
-					c->grid_last_pts = gpts;
-					if (c->grid_src_iv == 0 || c->grid_src_iv > period * 3 / 4) {
-						c->enc_grid_next = gpts + period; /* pass-through; keep the grid primed */
-					} else if (c->enc_grid_next == 0 || gpts + 4 * period < c->enc_grid_next) {
-						/* prime on the first frame; re-prime when PTS jumped BACK (new producer /
-						 * clock origin) instead of pacing everything out until it catches up */
-						c->enc_grid_next = gpts + period;
-					} else if (gpts + tol < c->enc_grid_next) {
-						PW.stream_queue(c->stream, last); /* sub-grid: pace it out (pre-encode skip) */
-						c->grid_drops++;
-						return;
-					} else {
-						c->enc_grid_next += period;
-						if (c->enc_grid_next <= gpts + tol) /* catch up after a gap / slow source */
-							c->enc_grid_next += ((gpts + tol - c->enc_grid_next) / period + 1) * period;
-					}
+				int gfps = rpw_eff_fps(c->enc_fps, capf); /* governor/user fps cap: same grid, coarser slot */
+				int capped = capf > 0 && (c->enc_fps <= 0 || capf < c->enc_fps);
+				if (gfps > 0 && !rpw_grid_gate(&c->grid, gpts, gfps, capped)) {
+					PW.stream_queue(c->stream, last); /* sub-grid: pace it out (pre-encode skip) */
+					c->grid_drops++;
+					return;
 				}
 				int np = sb->n_datas < RPW_MAX_PLANES ? (int)sb->n_datas : RPW_MAX_PLANES;
 				c->cap_frames++; /* captured frames handed to the encoder stage (CapFPS) */
@@ -2173,6 +2155,52 @@ void rpw_set_cap_fps(struct rpw_capture *c, int fps) {
 	if (!c)
 		return;
 	__atomic_store_n(&c->cap_fps, fps > 0 ? fps : 0, __ATOMIC_RELAXED);
+}
+
+int rpw_eff_fps(int enc_fps, int cap_fps) {
+	if (enc_fps <= 0)
+		return cap_fps > 0 ? cap_fps : 0;
+	if (cap_fps <= 0 || cap_fps >= enc_fps)
+		return enc_fps;
+	return cap_fps; /* >= 1 here */
+}
+
+int rpw_cur_cap_fps(struct rpw_capture *c) { return c ? __atomic_load_n(&c->cap_fps, __ATOMIC_RELAXED) : 0; }
+
+int rpw_cur_eff_fps(struct rpw_capture *c) { return c ? rpw_eff_fps(c->enc_fps, rpw_cur_cap_fps(c)) : 0; }
+
+/* B.3 grid: newest frame per 1/fps slot by capture PTS (even spacing in source time), tolerance p/4.
+ * Uncapped, decimate ONLY a source that really runs faster than the rate (interval EMA < 0.75p, e.g.
+ * VRChat 120 -> 60): a ~rate source with arrival jitter (no header PTS) must pass every frame - gating
+ * it dropped every other frame of a 4K60 libfunnel source. Capped (receiver fps cap < negotiated), the
+ * cap always binds: the pass-through heuristic would let a 30 fps source through a 25 fps cap. */
+int rpw_grid_gate(struct rpw_grid *g, long long pts, int fps, int capped) {
+	if (fps <= 0)
+		return 1;
+	long long period = 1000000000LL / fps, tol = period / 4;
+	if (g->last_pts > 0 && pts > g->last_pts) { /* source interval EMA, clamped to 2p */
+		long long iv = pts - g->last_pts;
+		if (iv > 2 * period)
+			iv = 2 * period;
+		g->src_iv = g->src_iv ? (g->src_iv * 7 + iv) / 8 : iv;
+	}
+	g->last_pts = pts;
+	if (!capped && (g->src_iv == 0 || g->src_iv > period * 3 / 4)) {
+		g->next = pts + period; /* pass-through; keep the grid primed */
+		return 1;
+	}
+	if (g->next == 0 || pts + 4 * period < g->next) {
+		/* prime on the first frame; re-prime when PTS jumped BACK (new producer / clock origin, or a
+		 * cap lowered the period) instead of pacing everything out until it catches up */
+		g->next = pts + period;
+		return 1;
+	}
+	if (pts + tol < g->next)
+		return 0; /* sub-grid */
+	g->next += period;
+	if (g->next <= pts + tol) /* catch up after a gap / slow source */
+		g->next += ((pts + tol - g->next) / period + 1) * period;
+	return 1;
 }
 
 /* rpw_set_bitrate updates the live target bitrate (kbps); applied on the next encoded frame. */

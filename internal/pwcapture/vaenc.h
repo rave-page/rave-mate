@@ -79,6 +79,11 @@ void rva_enc_last_steps(rva_enc *e, long long out[RVA_NSTEP]);
  * constant-quality CEILING in quality mode. Applied on the next encoded frame (no reopen). */
 void rva_enc_set_bitrate(rva_enc *e, int kbps);
 
+/* rva_enc_set_fps sets the RATE-CONTROL frame rate (receiver fps cap): driver framerate param, the
+ * corrector/ceiling windows. SPS level + GOP keep the open-time rate (no stream reconfig, no IDR). */
+void rva_enc_set_fps(rva_enc *e, int fps);
+int rva_enc_rc_fps(rva_enc *e);
+
 /* rva_enc_set_quality updates the live constant-quality target QP (quality mode only; no reopen). A
  * higher target_qp = lower quality. cur_qp is re-floored to the new target. No-op in legacy mode. */
 void rva_enc_set_quality(rva_enc *e, int target_qp);

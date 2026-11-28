@@ -314,6 +314,10 @@ func (s *pwSource) SetRateHint(h medialink.RateHint) {
 	if h.MaxFPS != s.lastMaxFPS { // fps rung: PTS-grid decimation in the shim (0 = restore)
 		s.lastMaxFPS = h.MaxFPS
 		C.rpw_set_cap_fps(s.h, C.int(h.MaxFPS))
+		if s.log != nil {
+			s.log.Info(source, "rate hint: fps cap applied (PTS grid + cadence + RC rate, no reopen)", map[string]any{
+				"node": s.node, "maxFPS": h.MaxFPS, "encFpsTarget": int(C.rpw_cur_eff_fps(s.h))})
+		}
 	}
 }
 
@@ -601,7 +605,9 @@ func (s *pwSource) encTelemetry() {
 				"dropped": st.Dropped, "bytesPerFrame": uint64(st.AUBytesPerFrame),
 				"ringDepth": int(C.rpw_ring_depth(s.h)), "ringHiwater": int(C.rpw_ring_hiwater(s.h)),
 				"ringOverflow": int64(C.rpw_ring_overflow(s.h)), "capDrops": int64(C.rpw_cap_drops(s.h)),
-				"gridDrops":  int64(C.rpw_grid_drops(s.h)),
+				"gridDrops": int64(C.rpw_grid_drops(s.h)),
+				// effective receiver caps in force: fps (0 = none; encFpsTarget = min(negotiated, cap)) + kbps ceiling
+				"fpsCap": int(C.rpw_cur_cap_fps(s.h)), "encFpsTarget": int(C.rpw_cur_eff_fps(s.h)), "kbpsCeiling": st.BudgetKbps,
 				"reconnects": int64(C.rpw_reconnects(s.h)), "node": s.node,
 				"repeats": int64(C.rpw_repeats(s.h)), "ringSkips": int64(C.rpw_ring_skips(s.h)),
 				"startHolds": int64(C.rpw_start_holds(s.h)), "forcedIDRs": int64(C.rpw_forced_idrs(s.h)),
@@ -807,3 +813,18 @@ func qpNext(cur, target int, winBits int64, frames, fps int, budget int64, under
 	*under = int(cu)
 	return r
 }
+
+// gridState is the cgo seam over the pure PTS-grid gate (rpw_grid_gate) for its table test.
+type gridState struct{ g C.struct_rpw_grid }
+
+// gate decides one frame (pts ns) at fps: true = encode, false = paced out.
+func (s *gridState) gate(pts int64, fps int, capped bool) bool {
+	cp := C.int(0)
+	if capped {
+		cp = 1
+	}
+	return C.rpw_grid_gate(&s.g, C.longlong(pts), C.int(fps), cp) != 0
+}
+
+// effFPS is the cgo seam for rpw_eff_fps (rate in force under a receiver fps cap).
+func effFPS(encFPS, capFPS int) int { return int(C.rpw_eff_fps(C.int(encFPS), C.int(capFPS))) }
