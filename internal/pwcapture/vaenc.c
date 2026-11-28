@@ -61,6 +61,9 @@ struct va_api {
 	VAStatus (*MapBuffer)(VADisplay, VABufferID, void **);
 	VAStatus (*UnmapBuffer)(VADisplay, VABufferID);
 	VAStatus (*GetConfigAttributes)(VADisplay, VAProfile, VAEntrypoint, VAConfigAttrib *, int);
+	/* optional (SHM upload fallback when vaDeriveImage is refused on a tiled RGB surface) */
+	VAStatus (*CreateImage)(VADisplay, VAImageFormat *, int, int, VAImage *);
+	VAStatus (*PutImage)(VADisplay, VASurfaceID, VAImageID, int, int, unsigned, unsigned, int, int, unsigned, unsigned);
 	/* libva-drm */
 	VADisplay (*GetDisplayDRM)(int);
 };
@@ -124,6 +127,9 @@ static int va_load_locked(void) {
 		}
 		*t[i].s = s;
 	}
+	VA.CreateImage = (VAStatus(*)(VADisplay, VAImageFormat *, int, int, VAImage *))dlsym(l, "vaCreateImage");
+	VA.PutImage = (VAStatus(*)(VADisplay, VASurfaceID, VAImageID, int, int, unsigned, unsigned, int, int, unsigned,
+	                           unsigned))dlsym(l, "vaPutImage");
 	VA.ok = 1;
 	return 1;
 }
@@ -543,6 +549,14 @@ struct rva_enc {
 	VASurfaceID cache_surf[16];
 	int cache_n;
 	int cache_next; /* round-robin eviction slot when full */
+	/* SHM upload (rva_enc_frame_mem): 2 RGB32 surfaces ping-ponged with nv12[] (a reuse is 2 frames
+	 * later, after that frame's encode - which waited on its VPP read - was emitted). Fixed: 2 x w*h*4
+	 * VRAM, re-created only on a size/format change. up_img = staging image for the vaPutImage fallback. */
+	VASurfaceID up[2];
+	int up_w, up_h;
+	uint32_t up_fourcc;
+	int up_put; /* 1 = vaDeriveImage refused/mismatched: upload via up_img + vaPutImage */
+	VAImage up_img;
 };
 
 /* enc_init_qp is the init QP written into the PPS and the picture param: the live cur_qp in quality
@@ -848,6 +862,8 @@ static VASurfaceID import_cached(struct rva_enc *e, uint32_t drm_fourcc, uint64_
 	return s;
 }
 
+static int vpp_run(struct rva_enc *e, VASurfaceID target, VASurfaceID rgb, int w, int h, int flip);
+
 /* vpp_to_nv12: import (cached) the dmabuf, VPP (convert + optional vertical mirror + scale) into
  * e->nv12. flip=1 mirrors vertically (a bottom-up GL producer); flip=0 keeps orientation (a top-down
  * DX/Spout producer). Same decision as the readback path (shim want_flip), so both agree.
@@ -860,6 +876,11 @@ static int vpp_to_nv12(struct rva_enc *e, VASurfaceID target, uint32_t drm_fourc
 	e->st_us[RVA_ST_IMPORT] = now_us() - t0;
 	if (rgb == VA_INVALID_ID)
 		return -1;
+	return vpp_run(e, target, rgb, w, h, flip);
+}
+
+/* vpp_run: VPP-convert RGB surface rgb (w x h) into target NV12 (+ mirror/scale). 0=ok. */
+static int vpp_run(struct rva_enc *e, VASurfaceID target, VASurfaceID rgb, int w, int h, int flip) {
 	VAProcPipelineParameterBuffer pp;
 	memset(&pp, 0, sizeof(pp));
 	pp.surface = rgb;
@@ -939,6 +960,8 @@ rva_enc *rva_enc_new(const char *node, int codec, int out_w, int out_h, int fps,
 	e->vpp_cfg = e->enc_cfg = VA_INVALID_ID;
 	e->vpp_ctx = e->enc_ctx = VA_INVALID_ID;
 	e->nv12[0] = e->nv12[1] = e->recon[0] = e->recon[1] = VA_INVALID_ID;
+	e->up[0] = e->up[1] = VA_INVALID_ID;
+	e->up_img.image_id = VA_INVALID_ID;
 
 	int maj, min;
 	e->dpy = VA.GetDisplayDRM(e->fd);
@@ -1488,18 +1511,131 @@ static int enc_emit(rva_enc *e, VASurfaceID sync, int pidx, int pidr, unsigned c
 	return 0;
 }
 
+static int enc_after_vpp(rva_enc *e, int idx, long long t0, int force_idr, unsigned char **au, int *au_len, int *keyframe);
+
+/* upload_mem copies a CPU RGB32 frame (w x h, src_stride bytes/row) into up[idx], (re)creating the
+ * upload surfaces on a size/format change. vaDeriveImage + map = one copy; when the driver refuses to
+ * derive a (tiled) RGB surface or derives another layout, fall back to a staging VAImage + vaPutImage
+ * (two copies). Returns the surface or VA_INVALID_ID. */
+static VASurfaceID upload_mem(rva_enc *e, int idx, uint32_t va_fourcc, int w, int h, const unsigned char *src, int src_stride) {
+	if (e->up[0] == VA_INVALID_ID || e->up_w != w || e->up_h != h || e->up_fourcc != va_fourcc) {
+		if (e->up[0] != VA_INVALID_ID)
+			VA.DestroySurfaces(e->dpy, e->up, 2);
+		if (e->up_img.image_id != VA_INVALID_ID)
+			VA.DestroyImage(e->dpy, e->up_img.image_id);
+		e->up[0] = e->up[1] = VA_INVALID_ID;
+		e->up_img.image_id = VA_INVALID_ID;
+		e->up_put = 0;
+		VASurfaceAttrib fa;
+		memset(&fa, 0, sizeof(fa));
+		fa.type = VASurfaceAttribPixelFormat;
+		fa.flags = VA_SURFACE_ATTRIB_SETTABLE;
+		fa.value.type = VAGenericValueTypeInteger;
+		fa.value.value.i = (int)va_fourcc;
+		VAStatus st = VA.CreateSurfaces(e->dpy, VA_RT_FORMAT_RGB32, (unsigned)w, (unsigned)h, e->up, 2, &fa, 1);
+		if (st != VA_STATUS_SUCCESS) {
+			VDBG("enc: shm upload surfaces: %s\n", VA.ErrorStr(st));
+			e->up[0] = e->up[1] = VA_INVALID_ID;
+			return VA_INVALID_ID;
+		}
+		e->up_w = w;
+		e->up_h = h;
+		e->up_fourcc = va_fourcc;
+	}
+	VASurfaceID s = e->up[idx];
+	size_t row = (size_t)w * 4;
+	if (!e->up_put) {
+		VAImage img;
+		memset(&img, 0, sizeof(img));
+		img.image_id = VA_INVALID_ID;
+		VAStatus st = VA.DeriveImage(e->dpy, s, &img);
+		if (st == VA_STATUS_SUCCESS && img.format.fourcc == va_fourcc && img.num_planes == 1 &&
+		    img.pitches[0] >= row) {
+			void *p = NULL;
+			st = VA.MapBuffer(e->dpy, img.buf, &p);
+			if (st == VA_STATUS_SUCCESS) {
+				unsigned char *d = (unsigned char *)p + img.offsets[0];
+				for (int y = 0; y < h; y++)
+					memcpy(d + (size_t)y * img.pitches[0], src + (size_t)y * src_stride, row);
+				VA.UnmapBuffer(e->dpy, img.buf);
+				VA.DestroyImage(e->dpy, img.image_id);
+				return s;
+			}
+		}
+		VDBG("enc: shm upload: derive unusable (%s, fourcc 0x%x) -> vaPutImage\n", VA.ErrorStr(st), img.format.fourcc);
+		if (img.image_id != VA_INVALID_ID)
+			VA.DestroyImage(e->dpy, img.image_id);
+		e->up_put = 1;
+	}
+	if (!VA.CreateImage || !VA.PutImage)
+		return VA_INVALID_ID;
+	if (e->up_img.image_id == VA_INVALID_ID) {
+		VAImageFormat f;
+		memset(&f, 0, sizeof(f));
+		f.fourcc = va_fourcc;
+		f.byte_order = VA_LSB_FIRST;
+		f.bits_per_pixel = 32;
+		f.depth = (va_fourcc == VA_FOURCC_BGRA || va_fourcc == VA_FOURCC_RGBA) ? 32 : 24;
+		VAStatus st = VA.CreateImage(e->dpy, &f, w, h, &e->up_img);
+		if (st != VA_STATUS_SUCCESS) {
+			VDBG("enc: shm upload: vaCreateImage: %s\n", VA.ErrorStr(st));
+			e->up_img.image_id = VA_INVALID_ID;
+			return VA_INVALID_ID;
+		}
+	}
+	void *p = NULL;
+	if (VA.MapBuffer(e->dpy, e->up_img.buf, &p) != VA_STATUS_SUCCESS)
+		return VA_INVALID_ID;
+	unsigned char *d = (unsigned char *)p + e->up_img.offsets[0];
+	for (int y = 0; y < h; y++)
+		memcpy(d + (size_t)y * e->up_img.pitches[0], src + (size_t)y * src_stride, row);
+	VA.UnmapBuffer(e->dpy, e->up_img.buf);
+	VAStatus st = VA.PutImage(e->dpy, s, e->up_img.image_id, 0, 0, (unsigned)w, (unsigned)h, 0, 0, (unsigned)w, (unsigned)h);
+	if (st != VA_STATUS_SUCCESS) {
+		VDBG("enc: shm upload: vaPutImage: %s\n", VA.ErrorStr(st));
+		return VA_INVALID_ID;
+	}
+	return s;
+}
+
+int rva_enc_frame_mem(rva_enc *e, uint32_t drm_fourcc, int w, int h, const unsigned char *data, int stride,
+                      int flip, int force_idr, unsigned char **au, int *au_len, int *keyframe) {
+	if (!e || !au || !au_len || !keyframe || !data || w < 16 || h < 16 || w > 8192 || h > 8192 || stride < w * 4)
+		return -1;
+	*au_len = 0;
+	uint32_t va_fourcc = drm_to_va_fourcc(drm_fourcc);
+	if (!va_fourcc)
+		return -1;
+	int idx = e->pp;
+	for (int i = 0; i < RVA_NSTEP; i++)
+		e->st_us[i] = -1;
+	long long t0 = now_us();
+	VASurfaceID rgb = upload_mem(e, idx, va_fourcc, w, h, data, stride);
+	e->st_us[RVA_ST_IMPORT] = now_us() - t0; /* "import" = the CPU upload on this path */
+	if (rgb == VA_INVALID_ID || vpp_run(e, e->nv12[idx], rgb, w, h, flip) != 0)
+		return -2;
+	return enc_after_vpp(e, idx, t0, force_idr, au, au_len, keyframe);
+}
+
 int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int h, int n_planes,
                   const int *fds, const unsigned *offsets, const unsigned *strides,
                   int flip, int force_idr, unsigned char **au, int *au_len, int *keyframe) {
 	if (!e || !au || !au_len || !keyframe)
 		return -1;
 	*au_len = 0;
-	int idx = e->pp, idr = 0;
+	int idx = e->pp;
 	for (int i = 0; i < RVA_NSTEP; i++)
 		e->st_us[i] = -1;
 	long long t0 = now_us();
 	if (vpp_to_nv12(e, e->nv12[idx], drm_fourcc, modifier, w, h, n_planes, fds, offsets, strides, flip) != 0)
 		return -2;
+	return enc_after_vpp(e, idx, t0, force_idr, au, au_len, keyframe);
+}
+
+/* enc_after_vpp: shared tail of rva_enc_frame{,_mem} once nv12[idx] holds the VPP output: submit the
+ * encode, emit the previous (pipelined) frame. */
+static int enc_after_vpp(rva_enc *e, int idx, long long t0, int force_idr, unsigned char **au, int *au_len, int *keyframe) {
+	int idr = 0;
 	long long t1 = now_us();
 	e->st_us[RVA_ST_VPP] = t1 - t0 - (e->st_us[RVA_ST_IMPORT] > 0 ? e->st_us[RVA_ST_IMPORT] : 0);
 	if (e->vpp_sync) { /* diag: GPU latency of the colour convert alone (serializes the pipeline) */
@@ -1660,6 +1796,10 @@ void rva_enc_free(rva_enc *e) {
 		for (int i = 0; i < e->cache_n; i++)
 			if (e->cache_surf[i] != VA_INVALID_ID)
 				VA.DestroySurfaces(e->dpy, &e->cache_surf[i], 1);
+		if (e->up_img.image_id != VA_INVALID_ID)
+			VA.DestroyImage(e->dpy, e->up_img.image_id);
+		if (e->up[0] != VA_INVALID_ID)
+			VA.DestroySurfaces(e->dpy, e->up, 2);
 		for (int i = 0; i < 2; i++)
 			if (e->coded[i] != VA_INVALID_ID)
 				VA.DestroyBuffer(e->dpy, e->coded[i]);

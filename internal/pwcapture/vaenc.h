@@ -52,6 +52,13 @@ int rva_enc_frame(rva_enc *e, uint32_t drm_fourcc, uint64_t modifier, int w, int
                   const int *fds, const unsigned *offsets, const unsigned *strides,
                   int flip, int force_idr, unsigned char **au, int *au_len, int *keyframe);
 
+/* rva_enc_frame_mem is rva_enc_frame for a CPU (SHM: MemFd/MemPtr) RGB32 frame: data = w x h pixels,
+ * stride bytes per row (>= w*4), drm_fourcc one of ARGB/ABGR/XRGB/XBGR8888. The frame is copied into a
+ * session-owned VA RGB surface (one CPU copy; vaPutImage fallback = two), then the same VPP + encode
+ * pipeline as the dmabuf path. Same return contract. data may be released when it returns. */
+int rva_enc_frame_mem(rva_enc *e, uint32_t drm_fourcc, int w, int h, const unsigned char *data, int stride,
+                      int flip, int force_idr, unsigned char **au, int *au_len, int *keyframe);
+
 /* rva_enc_flush emits the pipelined pending frame (submitted by the last rva_enc_frame, not yet emitted)
  * without a new input: a slow/stalled source must not hold its last frame back. *au_len = 0 when
  * nothing was pending. 0 ok, <0 error. */
