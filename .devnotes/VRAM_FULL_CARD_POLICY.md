@@ -114,7 +114,7 @@ Native decode destination (`native/zigenc/src/dec.zig` `openDest`):
    (`hello` -> proto/version, `ensure{name,w,h}`, `list`, `clear{name}`, `release{name}`), started
    detached from the job object so it outlives daemon/media child/self-update; app adopts existing
    senders (same handle -> Resolume sees nothing new). Keeper death -> one guarded re-create through
-   admission. Opt-in until rig-verified.
+   admission. Default ON since 2026-11-28 (see "Keeper default on" at the end).
 
 ## 1e - adaptive decode mode (design, 2026-11-13)
 
@@ -192,7 +192,7 @@ rig run (card full now - not run).
 | 1d HELD visible (ctl routes / encoder-scan, hold JSON across the child RPC) | 3145e760 | merged |
 | 1e adaptive HW/CPU decode (zigenc proto v6 sw + keygate, decmode, sender cap) | 05e0db48, 169b6517 | GPU-unverified |
 | 1a claim remembered destinations at start, no TTL | e5de9e2f | GPU-unverified |
-| 1b sender keeper (rave-mate-keeper.exe, opt-in) | 12ea21e2 | GPU-unverified, default OFF |
+| 1b sender keeper (rave-mate-keeper.exe) | 12ea21e2 | default ON 2026-11-28 (perf/decode) |
 
 ### Our VRAM per 4K route (estimates unless marked learned)
 
@@ -201,8 +201,9 @@ rig run (card full now - not run).
 | before (SpoutLibrary GL sender + DXVA) | 31.6 MiB texture + ~48 GL ctx/interop/2 devices (est) | 114 learned (HEVC) | 2 x 33 MB host RAM (flip + park blank) | ~194 MB VRAM |
 | keeper + HW | 31.6 + device (few MB) in the keeper | 114 learned | none | ~150 MB |
 | keeper + CPU mode (coded 720p) | 31.6 | ~13 (NV12 upload + VP + device) | none | ~45 MB |
-The budget still estimates a NEW sender at 80 MB (GL path); with the keeper on that over-reserves ~45 MB
-until a measured sender cost exists (follow-up: sender cost observation / keeper-aware estimate).
+Keeper-aware estimate since 2026-11-28: a NEW keeper-hosted destination is `OpSenderKeeper` = texture + 8 MB
+keeper device share (4K ~40 MB) instead of the GL path's texture + 48 MB interop (~80 MB); charged only while
+the keeper answers (else the in-process GL sender is what gets created, at full cost).
 
 ### Known gaps (honest)
 
@@ -235,7 +236,7 @@ until a measured sender cost exists (follow-up: sender cost observation / keeper
    with `mediaLink.cpuDecodeFallback=false` if anything looks wrong.
 3. 1a: restart the app with Resolume open: log `remembered destination claimed at start` once per
    remembered receive; Resolume's sender list keeps ONE `rave-mate link ...`.
-4. 1b (opt-in `mediaLink.senderKeeper=true`, ship `native/zigkeeper/zig-out/bin/rave-mate-keeper.exe` beside
+4. 1b (default on; `mediaLink.senderKeeper=false` opts out; ship `native/zigkeeper/zig-out/bin/rave-mate-keeper.exe` beside
    rave-mate.exe): log `sender keeper up`; Spout sender list shows the destination with host path
    rave-mate-keeper.exe; restart rave-mate -> `receive sink open (keeper-hosted GPU destination) adopted:true`,
    Resolume does NOT re-follow (no flicker); kill the keeper -> one re-create, a second kill -> HELD.
@@ -323,3 +324,23 @@ sender, so it holds no GPU allocation for the destination (its 74 MB in the inci
 Native receive gate `TestNetRXDecodeLive4K`: acceptance now max <= 1.5 frame periods, p99 <= 20 ms
 (bucket upper edge), zero > 25 ms; re-run PASS (p50/p99/max 17.0/18.0/17.2 ms, 0 > 25 ms, 10 resizes,
 0 restarts).
+
+## Keeper default on (2026-11-28, perf/decode)
+
+Why it was off: "opt-in until rig-verified" (GPU-unverified at 12ea21e2), and the sidecar is neither
+embedded nor in the installer/CI artifacts (self-update swaps only rave-mate.exe). GPU gate passed
+2026-11-13 (`TestKeeperGPU`); the incident (4K60 receive lagging the host on a Resolume-full card) made
+the GL/DX interop of the in-process sender the cost to remove.
+
+- `mediaLink.senderKeeper`: nil = ON, `false` opts out, env `RAVE_MATE_SENDER_KEEPER=1|0` overrides.
+- Fallbacks, all to the in-process SpoutLibrary sender with a log line: sidecar missing / spawn failure
+  (`sender keeper not available`, daemon, once per outage), keeper unreachable at open or re-create spent
+  (`sender keeper unavailable - using the in-process sender`), keeper died mid-route (`sender keeper lost
+  a receive destination`: media plane checks every 2 s, closes the route, resume re-offers, reopen goes
+  in-process or through the one guarded re-create). A lost destination is never parked or reused.
+- Defect fixed with the flip: the keeper pipe has ONE instance and the daemon's boot Ping held it forever,
+  so the media child (the process that opens sinks) could never connect. Daemon now runs `KeepAlive` per
+  minute (dial, start if dead, hang up); `DialPipe` waits 500 ms on a busy pipe; busy = alive, never a
+  second start. The keep-alive also stops the keeper's 10 min idle exit while the app runs.
+- Not shipped yet: nightly/release CI + NSIS do not copy `rave-mate-keeper.exe` (follow-up); until then
+  installs without the sidecar run the in-process path exactly as before (one warn line).

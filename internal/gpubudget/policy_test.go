@@ -178,6 +178,33 @@ func TestFreeAveragerDampsOscillation(t *testing.T) {
 	}
 }
 
+// A keeper-hosted NEW destination is charged texture + keeper device share, not the GL interop: the
+// receive need drops by exactly sndInteropMB - keeperDevMB; an in-process fallback is charged in full.
+func TestKeeperHostedSenderSkipsInteropCost(t *testing.T) {
+	b := New(Options{Policy: Policy{Mode: ModeBalanced}, Store: NewCostStore("", nil),
+		Headroom: func() gpumem.Headroom { return gpumem.Headroom{Present: true, FreeMB: 8000, BudgetMB: 12288} },
+		Self:     func() (uint64, bool) { return 0, true }})
+	const want = sndInteropMB - keeperDevMB
+	near := func(a, b float64) bool { return a-b < 0.01 && b-a < 0.01 }
+	gl, glS := b.AdmitReceive(3840, 2160, 60, "hevc", true), b.AdmitSender(3840, 2160)
+	hosted := true
+	b.SetKeeperHosted(func() bool { return hosted })
+	kp, kpS := b.AdmitReceive(3840, 2160, 60, "hevc", true), b.AdmitSender(3840, 2160)
+	if !near(gl.NeedMB-kp.NeedMB, want) {
+		t.Fatalf("receive: keeper need %.1f vs GL %.1f, want diff %d", kp.NeedMB, gl.NeedMB, want)
+	}
+	if !near(glS.NeedMB-kpS.NeedMB, want) {
+		t.Fatalf("sender gate: keeper need %.1f vs GL %.1f, want diff %d", kpS.NeedMB, glS.NeedMB, want)
+	}
+	hosted = false // keeper unreachable => in-process sender => full interop charge
+	if d := b.AdmitReceive(3840, 2160, 60, "hevc", true); !near(d.NeedMB, gl.NeedMB) {
+		t.Fatalf("in-process fallback must be charged the GL cost: %.1f vs %.1f", d.NeedMB, gl.NeedMB)
+	}
+	if kept := b.AdmitReceive(3840, 2160, 60, "hevc", false); kept.NeedMB >= kp.NeedMB {
+		t.Fatalf("a kept destination costs nothing new: %.1f", kept.NeedMB)
+	}
+}
+
 // Incident 2026-11-28: a decoder whose CPU mode frees next to nothing opens in HW down to the hard
 // floor; a costly one (the rig's 114 MB pool) still falls to CPU below the system floor.
 func TestAdmitDecodeTieredTrivialGain(t *testing.T) {

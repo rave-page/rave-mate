@@ -79,6 +79,8 @@ New event `{"ev":"dstgone","sid":N,"reason":…}`. `hello.ver` → **3**; the pa
    removes. That case downgrades cleanly (`sw_decode_unsupported`) to the ffmpeg decoder.
 4. **`dec.zig` builds its own D3D11 device/VP rather than sharing `Enc`'s.** The encode pipeline
    is inc-1's proven path and the parity reference; ~60 duplicated lines beat refactoring it.
+   *Superseded 2026-11-28:* decode leases the child's shared device (`mf.leaseChildDevice`); the
+   private-device path remains the fallback.
    `mf.zig` grew a `pub const api` alias block (Zig has no friend visibility) so no existing
    declaration changed.
 5. **An explicit `Flush` before releasing the destination mutex.** Not in the spec, and

@@ -90,6 +90,45 @@ func TestAdoptOnlyNeverStarts(t *testing.T) {
 	}
 }
 
+// A busy pipe (keeper alive, another client holds its single instance) never starts a second keeper,
+// and KeepAlive counts it as alive.
+func TestBusyKeeperIsAliveNeverStarted(t *testing.T) {
+	starts := 0
+	s := NewSupervisor(Options{
+		Dial:  func() (Conn, error) { return nil, ErrBusy },
+		Start: func() error { starts++; return nil },
+	})
+	if err := s.Ping(); !errors.Is(err, ErrUnavailable) || !errors.Is(err, ErrBusy) {
+		t.Fatalf("Ping on a busy pipe: %v", err)
+	}
+	if err := s.KeepAlive(); err != nil {
+		t.Fatalf("busy = alive, got %v", err)
+	}
+	if starts != 0 {
+		t.Fatalf("busy keeper must never be re-started, starts=%d", starts)
+	}
+}
+
+// KeepAlive starts a dead keeper and hangs up, leaving the single pipe instance free.
+func TestKeepAliveStartsAndHangsUp(t *testing.T) {
+	f := NewFakeServer()
+	f.Kill()
+	admit, starts := true, 0
+	s := fakeSup(f, &admit, &starts)
+	if err := s.KeepAlive(); err != nil || starts != 1 {
+		t.Fatalf("keep-alive must start the keeper: err=%v starts=%d", err, starts)
+	}
+	s.mu.Lock()
+	held := s.conn != nil
+	s.mu.Unlock()
+	if held {
+		t.Fatal("keep-alive must not hold the connection")
+	}
+	if err := s.KeepAlive(); err != nil || starts != 1 {
+		t.Fatalf("alive keeper must not be re-started: err=%v starts=%d", err, starts)
+	}
+}
+
 func TestProtocolClearReleaseAndErrors(t *testing.T) {
 	f := NewFakeServer()
 	c, err := f.Dial()

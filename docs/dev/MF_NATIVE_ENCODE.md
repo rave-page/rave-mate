@@ -60,7 +60,11 @@ Hard-won contract lessons (cost real debugging, keep them):
   process, which no reference MF pipeline does (OBS, ffmpeg and the Media Engine all share
   one per adapter) and which AMF-backed MFTs reject: on AMD a single session is clean and a
   second one in the same child wedges it. Legal because the device carries
-  `D3D11_CREATE_DEVICE_VIDEO_SUPPORT` + `SetMultithreadProtected(TRUE)`.
+  `D3D11_CREATE_DEVICE_VIDEO_SUPPORT` + `SetMultithreadProtected(TRUE)`. Decode sessions lease the
+  SAME device + manager (`mf.leaseChildDevice`, 2026-11-28; was one device per decode session, ~40 MB
+  each): refused only for policy `session`, another adapter or a WARP singleton (then a private
+  device). A lost device (`GetDeviceRemovedReason`) is detached at the next open so re-established
+  sessions get a fresh one; holders release their own lease. Gate: `TestDecSharedDevice`.
 - **The child's per-frame wait must be far below the parent's `encodeWait`.** Both sat at
   2 s, so the parent's deadline expired at the same instant the child's did and a merely
   SATURATED encoder ended the route. Now `SUBMIT_WAIT_MS` = 250 ms returning `RC_BUSY`

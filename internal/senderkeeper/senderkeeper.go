@@ -156,6 +156,10 @@ func (c *lineConn) Close() error { return c.rw.Close() }
 // ErrUnavailable means no keeper could be reached or started (platform, missing exe, policy).
 var ErrUnavailable = errors.New("senderkeeper: keeper unavailable")
 
+// ErrBusy: the keeper is ALIVE but serving another client (one pipe instance; the media child holds
+// it while routes run). Never a reason to start a second keeper.
+var ErrBusy = errors.New("senderkeeper: keeper busy with another client")
+
 // kmtHandle sign-extends a 32-bit legacy (KMT) share handle the way Windows and the Spout SDK
 // (LongToHandle) present it on 64-bit, so a keeper handle compares equal to the Spout registry view.
 func kmtHandle(h uint64) uint64 { return uint64(int64(int32(uint32(h)))) }

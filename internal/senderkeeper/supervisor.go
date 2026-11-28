@@ -54,6 +54,9 @@ func (s *Supervisor) connLocked() (Conn, error) {
 		return s.conn, nil
 	}
 	c, err := s.o.Dial()
+	if errors.Is(err, ErrBusy) {
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err) // alive, another client: never start a 2nd
+	}
 	if err != nil && s.o.Start != nil {
 		if serr := s.o.Start(); serr != nil {
 			return nil, fmt.Errorf("%w: start: %v", ErrUnavailable, serr)
@@ -157,6 +160,20 @@ func (s *Supervisor) Ping() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.connLocked()
+	return err
+}
+
+// KeepAlive (daemon, on a slow tick) dials - starting the keeper when this Supervisor may - handshakes
+// and hangs up: the keeper never idles out while the app runs, a crashed one is restarted, and the
+// keeper's single pipe instance stays free for the media child. ErrBusy (another client) = alive.
+func (s *Supervisor) KeepAlive() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.connLocked()
+	s.dropLocked()
+	if errors.Is(err, ErrBusy) {
+		return nil
+	}
 	return err
 }
 

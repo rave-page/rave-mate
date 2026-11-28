@@ -112,8 +112,13 @@ const (
 
 	decDeviceMB  = 128 // D3D11 device + decoder MFT + runtime
 	encDeviceMB  = 96  // D3D11 device + encoder MFT
-	sndInteropMB = 48  // Spout shared-texture registration + GL/DX interop overhead
+	sndInteropMB = 48  // Spout shared-texture registration + GL/DX interop overhead (in-process GL sender)
+	keeperDevMB  = 8   // rave-mate-keeper's D3D11 device share per destination (measured: 1080p sender 16 MB = 7.9 texture + ~8)
 )
+
+// OpSenderKeeper is a destination hosted by rave-mate-keeper: pure D3D11 texture, no GL context or
+// GL/DX interop in our processes (VRAM_FULL_CARD_POLICY 1b).
+const OpSenderKeeper Op = "sender-keeper"
 
 // Inputs are the live admission inputs (gathered by Budget; injected directly in tests).
 type Inputs struct {
@@ -164,6 +169,8 @@ func EstimateCostMB(op Op, g Geom) float64 {
 	case OpSender:
 		// One shared BGRA texture + interop registration overhead.
 		return sndInteropMB + (px*bppRGBA)/mib
+	case OpSenderKeeper:
+		return keeperDevMB + (px*bppRGBA)/mib
 	case OpEncode:
 		// The VP NV12 input pool + one RGBA staging + device overhead. pool = zigenc NVPOOL_INIT: the
 		// child starts there and grows (max 8) only when the encoder holds every slot - visible as

@@ -180,6 +180,9 @@ type Manager struct {
 	// largest sender up to zeroFrameCap; replaces a w*h*4 blank per parked sender. zeroMu guards it.
 	zeroMu sync.Mutex
 	zero   []byte
+	// kSinks: keeper-hosted destinations this process opened (live or parked), checked for loss on the
+	// scan cadence. One per sender name (replaced on reopen); bounded like parked/receives.
+	kSinks map[string]*keeperSink
 }
 
 // New builds the manager (inert until Start).
@@ -193,6 +196,7 @@ func New(o Options) *Manager {
 		parked: map[string]*parkedSink{}, stopping: map[string]bool{}, now: time.Now,
 		holds: map[string]Hold{}, holdLog: map[string]time.Time{}, release: map[string]*releaseState{}, attempts: map[string]*attemptState{},
 		pending: map[string]Admission{}, claimAt: map[string]time.Time{}, keeper: o.Keeper,
+		kSinks: map[string]*keeperSink{},
 	}
 	m.pressureFloor = m.systemFloorMB
 	m.hub = newCaptureHub(o.Log, o.OpenReceiver, o.PutPix)
@@ -246,6 +250,7 @@ func (m *Manager) Start(ctx context.Context) {
 				return
 			case <-t.C:
 				m.scan()
+				m.checkKeeper()
 				m.cleanup()
 				m.reapParked()
 				m.relievePressure()
@@ -747,6 +752,13 @@ func (m *Manager) openReceiveSink(name string, w, h int) (medialink.Sink, error)
 	}
 	m.mu.Unlock()
 	if ok {
+		if ks, isK := p.inner.(*keeperSink); isK && (ks.lost.Load() || !ks.k.Has(name)) {
+			// Keeper lost it since parking (checkKeeper may not have run yet): open a fresh destination.
+			ks.lost.Store(true)
+			ok = false
+		}
+	}
+	if ok {
 		// IMMORTAL SENDER: reuse the kept-alive sender REGARDLESS of a source-resolution change, so
 		// its DX11 shared texture + handle never change. Resolume registered its GL/DX interop against
 		// this handle once, early; forcing it to re-register on a saturated card is the mid-set crash.
@@ -875,6 +887,9 @@ func (m *Manager) closeKept(k *keptSink) error {
 		return nil
 	}
 	if ks, ok := k.inner.(*keeperSink); ok { // keeper destination: park = keeper clear, no host blank
+		if ks.lost.Load() {
+			return nil // keeper lost it: nothing to park, the reopen builds a new destination
+		}
 		if err := ks.k.Clear(ks.s.Name); err != nil {
 			m.log.Debug(source, "kept-alive park: keeper clear failed", map[string]any{"sender": k.name, "err": err.Error()})
 		}
@@ -1218,8 +1233,13 @@ func (m *Manager) openSpoutSink(name string, w, h int) (medialink.Sink, error) {
 		if err == nil {
 			m.log.Info(source, "receive sink open (keeper-hosted GPU destination)", map[string]any{
 				"sender": name, "w": s.W, "h": s.H, "adopted": !created})
-			return &keeperSink{k: m.keeper, s: s}, nil
+			ks := &keeperSink{m: m, k: m.keeper, s: s}
+			m.mu.Lock()
+			m.kSinks[name] = ks
+			m.mu.Unlock()
+			return ks, nil
 		}
+		// Missing sidecar, spawn failure, keeper dead, or its one re-create spent: today's in-process sender.
 		m.log.Warn(source, "sender keeper unavailable - using the in-process sender", map[string]any{
 			"sender": name, "err": err.Error()})
 	}
