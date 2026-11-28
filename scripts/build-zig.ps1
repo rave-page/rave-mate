@@ -49,12 +49,11 @@ Copy-Item -Force zig-out\bin\rave-mate-enc.exe (Join-Path $encDst "rave-mate-enc
 Write-Host "rave-mate-enc built + embed-staged ($(& $zig.Source version))"
 
 # Pure-D3D11 Spout sender host (receive destinations) + go:embed staging (tag encembed).
-Set-Location (Join-Path $PSScriptRoot "..
-ative\zigkeeper")
+Set-Location (Join-Path $PSScriptRoot "..\native\zigkeeper")
 Build-ZigComponent "zigkeeper"
 $keeperDst = Join-Path $PSScriptRoot "..\internal\senderkeeper\embedded"
 New-Item -ItemType Directory -Force -Path $keeperDst | Out-Null
-Copy-Item -Force zig-outinave-mate-keeper.exe (Join-Path $keeperDst "rave-mate-keeper.exe")
+Copy-Item -Force zig-out\bin\rave-mate-keeper.exe (Join-Path $keeperDst "rave-mate-keeper.exe")
 Write-Host "rave-mate-keeper built + embed-staged ($(& $zig.Source version))"
 
 # rave-mate-vfx effects child exe (native/zigvfx: frei0r host, ISF next; no cgo)
