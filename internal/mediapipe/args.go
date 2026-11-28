@@ -301,6 +301,8 @@ func encodeArgs(spec medialink.EncodeSpec, forceSW bool) []string {
 		// AGENT: verify the encode still opens on radeonsi/iHD (VBR is standard but driver-gated)
 		// and that a flat source now emits well under the budget - fall back to CBR, or try QVBR
 		// with a quality target + maxrate, if a driver rejects VBR.
+		// radeonsi's RC overshoots this ceiling ~1.2-1.8x (rig: 3.2 Mbps on a 1916 kbps offer), so the
+		// kbps reaching here is already pre-compensated + closed-loop corrected (retarget.go).
 		args = append(args, "-c:v", spec.Encoder, "-rc_mode", "VBR", "-async_depth", "1")
 		args = append(args, rc...)
 	case "h264_amf":

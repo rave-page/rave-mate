@@ -55,8 +55,13 @@ type encoder struct {
 	runStop  context.CancelFunc // cancels the CURRENT child only (keyframe restart)
 	lastKey  int64              // unix ns of the last emitted keyframe
 	lastKick int64              // unix ns of the last forced restart
+	kicked   bool               // runStop was a deliberate respawn: restart at once, no backoff
 	restarts int
 	srcEOF   bool
+	rt       *retarget // live bitrate/fps -> respawn decision (guarded by mu)
+
+	gateFPS  atomic.Int32  // receiver fps cap applied pre-stdin (0 = none); feeder-owned fpsGate reads it
+	fpsDrops atomic.Uint64 // frames dropped by the fps cap (deliberate: RateCapped, not loss)
 
 	out     rate
 	dropped atomic.Uint64 // undersized/foreign input frames skipped
@@ -76,15 +81,66 @@ func newEncoder(ctx context.Context, log *logbus.Bus, ffmpeg string, spec medial
 		spec.VAAPIRenderNode = ensureVAAPINode(ctx, ffmpeg)
 	}
 	cctx, cancel := context.WithCancel(ctx)
+	if spec.FPS <= 0 {
+		spec.FPS = 30
+	}
+	ceil := spec.BitrateKbps
+	if ceil <= 0 { // encodeArgs' own default (output pixel rate), now owned here so hints can retarget it
+		ow, oh := spec.Width, spec.Height
+		if spec.MaxHeight > 0 && oh > spec.MaxHeight {
+			ow, oh = ow*spec.MaxHeight/oh, spec.MaxHeight
+		}
+		ceil = defaultBitrateKbps(ow, oh, spec.FPS)
+	}
 	e := &encoder{
 		log: log, ffmpeg: ffmpeg, spec: spec, baseMaxHeight: spec.MaxHeight, src: src,
 		size:   spec.Width * spec.Height * 4,
 		frames: make(chan *medialink.Frame, encFramesBuf),
 		cancel: cancel, done: make(chan struct{}),
 		resCap: newResCapGate(effCapHeight(spec.MaxHeight, spec.Height)),
+		rt:     newRetarget(spec.Encoder, ceil, spec.FPS, time.Now()),
 	}
 	go e.run(cctx)
+	go e.retargetLoop(cctx)
 	return e, nil
+}
+
+// retargetLoop is the 1 Hz control tick: feeds the measured output to the closed-loop correction and
+// respawns the child when the debounced spawn rate changed materially (hint or correction).
+func (e *encoder) retargetLoop(ctx context.Context) {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			bps, _ := e.out.w.Rate(now)
+			e.mu.Lock()
+			e.rt.observe(now, bps*8/1000)
+			e.retargetLocked(now, bps*8/1000)
+			e.mu.Unlock()
+		}
+	}
+}
+
+// retargetLocked respawns the child when rt decides so (caller holds mu).
+func (e *encoder) retargetLocked(now time.Time, measuredKbps float64) {
+	if e.runStop == nil || !e.rt.decide(now) {
+		return
+	}
+	w, cur := e.rt.want(), e.rt.running
+	e.kickLocked(now)
+	e.log.Info(source, "rate retarget: respawning the encode child (forced IDR, route stays up)", map[string]any{
+		"encoder": e.spec.Encoder, "ceilingKbps": e.rt.ceilKbps, "spawnKbps": w.kbps, "wasKbps": cur.kbps,
+		"scalePct": e.rt.scalePct, "fps": w.fps, "wasFps": cur.fps, "measuredKbps": int(measuredKbps)})
+}
+
+// kickLocked stops the current child for an immediate respawn (caller holds mu, runStop != nil).
+func (e *encoder) kickLocked(now time.Time) {
+	e.lastKick = now.UnixNano()
+	e.kicked = true
+	e.runStop()
 }
 
 // Next implements medialink.Source.
@@ -118,19 +174,35 @@ func (e *encoder) RequestKeyframe() {
 		return
 	}
 	if e.runStop != nil {
-		e.lastKick = now
-		e.runStop()
+		e.kickLocked(time.Unix(0, now))
 	}
 }
 
 // SetRateHint implements medialink.RateControlSource for the ffmpeg substitute. ffmpeg's CLI has no
-// live bitrate/fps channel (both are spawn-time), but RESOLUTION is honoured: the governor's
-// last-resort VRAM step updates the downscale ceiling and respawns the child so the encode-args
-// scaler rebuilds (RequestKeyframe uses the same respawn mechanism). The target is the SMALLER of the
-// route's negotiated ceiling and the hint, and a cleared hint (MaxHeight 0) restores the ceiling, so
-// the state always converges when the governor dedups to a single hint. Bitrate/fps stay spawn-time
-// only (reserved); logged so a hint is never silently dropped.
+// live bitrate/fps channel, so:
+//   - fps: LIVE - frames are dropped before stdin on an even PTS grid (fpsGate); the declared
+//     -framerate (RC bits/frame) follows on the next debounced respawn.
+//   - bitrate: the child respawns with the new ceiling when it differs materially (retarget: >= 15%,
+//     <= 1 respawn / 5 s; forced IDR, route stays up).
+//   - RESOLUTION: the governor's last-resort VRAM step updates the downscale ceiling and respawns at once
+//     (resCap anti-flap gate). Target = SMALLER of the negotiated ceiling and the hint; a cleared hint
+//     (MaxHeight 0) restores it, so the state converges when the governor dedups to a single hint.
 func (e *encoder) SetRateHint(h medialink.RateHint) {
+	now := time.Now()
+	e.mu.Lock()
+	prevCap := e.rt.capFPS
+	e.rt.hint(h.MaxBitrateKbps, h.MaxFPS)
+	gate := 0
+	if f := e.rt.effFPS(); f < e.rt.srcFPS {
+		gate = int(f + 0.5)
+	}
+	e.gateFPS.Store(int32(gate))
+	e.retargetLocked(now, 0)
+	e.mu.Unlock()
+	if h.MaxFPS != prevCap {
+		e.log.Info(source, "rate hint: fps cap on the ffmpeg substitute (pre-stdin drop, live)", map[string]any{
+			"encoder": e.spec.Encoder, "maxFPS": h.MaxFPS, "gateFps": gate})
+	}
 	want := e.baseMaxHeight
 	if h.MaxHeight > 0 && (want == 0 || h.MaxHeight < want) {
 		want = h.MaxHeight
@@ -146,27 +218,23 @@ func (e *encoder) SetRateHint(h medialink.RateHint) {
 		e.mu.Lock()
 		e.spec.MaxHeight = newMax
 		if e.runStop != nil {
-			e.runStop() // respawn with the new downscale ceiling
+			e.kickLocked(now) // respawn with the new downscale ceiling
 		}
 		e.mu.Unlock()
 		e.log.Info(source, "rate hint: resolution cap applied via child respawn (VRAM last resort)",
 			map[string]any{"maxHeight": newMax, "codedHeight": target, "hintHeight": h.MaxHeight, "base": e.baseMaxHeight})
-	}
-	if h.MaxBitrateKbps > 0 || h.MaxFPS > 0 {
-		e.log.Debug(source, "rate hint bitrate/fps on the ffmpeg substitute is reserved (spawn-time only) - ignored", map[string]any{
-			"maxBitrateKbps": h.MaxBitrateKbps, "maxFPS": h.MaxFPS})
 	}
 }
 
 // PipeStats implements medialink.PipelineReporter.
 func (e *encoder) PipeStats() medialink.PipelineStats {
 	e.mu.Lock()
-	restarts := e.restarts
+	restarts, ceil := e.restarts, e.rt.ceilKbps
 	e.mu.Unlock()
 	return medialink.PipelineStats{Encoder: e.spec.Encoder, OutFPS: e.out.value(), Restarts: restarts,
 		Dropped:       e.dropped.Load() + medialink.InnerDrops(e.src),
-		RateCapped:    medialink.InnerRateCapped(e.src),
-		QualityTarget: e.spec.QualityTarget, BudgetKbps: e.spec.BitrateKbps}
+		RateCapped:    medialink.InnerRateCapped(e.src) + e.fpsDrops.Load(),
+		QualityTarget: e.spec.QualityTarget, BudgetKbps: ceil}
 }
 
 // hwScaling reports whether the current argv puts a GPU scaler in the filter chain.
@@ -186,7 +254,8 @@ func (e *encoder) run(ctx context.Context) {
 		started := time.Now()
 		err := e.runOnce(ctx)
 		e.mu.Lock()
-		eof := e.srcEOF
+		eof, kicked := e.srcEOF, e.kicked
+		e.kicked = false
 		e.mu.Unlock()
 		if ctx.Err() != nil || eof {
 			return
@@ -194,6 +263,9 @@ func (e *encoder) run(ctx context.Context) {
 		e.mu.Lock()
 		e.restarts++
 		e.mu.Unlock()
+		if kicked && err == nil {
+			continue // deliberate respawn (keyframe / retarget / resolution): no backoff - the gap is the spawn
+		}
 		// GPU-scaler demotion (mirrors the decoder's hwaccel tier demotion): a child that dies
 		// without ever emitting an AU while a hardware MaxHeight scaler was in the filter chain
 		// means this ffmpeg build / driver has no usable scale_cuda|scale_qsv. Pin swscale and
@@ -229,7 +301,14 @@ func (e *encoder) runOnce(ctx context.Context) error {
 	e.runStop = rcancel
 	e.ptsq = e.ptsq[:0]
 	spec := e.spec // snapshot: SetRateHint can lower spec.MaxHeight concurrently
+	sr := e.rt.want()
+	e.rt.spawned(sr, time.Now())
+	spec.BitrateKbps, spec.FPS = sr.kbps, sr.fps
+	ceil, scale := e.rt.ceilKbps, e.rt.scalePct
 	e.mu.Unlock()
+	// spawn-rate evidence on the rig (rare: route start, PLI, retarget <= 1/5 s)
+	e.log.Info(source, "encode child spawn", map[string]any{"encoder": spec.Encoder,
+		"ceilingKbps": ceil, "spawnKbps": sr.kbps, "scalePct": scale, "fps": sr.fps, "maxHeight": spec.MaxHeight})
 
 	cmd := exec.CommandContext(rctx, e.ffmpeg, encodeArgs(spec, e.swScale.Load())...)
 	stdin, err := cmd.StdinPipe()
@@ -279,6 +358,7 @@ func (e *encoder) runOnce(ctx context.Context) error {
 // (child flushes + exits) and flags the whole encoder done.
 func (e *encoder) feed(ctx context.Context, stdin io.WriteCloser) error {
 	defer func() { _ = stdin.Close() }()
+	var gate fpsGate // receiver fps cap: drop here, on the source's newest-wins hand-off (no new queue)
 	for {
 		f, err := e.src.Next(ctx)
 		if err != nil {
@@ -303,6 +383,13 @@ func (e *encoder) feed(ctx context.Context, stdin io.WriteCloser) error {
 		pts := f.PTS
 		if pts == 0 {
 			pts = time.Now().UnixNano()
+		}
+		if !gate.pass(pts, int(e.gateFPS.Load())) {
+			e.fpsDrops.Add(1)
+			if f.Release != nil {
+				f.Release()
+			}
+			continue
 		}
 		e.mu.Lock()
 		if len(e.ptsq) < encPTSQueueCap {
@@ -343,7 +430,7 @@ func (e *encoder) readAUs(ctx context.Context, stdout io.Reader) error {
 			}
 		}
 		e.mu.Unlock()
-		e.out.tick()
+		e.out.tickBytes(len(au)) // bytes too: the retarget loop's measured output
 		select {
 		case e.frames <- f:
 		case <-ctx.Done(): // consumer gone - child teardown drains the rest
