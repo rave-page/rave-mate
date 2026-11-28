@@ -101,6 +101,22 @@ void rpw_source_freezes(struct rpw_capture *c, long *count, long long *last_ms, 
 void rpw_autocap(struct rpw_capture *c, int *level, int *coded_h, int *gen, char *reason, int n);
 long long rpw_enc_bytes(struct rpw_capture *c);
 int rpw_import_ok(struct rpw_capture *c);
+/* rpw_shm_upload: 1 when the last encoded frame came from an SHM (MemFd/MemPtr) producer via the CPU
+ * upload (rva_enc_frame_mem), 0 = zero-copy dmabuf import. */
+int rpw_shm_upload(struct rpw_capture *c);
+
+/* per-buffer route decision in on_process (exposed for the unit test, no PipeWire needed). */
+enum {
+	RPW_ROUTE_DROP = 0,         /* unusable buffer (no data / bad geometry / out of bounds) */
+	RPW_ROUTE_STORE_SHM = 1,    /* readback mode, SHM: to_rgba into the slot */
+	RPW_ROUTE_READBACK_DMA = 2, /* readback mode, dmabuf: EGL import + glReadPixels */
+	RPW_ROUTE_ENC_DMA = 3,      /* encode mode, dmabuf: zero-copy VA import */
+	RPW_ROUTE_ENC_SHM = 4,      /* encode mode, SHM: CPU upload to a VA surface */
+};
+/* rpw_test_route: kind 0=MemPtr 1=MemFd 2=DmaBuf; has_data = mapped pointer present. *out_stride = the
+ * effective SHM row stride. */
+int rpw_test_route(int enc_mode, int kind, int has_data, unsigned chunk_off, unsigned chunk_size, int chunk_stride,
+                   unsigned maxsize, int w, int h, unsigned *out_stride);
 int rpw_coded_w(struct rpw_capture *c);
 int rpw_coded_h(struct rpw_capture *c);
 /* AU hand-off ring telemetry: current fill, high-water mark, overflow drops. */

@@ -475,7 +475,11 @@ struct rpw_capture {
 		uint64_t mod;
 		int w, h, flip;
 		long long pts;
+		/* SHM producer (MemFd/MemPtr): mapped first row + row stride, valid while buf is held (np = 0) */
+		const unsigned char *shm;
+		int shm_stride;
 	} hq[4];
+	int shm_upload; /* last encoded frame came via the SHM CPU upload (telemetry) */
 	int hq_head, hq_n, hq_max, hq_hiwater, hq_win_peak;
 	/* auto coded-size controller state (encode thread; see ac_tick). rx_maxh = the receiver/router cap. */
 	int rx_maxh;
@@ -896,6 +900,42 @@ static void to_rgba(unsigned char *dst, const unsigned char *src, int w, int h, 
 			d += 4;
 		}
 	}
+}
+
+/* route_buffer: where on_process sends a buffer (RPW_ROUTE_*). SHM must be mapped, w x h x 4 rows at
+ * stride (>= w*4; a negative/bottom-up stride is unsupported) must fit in maxsize past the chunk offset.
+ * *out_stride = effective SHM row stride. Pure (unit-tested via rpw_test_route). */
+static int route_buffer(int enc_mode, uint32_t type, const void *data, uint32_t off, uint32_t size, int32_t cstride,
+                        uint32_t maxsize, int w, int h, uint32_t *out_stride) {
+	if (type == SPA_DATA_DmaBuf)
+		return enc_mode ? RPW_ROUTE_ENC_DMA : RPW_ROUTE_READBACK_DMA;
+	if (type != SPA_DATA_MemFd && type != SPA_DATA_MemPtr)
+		return RPW_ROUTE_DROP;
+	if (!data || size == 0 || w <= 0 || h <= 0 || cstride < 0)
+		return RPW_ROUTE_DROP;
+	uint64_t row = (uint64_t)w * 4;
+	uint64_t stride = cstride > 0 ? (uint64_t)cstride : row;
+	if (stride < row || stride > 0x7fffffff)
+		return RPW_ROUTE_DROP;
+	uint64_t need = stride * (uint64_t)(h - 1) + row;
+	if (maxsize > 0 && ((uint64_t)off > maxsize || need > (uint64_t)maxsize - off))
+		return RPW_ROUTE_DROP;
+	*out_stride = (uint32_t)stride;
+	return enc_mode ? RPW_ROUTE_ENC_SHM : RPW_ROUTE_STORE_SHM;
+}
+
+int rpw_test_route(int enc_mode, int kind, int has_data, unsigned chunk_off, unsigned chunk_size, int chunk_stride,
+                   unsigned maxsize, int w, int h, unsigned *out_stride) {
+	static const uint32_t kinds[] = {SPA_DATA_MemPtr, SPA_DATA_MemFd, SPA_DATA_DmaBuf};
+	if (kind < 0 || kind > 2)
+		return RPW_ROUTE_DROP;
+	static unsigned char dummy;
+	uint32_t st = 0;
+	int r = route_buffer(enc_mode, kinds[kind], has_data ? &dummy : NULL, chunk_off, chunk_size, chunk_stride,
+	                     maxsize, w, h, &st);
+	if (out_stride)
+		*out_stride = st;
+	return r;
 }
 
 static void store_shm(struct rpw_capture *c, const unsigned char *src, int stride) {
@@ -1538,6 +1578,8 @@ static void *enc_thread_main(void *arg) {
 		}
 		uint32_t fourcc = pe.fourcc;
 		uint64_t mod = pe.mod;
+		const unsigned char *shm = pe.shm;
+		int shm_stride = pe.shm_stride;
 		int w = pe.w, h = pe.h, flip = pe.flip;
 		long long pts = pe.pts;
 		rm_sender *tx = c->native_tx; /* native-TX switch, read under enc_mu */
@@ -1603,7 +1645,9 @@ static void *enc_thread_main(void *arg) {
 				int sync_now = c->enc_sync || gap == 0 || gap >= period * 3 / 2;
 				if (pts <= 0)
 					pts = now;
-				int rc = rva_enc_frame(c->enc, fourcc, mod, w, h, np, fds, off, str, flip, idr, &au, &aulen, &kf);
+				int rc = shm ? rva_enc_frame_mem(c->enc, fourcc, w, h, shm, shm_stride, flip, idr, &au, &aulen, &kf)
+				             : rva_enc_frame(c->enc, fourcc, mod, w, h, np, fds, off, str, flip, idr, &au, &aulen, &kf);
+				c->shm_upload = shm != NULL;
 				enc_mark_steps(c);
 				if (c->slow_us > 0 && c->height > 0) { /* test hook: encode cost ~ coded pixels (overload sim) */
 					long long d = (long long)c->slow_us * c->coded_h / c->height * c->coded_h / c->height;
@@ -1678,7 +1722,11 @@ static void on_process(void *data) {
 	struct spa_buffer *sb = last->buffer;
 	if (sb->n_datas >= 1) {
 		struct spa_data *d = &sb->datas[0];
-		if (d->type == SPA_DATA_DmaBuf) {
+		uint32_t sstride = 0;
+		int route = route_buffer(c->enc_mode || getenv("RPW_VA_ENC"), d->type, d->data,
+		                         d->chunk ? d->chunk->offset : 0, d->chunk ? d->chunk->size : 0,
+		                         d->chunk ? d->chunk->stride : 0, d->maxsize, c->width, c->height, &sstride);
+		if (route == RPW_ROUTE_READBACK_DMA || route == RPW_ROUTE_ENC_DMA) {
 			if (!c->va_probed && getenv("RPW_VA_PROBE")) { /* one-shot go/no-go for the VA import path */
 				c->va_probed = 1;
 				const char *cnode = getenv("RPW_EGL_DEVICE");
@@ -1701,99 +1749,113 @@ static void on_process(void *data) {
 					r, np, (unsigned long long)c->modifier, c->width, c->height,
 					cn[0], cn[1], cn[2], cn[3], cn[4], cn[5], cn[6], cn[7], cn[8], cn[9], cn[10], cn[11]);
 			}
-			/* vaapi-native encode mode: fused dmabuf -> VA import -> VPP NV12 -> H.264/HEVC AU.
-			 * Set via rpw_set_encode (production) or RPW_VA_ENC (low-level harness). */
-			if (c->enc_mode || getenv("RPW_VA_ENC")) {
-				enc_thread_start(c); /* B.2: lazy-create the dedicated encode thread */
-				if (c->enc_thread_on) {
-					/* Hand the NEWEST buffer to the encode thread and return - the callback never blocks
-					 * on VA (vaSyncSurface/vaMapBuffer run on the thread). Newest-wins at capture: if the
-					 * encoder is still busy with a pending buffer, requeue that stale one here (loop thread
-					 * -> safe) and keep the freshest. The thread requeues `last` after it has consumed the
-					 * dmabuf (implicit dmabuf sync makes the post-submit requeue safe, as before). */
-					/* B.3: PTS-grid gate - emit the newest frame per 1/fps slot (even pacing from a faster
-					 * source). Prefer the capture PTS (VRChat/Spout2PW carries it); fall back to a monotonic
-					 * arrival clock when the source has none. Tolerance period/4 keeps a jittery exactly-60
-					 * source (every frame) while decimating 120->60 cleanly. */
-					long long gpts = buffer_pts(sb);
-					if (gpts <= 0)
-						gpts = mono_ns();
-					int gfps = c->enc_fps;
-					int capf = __atomic_load_n(&c->cap_fps, __ATOMIC_RELAXED);
-					if (capf > 0 && (gfps <= 0 || capf < gfps))
-						gfps = capf; /* governor fps rung: same grid, coarser slot */
-					if (gfps > 0) {
-						long long period = 1000000000LL / gfps;
-						long long tol = period / 4;
-						/* source interval EMA (clamped to 2p): decimate ONLY a source that really runs
-						 * faster than the rate (VRChat 120 -> 60). A ~rate source with arrival jitter (no
-						 * header PTS: the arrival clock) must pass every frame - gating it on the grid
-						 * dropped every other frame of a 4K60 libfunnel source (capFps 30). */
-						if (c->grid_last_pts > 0 && gpts > c->grid_last_pts) {
-							long long d = gpts - c->grid_last_pts;
-							if (d > 2 * period)
-								d = 2 * period;
-							c->grid_src_iv = c->grid_src_iv ? (c->grid_src_iv * 7 + d) / 8 : d;
-						}
-						c->grid_last_pts = gpts;
-						if (c->grid_src_iv == 0 || c->grid_src_iv > period * 3 / 4) {
-							c->enc_grid_next = gpts + period; /* pass-through; keep the grid primed */
-						} else if (c->enc_grid_next == 0 || gpts + 4 * period < c->enc_grid_next) {
-							/* prime on the first frame; re-prime when PTS jumped BACK (new producer /
-							 * clock origin) instead of pacing everything out until it catches up */
-							c->enc_grid_next = gpts + period;
-						} else if (gpts + tol < c->enc_grid_next) {
-							PW.stream_queue(c->stream, last); /* sub-grid: pace it out (pre-encode skip) */
-							c->grid_drops++;
-							return;
-						} else {
-							c->enc_grid_next += period;
-							if (c->enc_grid_next <= gpts + tol) /* catch up after a gap / slow source */
-								c->enc_grid_next += ((gpts + tol - c->enc_grid_next) / period + 1) * period;
-						}
+		}
+		/* vaapi-native encode mode: fused dmabuf -> VA import (or SHM -> CPU upload to a VA surface) ->
+		 * VPP NV12 -> H.264/HEVC AU. Set via rpw_set_encode (production) or RPW_VA_ENC (harness). An SHM
+		 * producer (gst pipewiresink) must take this path too: the AU consumer never reads the RGBA slot,
+		 * so routing it to store_shm in encode mode delivered 0 AUs (capFps 0) with a healthy link. */
+		if (route == RPW_ROUTE_ENC_DMA || route == RPW_ROUTE_ENC_SHM) {
+			enc_thread_start(c); /* B.2: lazy-create the dedicated encode thread */
+			if (c->enc_thread_on) {
+				/* Hand the NEWEST buffer to the encode thread and return - the callback never blocks
+				 * on VA (vaSyncSurface/vaMapBuffer run on the thread). Newest-wins at capture: if the
+				 * encoder is still busy with a pending buffer, requeue that stale one here (loop thread
+				 * -> safe) and keep the freshest. The thread requeues `last` after it has consumed the
+				 * dmabuf (implicit dmabuf sync makes the post-submit requeue safe, as before). */
+				/* B.3: PTS-grid gate - emit the newest frame per 1/fps slot (even pacing from a faster
+				 * source). Prefer the capture PTS (VRChat/Spout2PW carries it); fall back to a monotonic
+				 * arrival clock when the source has none. Tolerance period/4 keeps a jittery exactly-60
+				 * source (every frame) while decimating 120->60 cleanly. */
+				long long gpts = buffer_pts(sb);
+				if (gpts <= 0)
+					gpts = mono_ns();
+				int gfps = c->enc_fps;
+				int capf = __atomic_load_n(&c->cap_fps, __ATOMIC_RELAXED);
+				if (capf > 0 && (gfps <= 0 || capf < gfps))
+					gfps = capf; /* governor fps rung: same grid, coarser slot */
+				if (gfps > 0) {
+					long long period = 1000000000LL / gfps;
+					long long tol = period / 4;
+					/* source interval EMA (clamped to 2p): decimate ONLY a source that really runs
+					 * faster than the rate (VRChat 120 -> 60). A ~rate source with arrival jitter (no
+					 * header PTS: the arrival clock) must pass every frame - gating it on the grid
+					 * dropped every other frame of a 4K60 libfunnel source (capFps 30). */
+					if (c->grid_last_pts > 0 && gpts > c->grid_last_pts) {
+						long long iv = gpts - c->grid_last_pts;
+						if (iv > 2 * period)
+							iv = 2 * period;
+						c->grid_src_iv = c->grid_src_iv ? (c->grid_src_iv * 7 + iv) / 8 : iv;
 					}
-					int np = sb->n_datas < RPW_MAX_PLANES ? (int)sb->n_datas : RPW_MAX_PLANES;
-					c->cap_frames++; /* captured frames handed to the encoder stage (CapFPS) */
-					pthread_mutex_lock(&c->enc_mu);
-					if (c->hq_n >= c->hq_max) { /* sustained overload: drop the OLDEST queued frame */
-						PW.stream_queue(c->stream, c->hq[c->hq_head].buf);
-						c->hq_head = (c->hq_head + 1) % 4;
-						c->hq_n--;
-						c->cap_drops++;
-						c->dropped++;
+					c->grid_last_pts = gpts;
+					if (c->grid_src_iv == 0 || c->grid_src_iv > period * 3 / 4) {
+						c->enc_grid_next = gpts + period; /* pass-through; keep the grid primed */
+					} else if (c->enc_grid_next == 0 || gpts + 4 * period < c->enc_grid_next) {
+						/* prime on the first frame; re-prime when PTS jumped BACK (new producer /
+						 * clock origin) instead of pacing everything out until it catches up */
+						c->enc_grid_next = gpts + period;
+					} else if (gpts + tol < c->enc_grid_next) {
+						PW.stream_queue(c->stream, last); /* sub-grid: pace it out (pre-encode skip) */
+						c->grid_drops++;
+						return;
+					} else {
+						c->enc_grid_next += period;
+						if (c->enc_grid_next <= gpts + tol) /* catch up after a gap / slow source */
+							c->enc_grid_next += ((gpts + tol - c->enc_grid_next) / period + 1) * period;
 					}
-					struct rpw_pend *pe = &c->hq[(c->hq_head + c->hq_n) % 4];
+				}
+				int np = sb->n_datas < RPW_MAX_PLANES ? (int)sb->n_datas : RPW_MAX_PLANES;
+				c->cap_frames++; /* captured frames handed to the encoder stage (CapFPS) */
+				pthread_mutex_lock(&c->enc_mu);
+				if (c->hq_n >= c->hq_max) { /* sustained overload: drop the OLDEST queued frame */
+					PW.stream_queue(c->stream, c->hq[c->hq_head].buf);
+					c->hq_head = (c->hq_head + 1) % 4;
+					c->hq_n--;
+					c->cap_drops++;
+					c->dropped++;
+				}
+				struct rpw_pend *pe = &c->hq[(c->hq_head + c->hq_n) % 4];
+				pe->shm = NULL;
+				pe->shm_stride = 0;
+				if (route == RPW_ROUTE_ENC_SHM) {
+					/* no copy here: the thread uploads from the mapped buffer it holds (<= hq_max held) */
+					pe->np = 0;
+					pe->shm = (const unsigned char *)d->data + d->chunk->offset;
+					pe->shm_stride = (int)sstride;
+				} else {
 					pe->np = np;
 					for (int p = 0; p < np; p++) {
 						pe->fds[p] = sb->datas[p].fd;
 						pe->off[p] = sb->datas[p].chunk ? sb->datas[p].chunk->offset : 0;
 						pe->str[p] = sb->datas[p].chunk ? sb->datas[p].chunk->stride : 0;
 					}
-					pe->fourcc = spa_to_drm_fourcc(c->fmt);
-					pe->mod = c->modifier;
-					pe->w = c->width;
-					pe->h = c->height;
-					pe->flip = want_flip(c, sb);
-					pe->pts = gpts; /* capture PTS, else arrival (monotonic) - never 0 */
-					pe->buf = last;  /* handed off; the thread requeues it */
-					c->hq_n++;
-					if (c->hq_n > c->hq_hiwater)
-						c->hq_hiwater = c->hq_n;
-					if (c->hq_n > c->hq_win_peak)
-						c->hq_win_peak = c->hq_n;
-					c->enc_pending = c->hq[c->hq_head].buf;
-					pthread_cond_signal(&c->enc_cv);
-					pthread_mutex_unlock(&c->enc_mu);
-					return;
 				}
+				pe->fourcc = spa_to_drm_fourcc(c->fmt);
+				pe->mod = c->modifier;
+				pe->w = c->width;
+				pe->h = c->height;
+				pe->flip = want_flip(c, sb);
+				pe->pts = gpts; /* capture PTS, else arrival (monotonic) - never 0 */
+				pe->buf = last;  /* handed off; the thread requeues it */
+				c->hq_n++;
+				if (c->hq_n > c->hq_hiwater)
+					c->hq_hiwater = c->hq_n;
+				if (c->hq_n > c->hq_win_peak)
+					c->hq_win_peak = c->hq_n;
+				c->enc_pending = c->hq[c->hq_head].buf;
+				pthread_cond_signal(&c->enc_cv);
+				pthread_mutex_unlock(&c->enc_mu);
+				return;
 			}
+			/* encode thread could not start: readback fallback (as before) */
+			route = route == RPW_ROUTE_ENC_DMA ? RPW_ROUTE_READBACK_DMA : RPW_ROUTE_STORE_SHM;
+		}
+		if (route == RPW_ROUTE_READBACK_DMA) {
 			if (!egl_import_frame(c, sb)) {
 				c->dmabuf_skipped++;
 				c->dropped++;
 			}
-		} else if (d->data && d->chunk && d->chunk->size > 0 && c->width > 0) {
-			uint32_t stride = d->chunk->stride ? d->chunk->stride : (uint32_t)(c->width * 4);
-			store_shm(c, (const unsigned char *)d->data + d->chunk->offset, (int)stride);
+		} else if (route == RPW_ROUTE_STORE_SHM) {
+			store_shm(c, (const unsigned char *)d->data + d->chunk->offset, (int)sstride);
 		} else {
 			c->dropped++;
 		}
@@ -2002,7 +2064,8 @@ long rpw_dropped(struct rpw_capture *c) { return c ? c->dropped : 0; }
 long rpw_dmabuf_skipped(struct rpw_capture *c) { return c ? c->dmabuf_skipped : 0; }
 
 /* rpw_set_encode switches the capture to fused dmabuf->VA encode mode (codec 0=H.264, 1=HEVC).
- * Must be called before any AU is consumed; the encoder is created lazily on the first dmabuf frame
+ * Must be called before any AU is consumed; the encoder is created lazily on the first frame (dmabuf
+ * import, or SHM CPU upload)
  * at the coded size (source height capped by max_h). Returns 1 when VA is usable (caller commits to
  * the AU path), 0 when VA is unavailable (caller falls back to the readback + ffmpeg path). */
 int rpw_set_encode(struct rpw_capture *c, int codec, int kbps, int max_h, int fps, const char *node, int quality_qp) {
@@ -2225,6 +2288,7 @@ void rpw_native_stages(struct rpw_capture *c, rpw_stage_snap *enc, rpw_stage_sna
 		rpw_hist_snap(&c->h_tx, tx);
 }
 int rpw_import_ok(struct rpw_capture *c) { return c ? c->import_ok : 0; }
+int rpw_shm_upload(struct rpw_capture *c) { return c ? c->shm_upload : 0; }
 int rpw_coded_w(struct rpw_capture *c) { return c ? c->coded_w : 0; }
 int rpw_coded_h(struct rpw_capture *c) { return c ? c->coded_h : 0; }
 /* AU-ring telemetry: current fill, high-water, and overflow drops (consumer-behind-the-ring). */

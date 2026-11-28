@@ -333,7 +333,7 @@ func (s *pwSource) PipeStats() medialink.PipelineStats {
 		qdepth = int(ns.queue_depth)
 		drops += uint64(ns.aus_dropped)
 	}
-	importOK := C.rpw_import_ok(s.h) != 0
+	importOK := C.rpw_import_ok(s.h) != 0 && C.rpw_shm_upload(s.h) == 0 // SHM upload = one CPU copy
 	now := time.Now()
 	_, outFPS := s.outRate.Rate(now) // AUs/s leaving the encoder (windowed; accurate on one read)
 	_, capFPS := s.capRate.Rate(now) // dmabuf frames/s captured
@@ -587,9 +587,12 @@ func (s *pwSource) encTelemetry() {
 		busyPct := float64(busy-lastBusy) / 10 / float64(now.Sub(lastT).Microseconds()) * 1000
 		lastBusy, lastT = busy, now
 		cw, ch := int(C.rpw_coded_w(s.h)), int(C.rpw_coded_h(s.h))
-		importPath := "egl-readback"
+		importPath := "none" // encode mode, nothing encoded yet
 		if C.rpw_import_ok(s.h) != 0 {
 			importPath = "va-dmabuf"
+			if C.rpw_shm_upload(s.h) != 0 {
+				importPath = "va-shm-upload"
+			}
 		}
 		if s.log != nil {
 			s.log.Info(source, "route encode telemetry", map[string]any{
@@ -693,6 +696,107 @@ func (s *pwSource) startEncodeRawQP(codec, qp int, node string) bool {
 
 // reconnectCount is the stream re-arm counter (tests).
 func (s *pwSource) reconnectCount() int64 { return int64(C.rpw_reconnects(s.h)) }
+
+// Buffer route decisions (shim RPW_ROUTE_*), for the routing unit test.
+const (
+	routeDrop                      = int(C.RPW_ROUTE_DROP)
+	routeStoreSHM                  = int(C.RPW_ROUTE_STORE_SHM)
+	routeReadbackDMA               = int(C.RPW_ROUTE_READBACK_DMA)
+	routeEncDMA                    = int(C.RPW_ROUTE_ENC_DMA)
+	routeEncSHM                    = int(C.RPW_ROUTE_ENC_SHM)
+	bufMemPtr, bufMemFd, bufDmaBuf = 0, 1, 2
+)
+
+// routeBuffer is the cgo seam for the shim's per-buffer route decision (tests).
+func routeBuffer(encMode bool, kind int, hasData bool, off, size uint32, stride int32, maxsize uint32, w, h int) (route int, effStride uint32) {
+	em, hd := 0, 0
+	if encMode {
+		em = 1
+	}
+	if hasData {
+		hd = 1
+	}
+	var st C.uint
+	r := int(C.rpw_test_route(C.int(em), C.int(kind), C.int(hd), C.uint(off), C.uint(size), C.int(stride),
+		C.uint(maxsize), C.int(w), C.int(h), &st))
+	return r, uint32(st)
+}
+
+// vaEncodeMem encodes n synthetic w x h BGRx frames through rva_enc_frame_mem (the SHM upload path) on
+// render node and returns the Annex-B AUs + keyframe flags (tests). Pattern: corners TL red, TR green,
+// BL blue, BR white; a moving grey bar elsewhere. Rows use a padded stride (w*4+256) to exercise stride.
+func vaEncodeMem(node string, codec, w, h, n int) (aus [][]byte, keys []bool, err error) {
+	cnode := C.CString(node)
+	defer C.free(unsafe.Pointer(cnode))
+	e := C.rva_enc_new(cnode, C.int(codec), C.int(w), C.int(h), 60, 20000, 0)
+	if e == nil {
+		return nil, nil, errors.New("rva_enc_new failed")
+	}
+	defer C.rva_enc_free(e)
+	stride := w*4 + 256
+	cbuf := C.malloc(C.size_t(stride * h))
+	if cbuf == nil {
+		return nil, nil, errors.New("malloc")
+	}
+	defer C.free(cbuf)
+	px := unsafe.Slice((*byte)(cbuf), stride*h)
+	const xrgb = 0x34325258 // DRM_FORMAT_XRGB8888 (bytes B,G,R,x = SPA BGRx)
+	collect := func(au *C.uchar, n C.int, kf C.int) {
+		if n > 0 {
+			aus = append(aus, C.GoBytes(unsafe.Pointer(au), n))
+			keys = append(keys, kf != 0)
+		}
+	}
+	for f := 0; f < n; f++ {
+		fillCorners(px, w, h, stride, f)
+		var au *C.uchar
+		var alen, kf C.int
+		idr := C.int(0)
+		if f == 0 {
+			idr = 1
+		}
+		if rc := C.rva_enc_frame_mem(e, xrgb, C.int(w), C.int(h), (*C.uchar)(cbuf), C.int(stride), 0, idr, &au, &alen, &kf); rc != 0 {
+			return aus, keys, fmt.Errorf("rva_enc_frame_mem frame %d: rc=%d", f, int(rc))
+		}
+		collect(au, alen, kf)
+	}
+	var au *C.uchar
+	var alen, kf C.int
+	if rc := C.rva_enc_flush(e, &au, &alen, &kf); rc != 0 {
+		return aus, keys, fmt.Errorf("rva_enc_flush: rc=%d", int(rc))
+	}
+	collect(au, alen, kf)
+	return aus, keys, nil
+}
+
+// fillCorners paints the vaEncodeMem test pattern (BGRx) for frame f.
+func fillCorners(px []byte, w, h, stride, f int) {
+	bar := (f * 16) % w
+	for y := 0; y < h; y++ {
+		row := px[y*stride : y*stride+w*4]
+		for x := 0; x < w; x++ {
+			var b, g, r byte = 40, 40, 40
+			left, top := x < w/4, y < h/4
+			right, bottom := x >= w*3/4, y >= h*3/4
+			switch {
+			case left && top:
+				r = 255
+				b, g = 0, 0
+			case right && top:
+				g = 255
+				b, r = 0, 0
+			case left && bottom:
+				b = 255
+				g, r = 0, 0
+			case right && bottom:
+				b, g, r = 255, 255, 255
+			case x >= bar && x < bar+32:
+				b, g, r = 160, 160, 160
+			}
+			row[x*4], row[x*4+1], row[x*4+2], row[x*4+3] = b, g, r, 255
+		}
+	}
+}
 
 // qpNext is the cgo seam for the pure constant-quality ceiling controller (rva_qp_next): cgo cannot
 // live in a _test.go file, so the controller unit test calls this wrapper with injected rates.
