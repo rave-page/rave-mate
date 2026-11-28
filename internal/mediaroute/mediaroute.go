@@ -298,18 +298,18 @@ func (m *Manager) scan() {
 		}
 		switch {
 		case measured > 0:
-			m.log.Info(source, "sharing sender at its MEASURED frame rate (Spout frame counter)", map[string]any{
-				"sender": n, "measuredFPS": fmt.Sprintf("%.1f", measured), "advertisedFPS": fps, "w": w, "h": h})
+			by := "Spout frame counter"
+			if !counter {
+				by = "GPU frame compare"
+			}
+			m.log.Info(source, "sharing sender at its MEASURED frame rate", map[string]any{
+				"sender": n, "measuredFPS": fmt.Sprintf("%.1f", measured), "advertisedFPS": fps, "by": by, "w": w, "h": h})
 		case !counter && fps > 30:
-			// No counter: Spout carries no frame-rate metadata, so this number is an ASSUMPTION, and
-			// zero-copy capture is BLIND-paced at it - a 30 fps canvas advertised at 60 is captured,
-			// converted and encoded twice per frame (measured on the 2-PC rig: wire 62 fps). With the
-			// counter the encoder child encodes only new frames and this rate is just a ceiling.
-			m.log.Info(source, "sharing sender at an ASSUMED frame rate - it publishes no Spout frame counter, so capture is blind-paced", map[string]any{
-				"sender": n, "assumedFPS": fps, "w": w, "h": h,
-				"hint": "enable frame counting for the sending app (SpoutSettings: frame count) so only new frames " +
-					"are encoded, or set the MediaLink frame-rate cap to the source's rate - otherwise a slower " +
-					"source is captured and encoded twice per frame"})
+			// No counter: Spout carries no frame-rate metadata, so this number is an ASSUMPTION until
+			// a live zero-copy route measures the producer. Duplicates are not encoded either way: the
+			// encoder child's exact GPU compare skips them (it still pays one copy per tick).
+			m.log.Info(source, "sharing sender at an ASSUMED frame rate until a live route measures it - it publishes no Spout frame counter", map[string]any{
+				"sender": n, "assumedFPS": fps, "w": w, "h": h})
 		}
 		desc := medialink.SourceDesc{ID: "spout:" + n, Name: n, Kind: medialink.KindVideo,
 			Codec: medialink.CodecNRGBA, Width: w, Height: h, FPS: fps}
@@ -353,17 +353,29 @@ type fpsObs struct {
 // advertFPS picks sender n's advertised rate. With a Spout frame counter: the MEASURED producer rate
 // once two readings exist (rounded, clamped to [minMeasuredFPS, defaultFPSAdv]; a reading with no
 // progress keeps the last rate - a static picture is not a slow source), re-advertised only on a
-// material change. Without one: the assumed defaultFPSAdv. The MediaLink fps cap always wins.
-// measured > 0 = the rate came from the counter; counter = the sender publishes one at all.
+// material change. Without one: the rate the encoder child's GPU frame compare measured on a live
+// route (compareFPS), else the assumed defaultFPSAdv. The MediaLink fps cap always wins.
+// measured > 0 = the rate was measured; counter = the sender publishes a frame counter at all.
 func (m *Manager) advertFPS(n string, prev medialink.SourceDesc, had bool) (fps, measured float64, counter bool) {
 	fps = defaultFPSAdv
 	f, ok := m.senderFrame(n)
+	var cmpFPS float64
+	var cmpSat bool
+	if !ok {
+		cmpFPS, cmpSat = m.compareFPS(n) // router lock: taken before m.mu, never inside it
+	}
 	now := m.now()
 	m.mu.Lock()
 	o := m.rates[n]
 	switch {
 	case !ok:
-		delete(m.rates, n)
+		// No counter: the encoder child's GPU frame compare measures the producer on live routes.
+		if o == nil {
+			o = &fpsObs{}
+			m.rates[n] = o
+		}
+		compareObs(o, cmpFPS, cmpSat)
+		measured = o.fps
 	case o == nil:
 		m.rates[n] = &fpsObs{frame: f, at: now}
 	default:

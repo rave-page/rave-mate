@@ -73,6 +73,7 @@ type mfBridge struct {
 	baseOutW   int
 	baseOutH   int
 	resCap     *resCapGate
+	lastMaxFPS atomic.Int64 // last live fps cap the child accepted (0 = negotiated rate)
 	subOnce    sync.Once
 	sub        atomic.Pointer[encoder]
 	subReady   chan struct{} // closed when sub is live (or when substitution gave up)
@@ -286,6 +287,7 @@ func (b *mfBridge) routeTelemetry(ctx context.Context) {
 	t := time.NewTicker(routeTelemetryEvery)
 	defer t.Stop()
 	var prevBytes, prevCount uint64
+	nocmpLogged := false
 	prev := time.Now()
 	for {
 		select {
@@ -308,13 +310,19 @@ func (b *mfBridge) routeTelemetry(ctx context.Context) {
 			kbps = float64(dB) * 8 / 1000 / secs
 		}
 		b.noteNoContent(dN, perFrame)
+		if st.FrameDetect == mfenc.DetectBlindNoCompare && !nocmpLogged {
+			nocmpLogged = true
+			b.log.Info(source, "sender publishes no Spout frame counter and the GPU frame compare is unavailable on this device - capture is blind-paced (duplicates are encoded)", map[string]any{
+				"adapter": b.adapterName, "tickFps": st.TickFPS})
+		}
 		b.log.Info(source, "route encode telemetry", map[string]any{
 			"engine": st.Encoder, "tier": tierLabel(st.SoftwareEncode), "drive": st.Drive,
 			// capSync is not cosmetic: it decides whether the shared-texture read is coherent at
 			// all, and only the log makes the field's branch visible.
 			"capture": captureLabel(b.zeroCopy), "capSync": st.CapSync, "device": st.DevPolicy,
-			// New-frame gating: capFps vs srcFps vs dupSkips says whether duplicates are skipped
-			// (srcFps > 0) or the sender is blind-paced (no Spout frame counter).
+			// New-frame gating: detect names the detector (counter / gpu-compare / blind[-nocmp]);
+			// capFps vs srcFps vs dupSkips says how many duplicates it skipped.
+			"detect": st.FrameDetect,
 			"capFps": fmt.Sprintf("%.1f", st.CapFPS), "srcFps": fmt.Sprintf("%.1f", st.SrcFPS), "dupSkips": st.DupSkips,
 			"encPool": st.EncPool, "encPoolGrows": st.EncPoolGrows,
 			"mtxTimeouts": st.MtxTimeouts, "capStaleMs": fmt.Sprintf("%.0f", st.CapStaleMs),
@@ -637,8 +645,8 @@ func (b *mfBridge) RequestKeyframe() {
 // Ladder order (RateHint doc): BITRATE is the live lever (b.enc.SetBitrate, no reopen) and clears
 // most congestion; RESOLUTION is now LIVE too - the Zig child re-types its encoder MFT + NV12 pool to
 // the capped coded size (the republished destination geometry is unchanged). resCap rate-limits the
-// change so it cannot flap, and the cap never exceeds the open-time coded size. FPS stays reserved
-// (logged, never silently dropped). A mid-route ffmpeg substitute gets the hint too.
+// change so it cannot flap, and the cap never exceeds the open-time coded size. FPS is LIVE as well
+// (tick period in the child). A mid-route ffmpeg substitute gets the hint too.
 func (b *mfBridge) SetRateHint(h medialink.RateHint) {
 	if sub := b.sub.Load(); sub != nil {
 		sub.SetRateHint(h) // substituted: the hint must reach the engine actually running
@@ -660,9 +668,13 @@ func (b *mfBridge) SetRateHint(h medialink.RateHint) {
 			}
 		}
 	}
-	if h.MaxFPS > 0 {
-		b.log.Debug(source, "rate hint: fps cap not yet live on the native path (reserved); applied bitrate + resolution", map[string]any{
-			"maxFPS": h.MaxFPS, "maxHeight": h.MaxHeight, "maxBitrateKbps": h.MaxBitrateKbps})
+	// FPS is live too (proto v7): the child changes only its capture/encode tick period, clamped to
+	// [1, negotiated rate] - no reopen, no IDR. MaxFPS 0 (or >= negotiated) restores the negotiated
+	// rate; SetMaxFPS dedupes repeats, so the governor's steady-state hints cost nothing.
+	if b.enc != nil && int64(h.MaxFPS) != b.lastMaxFPS.Load() && b.enc.SetMaxFPS(h.MaxFPS) {
+		b.lastMaxFPS.Store(int64(h.MaxFPS))
+		b.log.Info(source, "rate hint: fps cap applied live (native MF)", map[string]any{
+			"maxFPS": h.MaxFPS, "negotiatedFPS": b.spec.FPS})
 	}
 }
 
@@ -694,7 +706,8 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		Restarts: st.Restarts, LatP50Ms: st.LatP50Ms, LatP99Ms: st.LatP99Ms,
 		QueueDepth: st.QueueDepth, ChildCPUPct: st.ChildCPUPct,
 		ZeroCopy: st.ZeroCopy, CapFPS: st.CapFPS, CapSkips: st.CapSkips,
-		DupSkips: st.DupSkips, SrcFPS: st.SrcFPS, EncPool: st.PoolDepth, EncPoolGrows: st.PoolGrows,
+		DupSkips: st.DupSkips, SrcFPS: st.SrcFPS, FrameDetect: st.Detector, TickFPS: st.TickFPS,
+		EncPool: st.PoolDepth, EncPoolGrows: st.PoolGrows,
 		MtxTimeouts: st.MtxTimeouts, SrcErrors: st.SrcErrors, CapStaleMs: st.CapStaleMs,
 		CapSync:      capSyncLabel(st.CapFlags),
 		AdapterMoved: st.AdapterMoved,

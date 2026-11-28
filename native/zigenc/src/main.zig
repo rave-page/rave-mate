@@ -12,6 +12,8 @@
 //!    "dfmt":<DXGI fmt>,"dname":"<dest sender>","in_ring_kb":..}
 //!   {"op":"close","sid":1} | {"op":"bitrate","sid":1,"kbps":..} | {"op":"idr","sid":1}
 //!   {"op":"capheight","sid":1,"out_w":..,"out_h":..} (proto v4: live coded-resolution cap)
+//!   {"op":"fps","sid":1,"tick_n":..,"tick_d":..} (proto v7: live fps cap, 0 = clear; open takes the
+//!    same two fields as the initial cap)
 //!   proto v5 (network receive, netrx.zig): open gains "null_dec" (no decoder/destination: GPU-free
 //!   tests) + "net_blk" (512 B telemetry block after the inbound ring);
 //!   {"op":"netrx","sid":1,"pinfo":<hex WSAPROTOCOL_INFOW>,"peer":"a.b.c.d:p","enc":..,"token":..,
@@ -223,15 +225,19 @@ const off_dec_mtx_timeouts = 200;
 // (w<<32 | h). The parent reads these to confirm the receiver VRAM cap engaged at the right size.
 const off_dec_resizes = 208;
 const off_dec_coded = 216;
-// New-frame gating (src:"spout", 224..239): ticks whose sender frame counter had not advanced, so
-// copy + CSC + encode were skipped (no duplicate P-frame); and counter advances seen = the
-// PRODUCER's frame count (the parent derives the real source rate from it). Both stay 0 when the
-// sender publishes no counter (blind pacing, capFlags bit 4 clear).
+// New-frame gating (src:"spout", 224..239): tick slots found to be duplicates - by the sender's frame
+// counter (copy + CSC + encode skipped) or by the GPU compare (CSC + encode skipped) - and new frames
+// seen = the PRODUCER's frame count (counter advances + compare "changed" verdicts; the parent derives
+// the real source rate from it). Both stay 0 on blind pacing (capFlags bits 4+5 clear).
 const off_dup_skips = 224;
 const off_src_frames = 232;
 // NV12 input pool (every encode session): live depth + how often it grew under encoder pressure.
 const off_pool_depth = 240;
 const off_pool_grows = 244;
+// GPU compare (capFlags bit 5): verdicts not ready inside the budget (encoded anyway, never a miss),
+// and the EWMA issue->verdict latency in us (copy + compare GPU time + queueing).
+const off_cmp_timeouts = 248;
+const off_cmp_lat_us = 252;
 
 // fault_after_frames > 0: crash the process after N encoded frames (test hook - proves
 // route continuity across an encoder-child death; parent injects on first spawn only).
@@ -308,6 +314,12 @@ const Session = struct {
     // above source), so the child never computes geometry.
     want_cap_w: i32 = 0,
     want_cap_h: i32 = 0,
+    // want_tick_*: a pending LIVE frame-rate cap (proto v7 "fps" op; want_tick_set = pending; n 0 =
+    // clear, back to the negotiated rate). open's tick_n/d preload it: the cap a reopen after a child
+    // restart must keep. The session thread clamps to [1 fps, negotiated rate] (tickPeriod).
+    want_tick_n: i32 = 0,
+    want_tick_d: i32 = 1,
+    want_tick_set: bool = false,
     closing: bool = false,
 
     thread: ?std.Thread = null,
@@ -570,33 +582,34 @@ fn sessionMain(s: *Session) void {
     var fed_frames: u64 = 0;
     var feed_fails: u32 = 0;
     var busy_drops: u32 = 0;
+    // Live fps cap (proto v7): the parent pushes frames at ITS rate; a capped session encodes at most
+    // one per `period` (base = the negotiated rate, never exceeded) and consumes the rest unencoded.
+    const base: u64 = @intCast(@max(@divTrunc(std.time.ns_per_s * @as(i64, @max(s.fps_d, 1)), @max(@as(i64, s.fps_n), 1)), 1_000_000));
+    var period = base; // an open-time cap arrives through the mailbox (want_tick_set at open)
+    var next_due: u64 = 0;
     while (true) {
         _ = WaitForSingleObject(s.ev_frame, 20);
-        var want_idr = false;
-        var want_kbps: u32 = 0;
-        var cap_w: i32 = 0;
-        var cap_h: i32 = 0;
-        var closing = false;
-        {
-            s.mu.lock();
-            defer s.mu.unlock();
-            want_idr = s.want_idr;
-            want_kbps = s.want_kbps;
-            cap_w = s.want_cap_w;
-            cap_h = s.want_cap_h;
-            closing = s.closing;
-            s.want_idr = false;
-            s.want_kbps = 0;
-            s.want_cap_w = 0;
-            s.want_cap_h = 0;
-        }
-        if (closing) break;
-        if (want_idr) enc.forceIDR();
-        if (want_kbps > 0) _ = enc.setBitrate(want_kbps);
-        if (cap_w > 0 and cap_h > 0 and enc.reconfigureOutput(cap_w, cap_h, sink) == -2) break; // device lost
+        const m = drainMailbox(s);
+        if (m.closing) break;
+        if (m.idr) enc.forceIDR();
+        if (m.kbps > 0) _ = enc.setBitrate(m.kbps);
+        if (m.cap_w > 0 and m.cap_h > 0 and enc.reconfigureOutput(m.cap_w, m.cap_h, sink) == -2) break; // device lost
+        if (m.tick_set) period = tickPeriod(base, m.tick_n, m.tick_d);
         const seq = s.hdr.frameSeq();
         if (seq != last_seq) {
             last_seq = seq;
+            if (period > base) {
+                // A quarter-period tolerance keeps a 60 -> 30 cap at every 2nd frame despite capture
+                // jitter; a late frame resyncs the grid instead of bursting to catch up.
+                const now = qpcNs();
+                if (now + period / 4 < next_due) {
+                    s.hdr.setConsSeq(seq);
+                    _ = SetEvent(s.ev_cons);
+                    continue;
+                }
+                const nd = next_due + period;
+                next_due = if (nd + period < now) now + period else nd;
+            }
             fed_frames += 1;
             s.fed += 1;
             if (fault_after_frames > 0 and fed_frames == fault_after_frames) {
@@ -641,17 +654,38 @@ fn sessionMain(s: *Session) void {
 }
 
 // Mailbox is one drained control snapshot (stdin thread â†’ session thread).
-const Mailbox = struct { idr: bool, kbps: u32, cap_w: i32, cap_h: i32, closing: bool };
+const Mailbox = struct { idr: bool, kbps: u32, cap_w: i32, cap_h: i32, closing: bool, tick_set: bool, tick_n: i32, tick_d: i32 };
 
 fn drainMailbox(s: *Session) Mailbox {
     s.mu.lock();
     defer s.mu.unlock();
-    const m = Mailbox{ .idr = s.want_idr, .kbps = s.want_kbps, .cap_w = s.want_cap_w, .cap_h = s.want_cap_h, .closing = s.closing };
+    const m = Mailbox{ .idr = s.want_idr, .kbps = s.want_kbps, .cap_w = s.want_cap_w, .cap_h = s.want_cap_h, .closing = s.closing, .tick_set = s.want_tick_set, .tick_n = s.want_tick_n, .tick_d = s.want_tick_d };
     s.want_idr = false;
     s.want_kbps = 0;
     s.want_cap_w = 0;
     s.want_cap_h = 0;
+    s.want_tick_set = false;
     return m;
+}
+
+// tickPeriod is the capture/encode tick period for a live fps cap n/d, bounded to [base, 1 s]: never
+// faster than the negotiated rate (base = its period), never slower than 1 fps. n <= 0 = no cap.
+// The encoder's own frame rate attribute stays the negotiated one: a cap only spaces the samples
+// (PTS is the capture clock), so no media-type change, no reopen and no keyframe is involved.
+fn tickPeriod(base: u64, n: i32, d: i32) u64 {
+    if (n <= 0) return base;
+    const dd: u64 = @intCast(@max(d, 1));
+    const p = std.time.ns_per_s * dd / @as(u64, @intCast(n));
+    return std.math.clamp(p, base, std.time.ns_per_s);
+}
+
+test "tickPeriod: bounded to [negotiated rate, 1 fps]" {
+    const base: u64 = std.time.ns_per_s / 60;
+    try std.testing.expectEqual(base, tickPeriod(base, 0, 1)); // clear
+    try std.testing.expectEqual(std.time.ns_per_s / 30, tickPeriod(base, 30, 1));
+    try std.testing.expectEqual(base, tickPeriod(base, 240, 1)); // above negotiated: clamped down
+    try std.testing.expectEqual(@as(u64, std.time.ns_per_s), tickPeriod(base, 1, 10)); // 0.1 fps: clamped to 1
+    try std.testing.expectEqual(@as(u64, 1001 * std.time.ns_per_s / 30000), tickPeriod(base, 30000, 1001));
 }
 
 // spoutLoop is the zero-copy session body: pace, capture only what is NEW, encode. ALLOCATION-FREE
@@ -663,7 +697,14 @@ fn drainMailbox(s: *Session) Mailbox {
 // source twice per frame (measured on the 2-PC rig) and the receiver decoded it twice. When the
 // sender publishes Spout's frame counter (cap.FrameCounter: named semaphore, read-only, no GL, no
 // pixels) a due tick whose counter has not advanced does nothing but poll again shortly; the
-// negotiated rate stays the CAP. No counter = the old blind pacing, per sender.
+// negotiated rate stays the CAP.
+//
+// No counter (Spout's frame counting is off by default, so this is the common case): every due tick
+// still copies, then cap.FrameCmp compares that copy against the last ENCODED frame on the GPU,
+// exactly (one changed pixel = new), and a duplicate skips the CSC + encode. The copy stays - it is
+// the only read of the sender's texture the lock permits - so the counter remains the preferred
+// signal. A device where the compare cannot run (WARP, FL < 10, failed self-test) is blind-paced.
+// Detector per session: capFlags bit 4 counter, bit 5 gpu-compare, bit 6 compare unavailable.
 //
 // Keep-alive: a fully static source still encodes one frame per keepalive_ns, so liveness holds
 // wherever it is measured - the parent's frozen-source oracle (capFrames must move inside its 2 s
@@ -676,19 +717,23 @@ const keepalive_ns: u64 = 500 * std.time.ns_per_ms; // 2 fps: 4x margin under th
 fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
     const cap_n: i64 = if (s.cap_n > 0) @intCast(s.cap_n) else @intCast(s.fps_n);
     const cap_d: i64 = if (s.cap_d > 0) @intCast(s.cap_d) else 1;
-    const period: u64 = @intCast(@max(@divTrunc(std.time.ns_per_s * cap_d, @max(cap_n, 1)), 1_000_000));
+    // base = the negotiated rate's period (the ceiling); period = the live tick, base..1 s (proto v7 "fps").
+    const base: u64 = @intCast(@max(@divTrunc(std.time.ns_per_s * cap_d, @max(cap_n, 1)), 1_000_000));
+    var period = base; // an open-time cap (reopen after a restart) arrives through the mailbox
     // Poll cadence while a due tick waits for a new frame: a new frame is encoded within ~2 ms of
     // publish at 60 fps, and an idle session costs a few hundred cheap syscalls/s.
-    const poll_ms: u32 = @intCast(std.math.clamp(period / 8 / std.time.ns_per_ms, 1, 4));
+    var poll_ms: u32 = @intCast(std.math.clamp(period / 8 / std.time.ns_per_ms, 1, 4));
     const qpc0 = qpcNs();
     var next = qpc0;
     var live = true; // false after srcgone: session + encoder stay alive, capture stops
     var feed_fails: u32 = 0;
     var idr_due = true; // a session's first frame is never gated
     var last_feed: u64 = 0;
-    var gated = false; // last poll found a counter (mirrored in capFlags bit 4)
     var dup_skips: u64 = 0;
     var polling = false; // a due tick is waiting for a new frame
+    // Compare verdict budget: a third of a tick, 2..8 ms. A 4K verdict is ~1 ms on this rig; an
+    // unready one encodes (never a missed change), and the tick is resynced, never caught up.
+    var cmp_budget: u64 = std.math.clamp(period / 3, 2 * std.time.ns_per_ms, 8 * std.time.ns_per_ms);
     while (true) {
         // Sleep only up to the next tick (1..20 ms) - prompt for close/idr/bitrate, and never
         // a hot spin. timeBeginPeriod(1) is already set, so Sleep granularity is ~1 ms.
@@ -709,6 +754,17 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
         }
         if (m.kbps > 0) _ = enc.setBitrate(m.kbps);
         if (m.cap_w > 0 and m.cap_h > 0 and enc.reconfigureOutput(m.cap_w, m.cap_h, sink) == -2) break; // device lost
+        if (m.tick_set) {
+            // Live fps cap: only the tick spacing changes. The next tick moves to last + new period
+            // (a lowered cap does not fire early, a raised one does not wait out the old period).
+            const p = tickPeriod(base, m.tick_n, m.tick_d);
+            if (p != period) {
+                next = next - period + p;
+                period = p;
+                poll_ms = @intCast(std.math.clamp(period / 8 / std.time.ns_per_ms, 1, 4));
+                cmp_budget = std.math.clamp(period / 3, 2 * std.time.ns_per_ms, 8 * std.time.ns_per_ms);
+            }
+        }
         if (!live) {
             _ = enc.pump(sink); // async MFT events still arrive; keep draining the tail
             continue;
@@ -720,13 +776,20 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
         }
         const c = &s.cap_open.?;
         const fresh = c.fc.poll(now);
-        if ((fresh != .unknown) != gated) {
-            gated = fresh != .unknown;
-            c.flags = if (gated) c.flags | cap.flag_frame_counter else c.flags & ~cap.flag_frame_counter;
-            s.hdr.setCapFlags(c.flags);
+        const use_cmp = fresh == .unknown and c.compareReady(enc.ctx, enc.warp);
+        if (fresh == .unknown and c.cmp_state == .failed and c.flags & cap.flag_compare_off == 0) {
+            // ONE line (bit 6 is set right below): stderr reaches the parent's crash tail, the
+            // flag reaches route telemetry as detect=blind-nocmp.
+            std.debug.print("mfenc session {d}: no frame counter and GPU compare unavailable ({s}) - blind pacing\n", .{ s.sid, c.cmp_why });
         }
-        s.hdr.setU64At(off_src_frames, c.fc.advances);
-        if (fresh == .same and !idr_due and now - last_feed < keepalive_ns) {
+        const flags = detectFlags(c.flags, fresh != .unknown, use_cmp, c.cmp_state == .failed);
+        if (flags != c.flags) {
+            c.flags = flags;
+            s.hdr.setCapFlags(flags);
+        }
+        s.hdr.setU64At(off_src_frames, c.fc.advances + c.cmp_changes);
+        const force = idr_due or now - last_feed >= keepalive_ns;
+        if (fresh == .same and !force) {
             // Duplicate: nothing to capture. Counted once per elapsed tick slot (not per poll), and
             // `next` trails by at most one period, so the first new frame after a quiet spell is
             // not followed by a catch-up burst.
@@ -744,7 +807,12 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
         // evenly spaced, and the receiver's playout is PTS-locked.
         const pts_ns: i64 = s.pts0 + @as(i64, @intCast(now - qpc0));
         const t0 = now;
-        switch (c.feed(enc, @divTrunc(pts_ns, 100), sink)) {
+        const grab = c.feed(enc, @divTrunc(pts_ns, 100), sink, .{ .compare = use_cmp, .force = force, .budget_ns = cmp_budget });
+        if (use_cmp) {
+            s.hdr.setU32At(off_cmp_timeouts, c.cmp_timeouts);
+            s.hdr.setU32At(off_cmp_lat_us, @intCast(@min(c.cmp_lat_ns / std.time.ns_per_us, std.math.maxInt(u32))));
+        }
+        switch (grab) {
             .ok => {
                 s.hdr.bumpAt(off_cap_frames);
                 s.hdr.setLastCapNs(@intCast(qpcNs()));
@@ -758,6 +826,11 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
                 }
             },
             .timeout => s.hdr.bumpAt(off_mtx_timeouts),
+            // GPU compare: bit-identical to the last encoded frame. Copied, not converted, not encoded.
+            .dup => {
+                dup_skips += 1;
+                s.hdr.setU64At(off_dup_skips, dup_skips);
+            },
             // Encoder saturated for this tick: a SKIP, which is exactly what capSkips means. Never
             // a srcgone (that would recycle a perfectly healthy sender) and never a route end.
             .busy => s.hdr.bumpAt(off_cap_skips),
@@ -786,6 +859,28 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
             s.hdr.bumpAt(off_cap_skips);
         }
     }
+}
+
+// detectFlags sets at most one detector bit: counter (4), gpu-compare (5), or neither = blind
+// (6 also set when the compare was tried and is unavailable).
+fn detectFlags(flags: u32, counter: bool, compare: bool, cmp_off: bool) u32 {
+    var f = flags & ~(cap.flag_frame_counter | cap.flag_gpu_compare | cap.flag_compare_off);
+    if (counter) {
+        f |= cap.flag_frame_counter;
+    } else if (compare) {
+        f |= cap.flag_gpu_compare;
+    } else if (cmp_off) {
+        f |= cap.flag_compare_off;
+    }
+    return f;
+}
+
+test "detectFlags: one detector at a time" {
+    const base = cap.flag_zerocopy | cap.flag_named_mutex;
+    try std.testing.expectEqual(base | cap.flag_frame_counter, detectFlags(base | cap.flag_gpu_compare, true, true, false));
+    try std.testing.expectEqual(base | cap.flag_gpu_compare, detectFlags(base | cap.flag_frame_counter, false, true, false));
+    try std.testing.expectEqual(base | cap.flag_compare_off, detectFlags(base, false, false, true));
+    try std.testing.expectEqual(base, detectFlags(base | cap.flag_gpu_compare, false, false, false));
 }
 
 // publishPool mirrors the encoder's NV12 pool depth + growth count into the header (two stores).
@@ -1066,6 +1161,9 @@ const Cmd = struct {
     spfx: u32 = 0,
     body_max: u32 = 0,
     rfps: f64 = 0,
+    // proto v7 live fps cap: open (initial cap) + "fps" op. tick_n 0 = no cap / clear.
+    tick_n: i32 = 0,
+    tick_d: i32 = 1,
     preset: []const u8 = "",
     stream: u16 = 1,
     iseq: u64 = 0,
@@ -1132,6 +1230,11 @@ pub fn main(init: std.process.Init) !void {
     if (init.environ_map.get("RAVE_MATE_MFENC_POOL_INIT")) |v| { // test hook: force pool growth
         mf.pool_init = std.math.clamp(std.fmt.parseInt(usize, v, 10) catch 4, 1, 8); // 1 = grow on the first frame
     }
+    // "0" disables the counter-less GPU frame compare (cap.FrameCmp): blind pacing, detect=blind-nocmp.
+    // A/B + kill switch for a driver that misbehaves in a way the self-test cannot see.
+    if (init.environ_map.get("RAVE_MATE_MFENC_FRAMECMP")) |v| {
+        cap.framecmp_enabled = !std.mem.eql(u8, v, "0");
+    }
     if (init.environ_map.get("RAVE_MATE_MFDEC_PROBE_BANDS")) |v| {
         probe_bands = std.mem.eql(u8, v, "1");
     }
@@ -1158,7 +1261,7 @@ pub fn main(init: std.process.Init) !void {
     // parent version-gates sending it rather than relying on the silent-ignore alone.
     emit(struct {
         ev: []const u8 = "hello",
-        ver: u32 = 6, // v6: dir:"dec" sw (software decode) + threads + keygate
+        ver: u32 = 7, // v7: live fps cap ("fps" op + open tick_n/tick_d); v6: dir:"dec" sw + threads + keygate
         luid: i64,
         // Active policies: the only channel that says WHICH code path this child is running.
         dev: []const u8,
@@ -1245,6 +1348,9 @@ pub fn main(init: std.process.Init) !void {
                 .net_blk = dir_dec and cmd.net_blk,
                 .dec_threads = if (dir_dec) @min(cmd.threads, 16) else 0,
                 .keygate = dir_dec and (cmd.keygate or cmd.sw),
+                .want_tick_n = cmd.tick_n,
+                .want_tick_d = cmd.tick_d,
+                .want_tick_set = !dir_dec and cmd.tick_n > 0,
             };
             s.thread = try std.Thread.spawn(.{}, sessionMain, .{s});
             try sessions.put(cmd.sid, s);
@@ -1286,6 +1392,14 @@ pub fn main(init: std.process.Init) !void {
             // seq/nonce counter. Bounded mailbox; a full one drops (the parent re-sends on its cadence).
             s.mu.lock();
             if (s.net) |n| _ = n.rx.sendMeta(cmd.m);
+            s.mu.unlock();
+        } else if (std.mem.eql(u8, cmd.op, "fps")) {
+            // Live frame-rate cap (proto v7): tick_n/tick_d, 0 = clear. Changes only the tick period
+            // (no reopen, no IDR); the session clamps it to [1 fps, negotiated rate].
+            s.mu.lock();
+            s.want_tick_n = cmd.tick_n;
+            s.want_tick_d = cmd.tick_d;
+            s.want_tick_set = true;
             s.mu.unlock();
         } else if (std.mem.eql(u8, cmd.op, "capheight")) {
             // Live coded-resolution cap (proto v4). out_w/out_h carry the new even target dims the

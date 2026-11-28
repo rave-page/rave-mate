@@ -2020,6 +2020,7 @@ func (rm *RouteManager) Stats() []RouteStat {
 			s.UDP = &us
 		}
 		s.TCPReason = r.tcpReason
+		s.Source = r.sourceID
 		out = append(out, s)
 	}
 	return out

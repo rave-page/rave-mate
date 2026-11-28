@@ -32,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -82,6 +83,7 @@ const (
 	shmVer            = 2
 	protoVerZeroC     = 2 // minimum child hello.ver that may be asked for src:"spout"
 	protoVerCapHeight = 4 // minimum child hello.ver that understands the "capheight" live-cap op
+	protoVerFPS       = 7 // minimum child hello.ver that understands the "fps" live frame-rate cap op
 
 	// Zero-copy capture counters, child-written (design §3.2).
 	offCapFrames  = 64
@@ -103,12 +105,18 @@ const (
 	offBusyDrops = 124 // frames the encoder had no credit for in time (saturation, not breakage)
 
 	// New-frame gating (child-written, src:"spout"; mirrors zigenc off_dup_skips/off_src_frames).
-	offDupSkips         = 224 // tick slots skipped: sender frame counter had not advanced
-	offSrcFrames        = 232 // sender frame-counter advances seen = producer frames
+	offDupSkips         = 224 // tick slots found duplicate (frame counter unmoved, or GPU compare equal)
+	offSrcFrames        = 232 // producer frames seen (counter advances + compare "changed" verdicts)
 	capFlagFrameCounter = 1 << 4
+	capFlagGPUCompare   = 1 << 5 // no counter: exact GPU compare vs last encoded frame gates CSC+encode
+	capFlagCompareOff   = 1 << 6 // no counter, compare unavailable on the device: blind pacing
 	// NV12 input pool (every encode session; mirrors zigenc off_pool_depth/off_pool_grows).
 	offPoolDepth = 240
 	offPoolGrows = 244
+	// GPU compare telemetry (mirrors zigenc off_cmp_timeouts/off_cmp_lat_us): u32 verdicts not ready
+	// in budget, u32 EWMA issue->verdict latency in us.
+	offCmpTimeouts = 248
+	offCmpLatUs    = 252
 
 	// AU ring for a zero-copy session: half a second of bitstream, floor 4 MiB, ceiling
 	// 16 MiB - GEOMETRY-INDEPENDENT, so a sender resize costs zero SHM realloc.
@@ -910,6 +918,9 @@ type openCmd struct {
 	CapD   int    `json:"cap_d,omitempty"`
 	RingKB int    `json:"ring_kb,omitempty"`
 	PTS0   int64  `json:"pts0,omitempty"`
+	// proto v7: live fps cap in force at (re)open (omitted = the negotiated rate).
+	TickN int `json:"tick_n,omitempty"`
+	TickD int `json:"tick_d,omitempty"`
 	// dir:"dec" receive-side fields (omitted entirely on an encode session: absent = "enc").
 	Dir      string `json:"dir,omitempty"`
 	Codec    string `json:"codec,omitempty"`
@@ -946,6 +957,9 @@ func (c *procChild) openSession(s *ProcSession) (openedEv, error) {
 		cmd.Src, cmd.Sh, cmd.SFmt, cmd.SName = "spout", h, sfmt, name
 		cmd.CapN, cmd.CapD, cmd.RingKB = fpsN, fpsD, s.ringKB
 		cmd.PTS0 = time.Now().UnixNano()
+	}
+	if f := s.fpsCapNow(); f > 0 {
+		cmd.TickN, cmd.TickD = f, 1 // a reopen after a child restart keeps the live cap
 	}
 	err := c.send(cmd)
 	if err != nil {
@@ -1086,7 +1100,9 @@ type ProcSession struct {
 	// the route panel so a silently-degraded rig is visible instead of just slow.
 	degradeMu sync.Mutex
 	degrade   string
-	capOnce   sync.Once // one-shot warn when a live resolution cap hits an older child protocol
+	capOnce   sync.Once    // one-shot warn when a live resolution cap hits an older child protocol
+	fpsOnce   sync.Once    // same, for the live fps cap
+	fpsCap    atomic.Int32 // live fps cap sent to the child (0 = negotiated rate); re-sent at reopen
 	encFails  atomic.Uint32
 	healthy   atomic.Bool // an AU really came out (ledger proof-of-health)
 
@@ -1692,6 +1708,44 @@ func (s *ProcSession) SetCapHeight(w, h int) bool {
 	return s.child.send(map[string]any{"op": "capheight", "sid": s.sid, "out_w": w, "out_h": h}) == nil
 }
 
+// SetMaxFPS applies a LIVE frame-rate cap (proto v7 "fps" op): the child changes only its tick
+// period - no reopen, no keyframe - clamped to [1, negotiated rate]; fps <= 0 or >= the negotiated
+// rate restores it. Repeats of the current value send nothing. Returns false on an older child (cap
+// not applied; logged once) or a send failure.
+func (s *ProcSession) SetMaxFPS(fps int) bool {
+	neg := int(math.Ceil(s.fps))
+	if fps <= 0 || fps >= neg {
+		fps = 0
+	}
+	if int(s.fpsCap.Load()) == fps {
+		return true
+	}
+	s.child.mu.Lock()
+	ver := s.child.protoVer
+	s.child.mu.Unlock()
+	if ver < protoVerFPS {
+		s.fpsOnce.Do(func() {
+			Warnf("mfenc: encoder child protocol v%d < v%d - live fps cap not applied (negotiated rate stays)", ver, protoVerFPS)
+		})
+		return false
+	}
+	if s.child.send(map[string]any{"op": "fps", "sid": s.sid, "tick_n": fps, "tick_d": 1}) != nil {
+		return false
+	}
+	s.fpsCap.Store(int32(fps))
+	return true
+}
+
+func (s *ProcSession) fpsCapNow() int { return int(s.fpsCap.Load()) }
+
+// tickFPS is the session's effective capture/encode rate: the live cap, else the negotiated rate.
+func (s *ProcSession) tickFPS() float64 {
+	if f := s.fpsCapNow(); f > 0 {
+		return float64(f)
+	}
+	return s.fps
+}
+
 // counterRate turns a monotone child-side counter (SHM header) into a per-second rate over
 // ratewin's sliding window. It used to refresh its anchor ON READ over a 500 ms span, so CapFPS
 // depended on the polling phase: Stats() is read by emitTelemetry (1 Hz), mediaroute.cleanup
@@ -1893,6 +1947,7 @@ func (s *ProcSession) Stats() ProcStats {
 		Drive: s.drive, Software: s.swBound, DegradeReason: s.DegradeReason(), EncFails: s.encFails.Load(),
 		BusyDrops: s.busyDrops.Load(), AsyncAttr: s.asyncAttr, DevShared: s.devShared,
 		AdapterLUID: s.resLUID, AdapterName: s.adapterName}
+	st.TickFPS = s.tickFPS()
 	if st.AdapterLUID == 0 {
 		st.AdapterLUID = s.child.luid // pre-fix child sent no resolved LUID
 	}
@@ -1936,9 +1991,13 @@ func (s *ProcSession) Stats() ProcStats {
 		}
 		st.CapFPS = s.capRate.sample(st.CapFrames, time.Now())
 		st.DupSkips = atomic.LoadUint64(s.shm.u64(offDupSkips))
-		if st.FrameCounter = st.CapFlags&capFlagFrameCounter != 0; st.FrameCounter {
+		st.FrameCounter = st.CapFlags&capFlagFrameCounter != 0
+		st.Detector = frameDetector(st.CapFlags)
+		if st.FrameCounter || st.CapFlags&capFlagGPUCompare != 0 {
 			st.SrcFPS = s.srcRate.sample(atomic.LoadUint64(s.shm.u64(offSrcFrames)), time.Now())
 		}
+		st.CmpTimeouts = atomic.LoadUint32((*uint32)(unsafe.Add(s.shm.base, offCmpTimeouts)))
+		st.CmpLatMs = float64(atomic.LoadUint32((*uint32)(unsafe.Add(s.shm.base, offCmpLatUs)))) / 1000
 		st.EncBusyMs = s.busyRate.mean(atomic.LoadUint64(s.shm.u64(56)), st.CapFrames)
 	}
 	s.child.mu.Lock()
@@ -1946,6 +2005,19 @@ func (s *ProcSession) Stats() ProcStats {
 	s.child.mu.Unlock()
 	st.ChildCPUPct = s.child.cpuPercent()
 	return st
+}
+
+// frameDetector names the zero-copy new-frame detector from the child's capFlags (bits 4-6).
+func frameDetector(flags uint32) string {
+	switch {
+	case flags&capFlagFrameCounter != 0:
+		return DetectCounter
+	case flags&capFlagGPUCompare != 0:
+		return DetectGPUCompare
+	case flags&capFlagCompareOff != 0:
+		return DetectBlindNoCompare
+	}
+	return DetectBlind
 }
 
 // cpuPercent samples the child's CPU usage since the previous call (all sessions).

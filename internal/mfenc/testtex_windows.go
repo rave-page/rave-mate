@@ -56,6 +56,11 @@ func newTestTexture(adapterLUID int64, w, h int, fmt uint32, keyed bool, pixels 
 	return &testTexture{h: p, Share: uint64(share)}, nil
 }
 
+// Poke writes one 4-byte texel at (x,y) and submits it (gate producer: one changed pixel per frame).
+func (t *testTexture) Poke(x, y int, texel uint32) bool {
+	return t != nil && t.h != nil && C.mf_testtex_poke(t.h, C.int(x), C.int(y), C.uint(texel)) != 0
+}
+
 // Close releases the texture and the device that owns it.
 func (t *testTexture) Close() {
 	if t != nil && t.h != nil {

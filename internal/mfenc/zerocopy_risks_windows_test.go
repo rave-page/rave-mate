@@ -190,6 +190,7 @@ func TestZeroCopyRiskKeyedMutex(t *testing.T) {
 		t.Skip("no hardware H.264 MFT / D3D11 device")
 	}
 	requireEncExe(t)
+	blindPacing(t) // static texture: the test needs every tick captured, not only new frames
 	red, blue := [3]byte{255, 0, 0}, [3]byte{0, 0, 255}
 	tex, err := newTestTexture(0, riskW, riskH, dxgiB8G8R8A8UNorm, true, bgraBands(riskW, riskH, red, blue))
 	if err != nil {
@@ -320,6 +321,7 @@ func TestZeroCopyRiskChangedHandleRecycles(t *testing.T) {
 		t.Skip("no hardware H.264 MFT / D3D11 device")
 	}
 	requireEncExe(t)
+	blindPacing(t) // static texture: the test needs every tick captured, not only new frames
 	red, blue := [3]byte{255, 0, 0}, [3]byte{0, 0, 255}
 	green, white := [3]byte{0, 255, 0}, [3]byte{255, 255, 255}
 	texA, err := newTestTexture(0, riskW, riskH, dxgiB8G8R8A8UNorm, false, bgraBands(riskW, riskH, red, blue))

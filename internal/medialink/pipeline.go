@@ -147,11 +147,15 @@ type PipelineStats struct {
 	CapSkips    uint64  // pacing ticks skipped (previous encode still running)
 	MtxTimeouts uint64  // shared-texture mutex acquire timeouts (sender contention)
 	SrcErrors   uint64  // capture hard failures (CopyResource/acquire)
-	// DupSkips: tick slots skipped because the sender's frame counter had not advanced (no copy,
-	// CSC or encode - zigmedia new-frame gating); SrcFPS: the producer's real rate from that
-	// counter. Zero when the sender publishes no counter (blind pacing).
-	DupSkips uint64
-	SrcFPS   float64
+	// DupSkips: tick slots found to be duplicates - by the sender's frame counter (no copy, CSC or
+	// encode) or, without one, by the child's exact GPU compare against the last encoded frame (no
+	// CSC or encode). SrcFPS: the producer's real rate from that detector. FrameDetect names it
+	// ("counter" / "gpu-compare" / "blind" / "blind-nocmp"); TickFPS is the capture tick rate, so
+	// SrcFPS close to it means the producer may be at least that fast. Zero/empty on other paths.
+	DupSkips    uint64
+	SrcFPS      float64
+	FrameDetect string
+	TickFPS     float64
 	// EncPool/EncPoolGrows: native encoder NV12 input pool depth + on-demand growth count.
 	EncPool      uint32
 	EncPoolGrows uint32
