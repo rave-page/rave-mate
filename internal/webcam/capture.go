@@ -267,7 +267,9 @@ func (cf capFrame) release() {
 // c.frames (the distributor); it takes one more per network tap before fanning out.
 func (c *capture) newFrame(buf []byte) capFrame {
 	ref := videoshare.NewPixRef(buf, len(buf) == c.size, func(int32) { c.refBugs.Add(1) })
-	return capFrame{ref: ref, f: &medialink.Frame{Kind: medialink.KindVideo,
+	// PTS = pipe arrival (the closest clock to capture rawvideo carries), stamped BEFORE the newest-wins
+	// hand-offs: the encode feeder used to stamp it after them, so queueing jitter became PTS jitter.
+	return capFrame{ref: ref, f: &medialink.Frame{Kind: medialink.KindVideo, PTS: time.Now().UnixNano(),
 		Codec: medialink.CodecNRGBA, Payload: ref.Pix(), Release: ref.Release}}
 }
 
@@ -320,9 +322,14 @@ func captureArgsFor(goos string, d capDesc, input string) []string {
 	if d.InputFormat != "" { // request the codec that hits the advertised fps (MJPEG > raw yuyv422 over USB-2)
 		args = append(args, "-input_format", d.InputFormat)
 	}
+	// -fps_mode passthrough: one output frame per camera frame, as it arrives. The rawvideo muxer
+	// defaults to CFR at the input's declared -framerate, so a camera delivering below it (C920 in low
+	// light: exposure priority) got DUPLICATES written back-to-back to fill the grid - measured, ffmpeg
+	// 8: a 30-declared stream at 22.5 real -> 300 frames out, dup=75, ~30% of intervals < 5 ms. That was
+	// the rig's uneven wire (24-34 fps, half the gaps > 25 ms, playout repeats).
 	return append(args,
 		"-i", in,
-		"-an", "-pix_fmt", "rgba", "-f", "rawvideo", "-")
+		"-an", "-pix_fmt", "rgba", "-fps_mode", "passthrough", "-f", "rawvideo", "-")
 }
 
 // sleepCtx sleeps d or until ctx cancel; false when cancelled.

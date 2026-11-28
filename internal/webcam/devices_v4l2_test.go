@@ -98,7 +98,7 @@ func TestCaptureArgsLinux(t *testing.T) {
 	d := capDesc{Device: "HD Pro Webcam C920", W: 1280, H: 720, FPS: 30, InputFormat: "mjpeg"}
 	got := strings.Join(captureArgsFor("linux", d, "/dev/video2"), " ")
 	want := "-hide_banner -loglevel error -fflags nobuffer -f v4l2 -video_size 1280x720 -framerate 30 " +
-		"-input_format mjpeg -i /dev/video2 -an -pix_fmt rgba -f rawvideo -"
+		"-input_format mjpeg -i /dev/video2 -an -pix_fmt rgba -fps_mode passthrough -f rawvideo -"
 	if got != want {
 		t.Fatalf("argv = %q\nwant  %q", got, want)
 	}

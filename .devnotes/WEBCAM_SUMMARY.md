@@ -26,6 +26,13 @@ friendly name, ` #N` on duplicates) + `v4l2-ctl --list-formats-ext` modes (ffmpe
 locally: capture feeds network taps only. UVC control still Windows-only. Still the legacy ffmpeg
 → Go pipe; native (Zig/C) V4L2 capture is the follow-up per the realtime rule.
 
+Cadence (2026-11-28): capture output is `-fps_mode passthrough`. rawvideo defaulted to CFR at the
+declared rate, so a camera under its nominal fps (C920 low light = exposure priority) got duplicates
+written back-to-back (ffmpeg 8: 22.5 real of 30 -> dup=75/10 s, ~30% intervals < 5 ms) = the rig's
+uneven wire (24-34 fps, half gaps > 25 ms). Frames are PTS-stamped at pipe arrival, before the
+newest-wins hand-offs. A camera that really runs < 30 now shows as an even lower rate; check
+`v4l2-ctl -d /dev/videoN --get-ctrl exposure_dynamic_framerate` (older: `exposure_auto_priority`).
+
 ## UVC control
 
 Stateless DirectShow COM shim, stdlib syscall (no cgo/deps): FriendlyName match →
