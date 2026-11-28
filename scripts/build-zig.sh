@@ -85,11 +85,13 @@ case "$target" in
     echo "rave-mate-enc built + embed-staged ($ver, ${target:-native})"
     # --- zigkeeper: long-lived pure-D3D11 Spout sender host (native/zigkeeper → rave-mate-keeper.exe,
     # VRAM_FULL_CARD_POLICY 1b; config mediaLink.senderKeeper, default on). Ship beside rave-mate.exe.
-    # Not embedded yet: the self-updater swaps only the main exe (follow-up before default-on).
+    # Embed-staged like the encoder child (tag `encembed`): the self-updater swaps only the main exe.
     cd ../zigkeeper
     "$ZIG" build -Drelease ${target:+-Dtarget=$target}
     ls -la zig-out/bin
-    echo "rave-mate-keeper built ($ver, ${target:-native})"
+    mkdir -p "$ROOT/internal/senderkeeper/embedded"
+    cp -f zig-out/bin/rave-mate-keeper.exe "$ROOT/internal/senderkeeper/embedded/rave-mate-keeper.exe"
+    echo "rave-mate-keeper built + embed-staged ($ver, ${target:-native})"
     cd ../zigenc
     ;;
 esac

@@ -11,8 +11,6 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-
-	"rave.page/mate/internal/appdir"
 )
 
 // ExeName is the keeper sidecar beside rave-mate.exe.
@@ -57,9 +55,9 @@ func DialPipe() (Conn, error) {
 // broken away from any job (falls back without breakaway when the job forbids it - then the keeper
 // only lives as long as that job, which is why only the daemon - not in a job - should call this).
 func StartDetached() error {
-	exe := appdir.SidecarPath(ExeName)
+	exe := exePath()
 	if _, err := os.Stat(exe); err != nil {
-		return fmt.Errorf("keeper sidecar missing: %w", err)
+		return fmt.Errorf("keeper exe missing: %w", err)
 	}
 	const detached, breakaway = 0x00000008, 0x01000000 // DETACHED_PROCESS, CREATE_BREAKAWAY_FROM_JOB
 	try := func(flags uint32) error {
