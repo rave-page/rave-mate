@@ -159,11 +159,19 @@ type Manager struct {
 	// texture) is kept open for the next reconnect, so Resolume never re-registers GL/DX interop.
 	// Keyed by sender name (linkPrefix + source). Bounded: cap parkCap, drop-oldest on overflow
 	// (evicted inner sink is closed) - a held 4K sender is ~33 MB of texture, so an unbounded cache
-	// is a VRAM leak. Reaped after parkTTL idle.
+	// is a VRAM leak. Reaped after parkTTL idle, or earlier under sustained VRAM pressure (pressure.go).
 	parked map[string]*parkedSink
 	// stopping marks senders whose NEXT keptSink.Close must destroy (explicit StopReceive) rather
 	// than park. Keyed by sender name; deleted when consumed.
 	stopping map[string]bool
+
+	// VRAM-pressure release of parked senders (pressure.go). pressureFloor = enter threshold (MB).
+	pressureFloor func() uint64
+	pressure      pressureState // scan-loop goroutine only
+	// zero is the ONE shared transparent park frame (all zero, never written after make), grown to the
+	// largest sender up to zeroFrameCap; replaces a w*h*4 blank per parked sender. zeroMu guards it.
+	zeroMu sync.Mutex
+	zero   []byte
 }
 
 // New builds the manager (inert until Start).
@@ -178,6 +186,7 @@ func New(o Options) *Manager {
 		holds: map[string]Hold{}, holdLog: map[string]time.Time{}, release: map[string]*releaseState{}, attempts: map[string]*attemptState{},
 		pending: map[string]Admission{}, claimAt: map[string]time.Time{}, keeper: o.Keeper,
 	}
+	m.pressureFloor = m.systemFloorMB
 	m.hub = newCaptureHub(o.Log, o.OpenReceiver, o.PutPix)
 	if m.listSenders == nil {
 		m.listSenders = videoshare.ListSenders
@@ -225,6 +234,7 @@ func (m *Manager) Start(ctx context.Context) {
 				m.scan()
 				m.cleanup()
 				m.reapParked()
+				m.relievePressure()
 				m.claimRemembered()
 			}
 		}
@@ -626,7 +636,6 @@ type keptSink struct {
 	inner medialink.Sink
 	name  string
 	w, h  int
-	blank []byte // reused transparent gate-out frame (w*h*4); carried across park/reopen, one per sender lineage
 }
 
 var _ medialink.ZeroCopySink = (*keptSink)(nil)
@@ -654,13 +663,11 @@ func (k *keptSink) PipeStats() medialink.PipelineStats {
 // Close parks the inner sink (kept alive) unless StopReceive flagged it for destruction.
 func (k *keptSink) Close() error { return k.m.closeKept(k) }
 
-// parkedSink is a kept-alive republish sender held between routes. blank is the reusable transparent
-// frame buffer for this sender's dims (freed with the entry).
+// parkedSink is a kept-alive republish sender held between routes.
 type parkedSink struct {
 	inner medialink.Sink
 	w, h  int
 	since time.Time
-	blank []byte
 	// claimed: the destination of a REMEMBERED receive (claimed at start or kept for it): no idle TTL
 	// and last in line for cap eviction - it lives until the receive is forgotten or the app exits.
 	claimed bool
@@ -691,7 +698,7 @@ func (m *Manager) openReceiveSink(name string, w, h int) (medialink.Sink, error)
 			m.log.Info(source, "receive sink reopened - reusing kept-alive Spout sender (shared handle unchanged)",
 				map[string]any{"sender": name, "w": p.w, "h": p.h})
 		}
-		return &keptSink{m: m, inner: p.inner, name: name, w: p.w, h: p.h, blank: p.blank}, nil
+		return &keptSink{m: m, inner: p.inner, name: name, w: p.w, h: p.h}, nil
 	}
 	// Governor gate: a NEW sender registers a NEW GL/DX interop (Resolume opens the shared texture).
 	// On a saturated card that registration FAILS and can wedge Resolume. Under low free VRAM refuse
@@ -811,11 +818,12 @@ func (m *Manager) closeKept(k *keptSink) error {
 		m.parkKept(k)
 		return nil
 	}
-	if k.blank == nil {
-		k.blank = make([]byte, k.w*k.h*4) // one reusable blank per sender lineage; a 4K blank is 33 MB - never per-frame/per-close
-	}
-	if err := k.inner.Write(&medialink.Frame{Kind: medialink.KindVideo, Codec: medialink.CodecNRGBA, Payload: k.blank}); err != nil {
-		m.log.Debug(source, "kept-alive park: transparent frame write failed", map[string]any{"sender": k.name, "err": err.Error()})
+	if blank := m.zeroFrame(k.w * k.h * 4); blank != nil {
+		if err := k.inner.Write(&medialink.Frame{Kind: medialink.KindVideo, Codec: medialink.CodecNRGBA, Payload: blank}); err != nil {
+			m.log.Debug(source, "kept-alive park: transparent frame write failed", map[string]any{"sender": k.name, "err": err.Error()})
+		}
+	} else {
+		m.log.Debug(source, "kept-alive park: sender above the shared blank cap - last picture kept", map[string]any{"sender": k.name, "w": k.w, "h": k.h})
 	}
 	m.parkKept(k)
 	return nil
@@ -823,13 +831,13 @@ func (m *Manager) closeKept(k *keptSink) error {
 
 // parkKept adds k to the parked cache under the cap (drop-oldest; evicted inner closed outside mu).
 func (m *Manager) parkKept(k *keptSink) {
-	m.parkInner(k.name, k.inner, k.w, k.h, k.blank, m.isRemembered(k.name))
+	m.parkInner(k.name, k.inner, k.w, k.h, m.isRemembered(k.name))
 }
 
 // parkInner adds a sender to the parked cache under the cap. Eviction is drop-oldest among UNCLAIMED
 // entries first; a claimed (remembered) destination is evicted only when every entry is claimed.
-func (m *Manager) parkInner(name string, inner medialink.Sink, w, h int, blank []byte, claimed bool) {
-	entry := &parkedSink{inner: inner, w: w, h: h, since: m.now(), blank: blank, claimed: claimed}
+func (m *Manager) parkInner(name string, inner medialink.Sink, w, h int, claimed bool) {
+	entry := &parkedSink{inner: inner, w: w, h: h, since: m.now(), claimed: claimed}
 	m.mu.Lock()
 	var evName string
 	var evicted medialink.Sink
@@ -956,7 +964,7 @@ func (m *Manager) claimRemembered() {
 			m.log.Debug(source, "remembered destination claim failed", map[string]any{"sender": name, "err": err.Error()})
 			continue
 		}
-		m.parkInner(name, inner, r.W, r.H, nil, true)
+		m.parkInner(name, inner, r.W, r.H, true)
 		m.log.Info(source, "remembered destination claimed at start - kept for the session (Resolume sees one sender, once)",
 			map[string]any{"sender": name, "w": r.W, "h": r.H, "attempt": a.Attempt})
 	}

@@ -91,7 +91,7 @@ func TestParkEvictionSparesClaimed(t *testing.T) {
 	for i := 0; i < parkCap; i++ {
 		now = now.Add(time.Second)
 		inner, _ := sf.open("x", 8, 4)
-		m.parkInner(linkPrefix+"other"+string(rune('a'+i)), inner, 8, 4, nil, false)
+		m.parkInner(linkPrefix+"other"+string(rune('a'+i)), inner, 8, 4, false)
 	}
 	m.mu.Lock()
 	_, kept := m.parked[linkPrefix+"VRC"]
