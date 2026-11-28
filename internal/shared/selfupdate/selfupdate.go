@@ -1,7 +1,8 @@
 // Package selfupdate gives a desktop build an in-app updater: poll a JSON manifest on the
 // same feed the binary was published to, and, on confirm, download the new executable, verify
-// its SHA-256, swap it in (Windows-safe rename dance), and relaunch. Shared by rave-mate and
-// rave-app - each passes its own feed URL, current build, and (optional) update public key.
+// its SHA-256, swap it in (Windows: rename dance; Linux: atomic rename(2) keeping <exe>.prev),
+// and relaunch. Shared by rave-mate and rave-app - each passes its own feed URL, current build,
+// and (optional) update public key.
 //
 // "Newer" is decided by the manifest's monotonic Build number (CI pipeline id), not semver -
 // dev builds carry a "-branch.sha" prerelease that semver can't order. An empty feed URL = a
@@ -39,10 +40,11 @@ const manifestName = "latest.json"
 // the exiting old process for the lock and lose (then forward-show + exit → "app didn't start").
 const AwaitRestartEnv = "RAVE_AWAIT_RESTART"
 
-// Release is the decoded update manifest (written by CI - see the deploy job). url/sha256 are
-// the updater's target: a VERSIONED raw exe so the fixed feed filename can never be served
-// stale by a CDN. installer_url / linux_url are for the web download page; the updater ignores
-// them. All download URLs are versioned + same-origin with the feed.
+// Release is the decoded update manifest (written by CI - see the deploy job). Per-OS updater
+// target (Target): Windows = url/sha256, Linux = linux_url/linux_sha256 - each a VERSIONED raw
+// binary so the fixed feed filename can never be served stale by a CDN. installer_url is for the
+// web download page only. All download URLs are versioned + same-origin with the feed; the
+// Ed25519 manifest signature covers every field, so both targets share one trust root.
 type Release struct {
 	Version         string `json:"version"`
 	Build           int    `json:"build"`
@@ -60,6 +62,17 @@ type Release struct {
 	// gained a runtime-loaded feature would launch with that feature dead. The updater places each
 	// next to the swapped exe (sha256-verified, same-origin) so the feature keeps working.
 	Assets []Asset `json:"assets,omitempty"`
+}
+
+// Target returns the updater artifact (url, sha256) for goos; empty when the manifest has none.
+func (r *Release) Target(goos string) (string, string) {
+	switch goos {
+	case "windows":
+		return r.URL, r.SHA256
+	case "linux":
+		return r.LinuxURL, r.LinuxSHA256
+	}
+	return "", ""
 }
 
 // Asset is one sidecar file placed next to the exe on update. Name is a bare basename (no path
@@ -81,6 +94,9 @@ type Updater struct {
 	dlStall   time.Duration
 	dlRetries int
 	dlBackoff time.Duration
+	dlMax     int64                  // payload byte cap per download (bounded disk use)
+	goos      string                 // target OS (runtime.GOOS; tests override)
+	exePath   func() (string, error) // running exe, symlinks resolved (tests override)
 }
 
 // Download tuning. A total-time cap (http.Client.Timeout / ctx deadline) killed slow-but-flowing
@@ -92,6 +108,7 @@ const (
 	dlStallDefault   = 60 * time.Second
 	dlRetriesDefault = 5
 	dlBackoffDefault = 2 * time.Second // doubles per retry: 2s 4s 8s 16s 32s
+	dlMaxDefault     = 512 << 20       // 512 MiB: several times today's binary; bigger is refused
 )
 
 // New builds an updater. feedURL is the per-branch feed (e.g. https://x.rave.page/app/app/);
@@ -132,7 +149,23 @@ func New(feedURL string, current int, pubKeyB64 string) *Updater {
 		dlStall:   dlStallDefault,
 		dlRetries: dlRetriesDefault,
 		dlBackoff: dlBackoffDefault,
+		dlMax:     dlMaxDefault,
+		goos:      runtime.GOOS,
+		exePath:   ExePath,
 	}
+}
+
+// ExePath returns the running executable with symlinks resolved (/usr/local/bin/x -> /opt/x/x):
+// the file a swap must replace.
+func ExePath() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("locate executable: %w", err)
+	}
+	if r, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = r
+	}
+	return exe, nil
 }
 
 // githubFeedHost reports whether host (the feed's) is github.com - the ONLY feed origin
@@ -187,8 +220,8 @@ func (u *Updater) Enabled() bool { return u != nil && u.feedURL != "" }
 // Latest fetches, verifies, and validates the manifest. Order matters: when a public key is
 // set, the manifest's detached signature (latest.json.sig) is verified over the RAW bytes
 // BEFORE anything in it is trusted - so a feed-write attacker can't forge a release without
-// the private key. Then: download URL must be same-origin with the feed; sha256 must be a
-// 64-char hex digest (no fail-open).
+// the private key. Then THIS OS's target (Release.Target): download URL must be same-origin
+// with the feed; sha256 must be a 64-char hex digest (no fail-open).
 func (u *Updater) Latest(ctx context.Context) (*Release, error) {
 	if !u.Enabled() {
 		return nil, fmt.Errorf("updater disabled (no feed)")
@@ -204,13 +237,15 @@ func (u *Updater) Latest(ctx context.Context) (*Release, error) {
 	if err := json.Unmarshal(body, &rel); err != nil {
 		return nil, fmt.Errorf("decode manifest: %w", err)
 	}
-	if err := u.validateURL(rel.URL); err != nil {
-		return nil, err
+	tu, ts := rel.Target(u.goos)
+	if err := u.validateURL(tu); err != nil {
+		return nil, fmt.Errorf("%s target: %w", u.goos, err)
 	}
-	if !isHex64(rel.SHA256) {
-		return nil, fmt.Errorf("manifest sha256 must be a 64-char hex digest")
+	if !isHex64(ts) {
+		return nil, fmt.Errorf("manifest %s sha256 must be a 64-char hex digest", u.goos)
 	}
 	rel.SHA256 = strings.ToLower(rel.SHA256)
+	rel.LinuxSHA256 = strings.ToLower(rel.LinuxSHA256)
 	return &rel, nil
 }
 
@@ -316,9 +351,8 @@ func isHex64(s string) bool {
 	return err == nil
 }
 
-// Available returns the release + true when the feed's build is newer than this binary's. The
-// build comparison is platform-agnostic (testable); applying it is Windows-only (Apply gates
-// that) since the manifest's checksum is the Windows artifact's.
+// Available returns the release + true when the feed's build is strictly newer than this
+// binary's (Latest already validated this OS's target).
 func (u *Updater) Available(ctx context.Context) (*Release, bool, error) {
 	rel, err := u.Latest(ctx)
 	if err != nil {
@@ -334,44 +368,107 @@ type Staged struct {
 	exe    string   // running executable path
 	tmp    string   // exe+".new" verified payload
 	assets []string // staged sidecar .new paths
+	goos   string   // swap mechanics: "windows" = .old rename dance, else rename(2) + .prev
 }
 
-// Download fetches rel's binary (+ sidecar assets), verifies every SHA-256, and stages the
-// files next to the running exe WITHOUT touching it - the verified/ready-to-install phase.
-// onProgress (optional) gets bytes-downloaded / total (total 0 if no Content-Length).
+// NotWritableError: the running user cannot replace the executable (e.g. root-owned install
+// dir). Checked BEFORE downloading, so an unwritable install never burns bandwidth.
+type NotWritableError struct {
+	Path string // executable (symlinks resolved)
+	Err  error
+}
+
+func (e *NotWritableError) Error() string {
+	return fmt.Sprintf("%s is not writable by this user: %v", e.Path, e.Err)
+}
+
+func (e *NotWritableError) Unwrap() error { return e.Err }
+
+// CheckWritable reports whether exe can be swapped by this process: rename(2) over exe and the
+// .prev/.new siblings need create+rename rights in exe's DIRECTORY (exe's own mode is irrelevant).
+// Probed for real (create + remove a temp file) so mode bits, ACLs and ro mounts all count.
+func CheckWritable(exe string) error {
+	f, err := os.CreateTemp(filepath.Dir(exe), "."+filepath.Base(exe)+".wtest-*")
+	if err != nil {
+		return &NotWritableError{Path: exe, Err: err}
+	}
+	name := f.Name()
+	_ = f.Close()
+	if err := os.Remove(name); err != nil {
+		return &NotWritableError{Path: exe, Err: err}
+	}
+	return nil
+}
+
+// Download fetches rel's binary for this OS (+ Windows sidecar assets), verifies every SHA-256,
+// and stages the files next to the running exe WITHOUT touching it - the verified/ready-to-install
+// phase. Linux: refuses up front (NotWritableError) when exe's dir is not writable; the verified
+// payload is chmod 0755 + fsync'd before Install may rename it. A failed download leaves no file
+// behind. onProgress (optional) gets bytes-downloaded / total (total 0 if no Content-Length).
 func (u *Updater) Download(ctx context.Context, rel *Release, onProgress func(done, total int64)) (*Staged, error) {
-	if runtime.GOOS != "windows" {
-		return nil, fmt.Errorf("auto-update is Windows-only on this build; download the new binary manually")
+	if u.goos != "windows" && u.goos != "linux" {
+		return nil, fmt.Errorf("auto-update unsupported on %s; download the new binary manually", u.goos)
 	}
-	if !isHex64(rel.SHA256) {
-		return nil, fmt.Errorf("refusing update: manifest sha256 missing/invalid")
+	tu, ts := rel.Target(u.goos)
+	if !isHex64(ts) {
+		return nil, fmt.Errorf("refusing update: manifest %s sha256 missing/invalid", u.goos)
 	}
-	if err := u.validateURL(rel.URL); err != nil {
+	if err := u.validateURL(tu); err != nil {
 		return nil, err
 	}
-	exe, err := os.Executable()
+	exe, err := u.exePath()
 	if err != nil {
-		return nil, fmt.Errorf("locate executable: %w", err)
+		return nil, err
 	}
-	exe, _ = filepath.EvalSymlinks(exe)
+	if u.goos != "windows" {
+		if err := CheckWritable(exe); err != nil {
+			return nil, err
+		}
+	}
 
 	tmp := exe + ".new"
-	if err := u.download(ctx, rel, tmp, onProgress); err != nil {
+	if err := u.downloadURL(ctx, tu, ts, tmp, onProgress); err != nil {
 		_ = os.Remove(tmp)
 		return nil, err
 	}
-
-	// Pre-fetch sidecar assets (runtime-loaded DLLs) to <name>.new next to the exe BEFORE the swap,
-	// so the swap window touches local files only. Best-effort: a failed/locked asset must never
-	// abort the exe update (the exe is the critical payload; a DLL just gates one feature).
-	return &Staged{Rel: rel, exe: exe, tmp: tmp, assets: u.fetchAssets(ctx, exe, rel.Assets)}, nil
+	if u.goos == "windows" {
+		// Pre-fetch sidecar assets (runtime-loaded DLLs) to <name>.new next to the exe BEFORE the
+		// swap, so the swap window touches local files only. Best-effort: a failed/locked asset must
+		// never abort the exe update (the exe is the critical payload; a DLL just gates one feature).
+		return &Staged{Rel: rel, exe: exe, tmp: tmp, goos: u.goos, assets: u.fetchAssets(ctx, exe, rel.Assets)}, nil
+	}
+	if err := finalizeExec(tmp); err != nil {
+		_ = os.Remove(tmp)
+		return nil, err
+	}
+	return &Staged{Rel: rel, exe: exe, tmp: tmp, goos: u.goos}, nil
 }
 
-// Install atomically swaps the staged binary over the running executable (rename current →
-// .old, move new into place), then places sidecar assets. On Windows a running .exe can be
-// renamed (not deleted/overwritten). Does NOT relaunch; call Relaunch after, or prompt the
-// user. The .old is cleaned next startup (CleanupOld).
+// finalizeExec makes a verified payload executable (0755, umask-proof) and durable (fsync), so a
+// power cut after the rename can never leave a truncated binary at the exe path.
+func finalizeExec(path string) error {
+	if err := os.Chmod(path, 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY, 0) // write handle: Windows can't flush a read-only one
+	if err != nil {
+		return err
+	}
+	serr := f.Sync()
+	if cerr := f.Close(); serr == nil {
+		serr = cerr
+	}
+	return serr
+}
+
+// Install atomically swaps the staged binary over the running executable, then (Windows) places
+// sidecar assets. Does NOT relaunch; call Relaunch/Reexec after, or prompt the user.
+// Windows: rename current → .old, move new into place (a running .exe can be renamed, not
+// overwritten); .old is cleaned next startup (CleanupOld). Linux: installReplace.
 func (s *Staged) Install() error {
+	if s.goos != "windows" {
+		return s.installReplace()
+	}
 	old := s.exe + ".old"
 	_ = os.Remove(old)
 	if err := os.Rename(s.exe, old); err != nil {
@@ -389,6 +486,60 @@ func (s *Staged) Install() error {
 		placeAsset(a)
 	}
 	return nil
+}
+
+// PrevSuffix names the previous binary a Linux swap keeps beside exe (rollback source).
+const PrevSuffix = ".prev"
+
+// installReplace (Linux): hardlink exe → exe.prev (rollback copy; byte copy when the fs has no
+// hardlinks), then rename(2) the verified payload over exe. Renaming over a running binary is
+// legal on Linux (the process keeps its old inode) and atomic: exe is never absent or partial.
+func (s *Staged) installReplace() error {
+	prev := s.exe + PrevSuffix
+	_ = os.Remove(prev)
+	if err := os.Link(s.exe, prev); err != nil {
+		if cerr := copyFile(s.exe, prev); cerr != nil {
+			_ = os.Remove(prev)
+			s.Discard()
+			return fmt.Errorf("keep previous binary: %w", cerr)
+		}
+	}
+	if err := os.Rename(s.tmp, s.exe); err != nil {
+		s.Discard()
+		return fmt.Errorf("install new binary: %w", err)
+	}
+	syncDir(filepath.Dir(s.exe))
+	return nil
+}
+
+// copyFile copies src to dst (mode 0755, fsync'd).
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, in)
+	if err == nil {
+		err = out.Sync()
+	}
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+// syncDir fsyncs a directory so a landed rename survives a power cut. Best-effort: Windows can't
+// sync a directory handle, and a failure here never undoes the rename.
+func syncDir(dir string) {
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
 }
 
 // Discard removes the staged files (download superseded or aborted).
@@ -618,6 +769,9 @@ func (u *Updater) attemptOnce(ctx context.Context, dlURL, dst string, st *dlStat
 	default:
 		return false, false, fmt.Errorf("download returned %s", resp.Status)
 	}
+	if u.dlMax > 0 && st.total > u.dlMax {
+		return false, false, fmt.Errorf("payload %d bytes exceeds the %d-byte cap", st.total, u.dlMax)
+	}
 	if st.validator == "" {
 		if st.validator = resp.Header.Get("ETag"); st.validator == "" {
 			st.validator = resp.Header.Get("Last-Modified")
@@ -635,8 +789,16 @@ func (u *Updater) attemptOnce(ctx context.Context, dlURL, dst string, st *dlStat
 		return false, false, err
 	}
 	pr := &watchdogReader{r: resp.Body, wd: wd, stall: u.dlStall, base: st.offset, total: st.total, hi: hi, cb: cb}
-	n, cerr := io.Copy(f, pr)
+	var src io.Reader = pr
+	if u.dlMax > 0 { // missing/lying Content-Length still can't fill the disk: cap+1 bytes trips it
+		src = io.LimitReader(pr, u.dlMax-st.offset+1)
+	}
+	n, cerr := io.Copy(f, src)
 	st.offset += n
+	if u.dlMax > 0 && st.offset > u.dlMax {
+		_ = f.Close()
+		return false, false, fmt.Errorf("payload exceeds the %d-byte cap", u.dlMax)
+	}
 	if clErr := f.Close(); cerr == nil {
 		cerr = clErr
 	}
@@ -677,7 +839,8 @@ func parseContentRange(h string) (start, total int64, ok bool) {
 	return s, total, true
 }
 
-// CleanupOld removes the .old/.new binaries left by a previous Apply. Call once at startup.
+// CleanupOld removes the .old/.new binaries left by a previous Apply (incl. a .new a crash left
+// mid-download). Call once at startup. Keeps .prev (the rollback source).
 func CleanupOld() {
 	if exe, err := os.Executable(); err == nil {
 		if exe, e := filepath.EvalSymlinks(exe); e == nil {
