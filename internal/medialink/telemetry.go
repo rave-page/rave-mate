@@ -144,6 +144,8 @@ type routeStat struct {
 	// Adaptive budget, recv-governor view (item 5): stored LOCK-FREE (atomic pointer, NOT st.mu) so
 	// the ~1 Hz governor never shares a lock with the per-frame count() path (realtime-path rule).
 	budget atomic.Pointer[budgetView]
+	// Per-source user caps the recv governor enforces (kbps, fps; 0 = none). Lock-free like budget.
+	capKbps, capFPS atomic.Int32
 	// rate is the sliding window's sample ring (see rateSpan): appended by count() only,
 	// evaluated - never mutated - by snapshot().
 	rate        []rateSample
@@ -479,6 +481,12 @@ func (st *routeStat) setBudget(mode string, target, model, link int, reason stri
 	st.budget.Store(&budgetView{mode: mode, target: target, model: model, link: link, reason: reason})
 }
 
+// setSourceCaps records the per-source caps the recv governor enforces (lock-free, ~1 Hz).
+func (st *routeStat) setSourceCaps(kbps, fps int) {
+	st.capKbps.Store(int32(kbps))
+	st.capFPS.Store(int32(fps))
+}
+
 // snapshot exports the route's counters for the Stats() API.
 func (st *routeStat) snapshot() RouteStat {
 	st.mu.Lock()
@@ -497,6 +505,7 @@ func (st *routeStat) snapshot() RouteStat {
 		out.BudgetMode, out.BudgetTargetKbps, out.BudgetModelKbps = bv.mode, bv.target, bv.model
 		out.BudgetLinkKbps, out.BudgetReason = bv.link, bv.reason
 	}
+	out.CapKbps, out.CapFPS = int(st.capKbps.Load()), int(st.capFPS.Load())
 	now := st.now()
 	out.RateBps, out.WireFPS = st.rateOver(now)
 	// Stalled route: a decayed rate is still not "live". Report nothing rather than a comforting
@@ -608,7 +617,9 @@ type RouteStat struct {
 	BudgetModelKbps  int
 	BudgetLinkKbps   int
 	BudgetReason     string
-	UDP              *UDPStats      // §2.5 UDP transport telemetry (loss/NACK/retransmit/pacer/owd); nil = TCP route
-	NativeRX         *NativeRXStats // native receive route (TransportImpl "native", recv): the child's counters
-	Stages           *StageStats    // STEP-0 per-stage inter-frame interval histograms (hang localization); nil = none yet
+	// Per-source user caps in force on a recv route (0 = none; RememberedReceive.MaxKbps/MaxFPS).
+	CapKbps, CapFPS int
+	UDP             *UDPStats      // §2.5 UDP transport telemetry (loss/NACK/retransmit/pacer/owd); nil = TCP route
+	NativeRX        *NativeRXStats // native receive route (TransportImpl "native", recv): the child's counters
+	Stages          *StageStats    // STEP-0 per-stage inter-frame interval histograms (hang localization); nil = none yet
 }

@@ -284,6 +284,14 @@ func (p *MediaRoutesProxy) SetTransportOverride(peer, sourceID, mode string) err
 	return err
 }
 
+// SetSourceCaps pushes one received source's per-source caps to the media child (live).
+func (p *MediaRoutesProxy) SetSourceCaps(peer, sourceID string, kbps, fps int) error {
+	ctx, cancel := p.h.callCtx()
+	defer cancel()
+	_, err := p.h.host.Call(ctx, mSourceCaps, sourceCapsReq{Peer: peer, SourceID: sourceID, Kbps: kbps, FPS: fps})
+	return err
+}
+
 // FrameShot samples a local video-share sender's content in the media child (where the Spout cgo
 // lives) and returns the verdict plus the last frame as a PNG. Its own timeout: N grabs spaced
 // IntervalMs apart can legitimately outlast the default call budget, and a diagnostic that times
@@ -326,6 +334,7 @@ func (p *MediaRoutesProxy) Testcard(op string, w, h, fps int) (TestcardResult, e
 }
 
 var _ mediaroute.ReceiveControl = (*MediaRoutesProxy)(nil)
+var _ mediaroute.SourceCapper = (*MediaRoutesProxy)(nil)
 
 // ── WebcamProxy: webcam.CamControl ──
 

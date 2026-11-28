@@ -88,34 +88,53 @@ func govFPS(base, div int) int {
 // headroom and emits MetaRate backpressure so the sender trims output (bitrate first, then fps;
 // resolution last-resort, unwired). Runs only for compressed video routes with a known base
 // bitrate. Emits ONLY on a change (dedup), including restoring the base on recovery; fails open
-// (governor off or headroom unknown => never emits, sender stays at full).
-func (rm *RouteManager) rateGovernor(ctx context.Context, rio *routeIO, stream uint16, budget func(codedH int) int, baseFPS int, decCap func() int) {
+// (governor off or headroom unknown => never emits, sender stays at full) - EXCEPT that per-source
+// caps (caps, read per tick) are always enforced: with no VRAM signal the hint is base-or-cap, and
+// lifting the last cap emits the base once to restore it.
+func (rm *RouteManager) rateGovernor(ctx context.Context, rio *routeIO, stream uint16, budget func(codedH int) int, baseFPS int, decCap func() int, caps func() (int, int)) {
 	baseKbps := budget(0)
-	if rm.headroom == nil || baseKbps <= 0 {
+	if (rm.headroom == nil && caps == nil) || baseKbps <= 0 {
 		return
 	}
 	assertBudgetSane(rm, stream, baseKbps)
 	t := time.NewTicker(rm.reportEvery)
 	defer t.Stop()
 	var last RateHint
-	var sent bool
+	var sent, capWas bool
+	capK, capF := readSourceCaps(caps)
+	immediate := capK > 0 || capF > 0 // a capped route gets its first hint at route-up, not a tick later
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
+		if !immediate {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
 		}
-		if rm.governorOn != nil && !rm.governorOn() {
-			continue // disabled: leave the sender at full (never emit)
+		immediate = false
+		capK, capF = readSourceCaps(caps)
+		capped := capK > 0 || capF > 0
+		var free uint64
+		present := false
+		if rm.headroom != nil && (rm.governorOn == nil || rm.governorOn()) {
+			free, present = rm.headroom()
 		}
-		free, present := rm.headroom()
-		if !present {
-			continue // headroom unknown: fail open
+		var h RateHint
+		if present {
+			h = rateLadder(free, rm.govFloorMB, budget(0), baseFPS, stream)
+			applyDecodeCap(&h, decCap)   // CPU decode mode: ask for a coded size the software decoder sustains
+			capBudgetToCoded(&h, budget) // item 2: a resolution cap lowers the bitrate to the coded-size model
+		} else {
+			if !capped && !capWas {
+				continue // governor off / headroom unknown and nothing to enforce: fail open (never emit)
+			}
+			h = RateHint{Type: MetaRate, Stream: stream, MaxBitrateKbps: budget(0), MaxFPS: baseFPS}
 		}
-		h := rateLadder(free, rm.govFloorMB, budget(0), baseFPS, stream)
-		applyDecodeCap(&h, decCap)                                                                              // CPU decode mode: ask for a coded size the software decoder sustains
-		capBudgetToCoded(&h, budget)                                                                            // item 2: a resolution cap lowers the bitrate to the coded-size model
-		rio.st.setBudget(rm.budgetModeStr(), h.MaxBitrateKbps, baseKbps, 0, budgetReason(h, baseKbps, baseFPS)) // item 5
+		applySourceCaps(&h, capK, capF)
+		capWas = capped
+		rio.st.setSourceCaps(capK, capF)
+		rio.st.setBudget(rm.budgetModeStr(), h.MaxBitrateKbps, baseKbps, 0,
+			sourceCapReason(h, capK, capF, budgetReason(h, baseKbps, baseFPS))) // item 5
 		if sent && h == last {
 			continue
 		}

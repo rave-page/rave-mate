@@ -323,6 +323,9 @@ type Options struct {
 	// RecvImpl returns the recv path preference (config mediaLink.recvImpl): "go" forces the Go
 	// receive path; ""/"auto"/nil = native when the route + decode engine support it (native_rx.go).
 	RecvImpl func() string
+	// RouteCaps returns the user's per-source caps for a RECEIVED source (peer node id, source id),
+	// read live every governor tick (0 = none on that axis). nil = no per-source caps.
+	RouteCaps func(peer, sourceID string) (kbps, fps int)
 }
 
 // RouteManager owns the media listener + negotiation. Create with New, attach sources/sinks, then
@@ -357,15 +360,16 @@ type RouteManager struct {
 	encPolicy    func() (prefer, pin string)                              // sender-side codec preference + encoder pin (live)
 	encDevice    func(w, h, fps int, codec string) (luid string, idx int) // sender-side encode-device resolver (live)
 
-	headroom    func() (freeMB uint64, present bool) // recv-side VRAM governor input (nil = no governor)
-	governorOn  func() bool                          // governor live enable (nil = on when headroom present)
-	govFloorMB  uint64                               // free-VRAM floor the governor protects (0 = default)
-	govBaseKbps func() int                           // route base bitrate ceiling (config.Bitrate / fixed mode)
-	budgetMode  func() string                        // adaptive bitrate mode ("auto"/"fixed"; nil=fixed)
-	budgetUserK func() int                           // adaptive user ceiling kbps (0=none)
-	budgetLinkF func() int                           // static link-ceiling fraction pct (0=default)
-	playout     func() string                        // recv playout preset name (nil = balanced)
-	recvImpl    func() string                        // recv path preference ("go" = escape hatch)
+	headroom    func() (freeMB uint64, present bool)   // recv-side VRAM governor input (nil = no governor)
+	governorOn  func() bool                            // governor live enable (nil = on when headroom present)
+	govFloorMB  uint64                                 // free-VRAM floor the governor protects (0 = default)
+	govBaseKbps func() int                             // route base bitrate ceiling (config.Bitrate / fixed mode)
+	budgetMode  func() string                          // adaptive bitrate mode ("auto"/"fixed"; nil=fixed)
+	budgetUserK func() int                             // adaptive user ceiling kbps (0=none)
+	budgetLinkF func() int                             // static link-ceiling fraction pct (0=default)
+	playout     func() string                          // recv playout preset name (nil = balanced)
+	recvImpl    func() string                          // recv path preference ("go" = escape hatch)
+	routeCaps   func(peer, sourceID string) (int, int) // per-source recv caps (kbps, fps; nil = none)
 
 	sampler procstat.Sampler // daemon RSS sampler for the media memory watchdog
 
@@ -424,7 +428,7 @@ func New(opts Options) *RouteManager {
 		headroom: opts.Headroom, governorOn: opts.GovernorEnabled,
 		govFloorMB: opts.GovernorFloorMB, govBaseKbps: opts.GovernorBaseKbps,
 		budgetMode: opts.BudgetMode, budgetUserK: opts.BudgetUserCeilKbps, budgetLinkF: opts.BudgetLinkFracPct,
-		playout: opts.PlayoutPreset, recvImpl: opts.RecvImpl,
+		playout: opts.PlayoutPreset, recvImpl: opts.RecvImpl, routeCaps: opts.RouteCaps,
 		udp:     opts.UDP,
 		sources: map[string]sourceReg{}, sinks: map[string]sinkReg{},
 		remoteAdvert: map[string]Advert{}, pendingAns: map[string]*pendingAnswer{},
@@ -1589,11 +1593,14 @@ func (rm *RouteManager) dialAndReceive(ctx context.Context, peer string, ans Ans
 		}
 		linkCeil := rm.localLinkCeilKbps(ans.Addr, frac) // item 4: static link ceiling (0 = unknown)
 		budget := rm.budgetKbpsFn(ans.Codec, srcDesc.Width, srcDesc.Height, int(srcDesc.FPS), linkCeil)
+		caps := rm.sourceCapsFn(peer, po.sourceID) // per-source user caps, live per tick
 		switch {
 		case udp != nil:
-			go rm.guard("congestGovernor", func() { rm.congestGovernor(rctx, rio, udp, ans.Stream, budget, int(srcDesc.FPS), decodeCapOf(final)) })
-		case rm.headroom != nil:
-			go rm.guard("rateGovernor", func() { rm.rateGovernor(rctx, rio, ans.Stream, budget, int(srcDesc.FPS), decodeCapOf(final)) })
+			go rm.guard("congestGovernor", func() {
+				rm.congestGovernor(rctx, rio, udp, ans.Stream, budget, int(srcDesc.FPS), decodeCapOf(final), caps)
+			})
+		case rm.headroom != nil || caps != nil:
+			go rm.guard("rateGovernor", func() { rm.rateGovernor(rctx, rio, ans.Stream, budget, int(srcDesc.FPS), decodeCapOf(final), caps) })
 		}
 	}
 	if jb != nil {
@@ -1664,7 +1671,7 @@ func (rm *RouteManager) runNativeReceive(rctx context.Context, cancel context.Ca
 		}
 		budget := rm.budgetKbpsFn(ans.Codec, srcDesc.Width, srcDesc.Height, int(srcDesc.FPS), rm.localLinkCeilKbps(ans.Addr, frac))
 		go rm.guard("congestGovernor", func() {
-			rm.congestGovernor(rctx, rio, nativeUDPStats{nrx}, ans.Stream, budget, int(srcDesc.FPS), decodeCapOf(final))
+			rm.congestGovernor(rctx, rio, nativeUDPStats{nrx}, ans.Stream, budget, int(srcDesc.FPS), decodeCapOf(final), rm.sourceCapsFn(peer, ar.sourceID))
 		})
 	}
 	err := rm.superviseNativeRX(rctx, conn, nrx, rio.st, peer)

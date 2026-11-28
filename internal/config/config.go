@@ -547,6 +547,53 @@ type RememberedReceive struct {
 	W   int `json:"w,omitempty"`
 	H   int `json:"h,omitempty"`
 	FPS int `json:"fps,omitempty"`
+	// Per-source caps set on THIS (receiving) instance; 0/absent = none, global MediaLink settings
+	// apply. MaxKbps caps the route bitrate in both modes (auto: model capped; fixed: min(global, this));
+	// MaxFPS caps the frame rate the sender is asked for (MetaRate hint). Additive, no version bump.
+	MaxKbps int `json:"maxKbps,omitempty"`
+	MaxFPS  int `json:"maxFps,omitempty"`
+}
+
+// Per-source cap bounds (match the adaptive budget floor/ceiling and a sane fps range).
+const (
+	SourceCapMinKbps = 1000
+	SourceCapMaxKbps = 80000
+	SourceCapMinFPS  = 1
+	SourceCapMaxFPS  = 240
+)
+
+// ValidSourceCaps reports whether kbps/fps are 0 (none) or within the per-source cap bounds.
+func ValidSourceCaps(kbps, fps int) bool {
+	okK := kbps == 0 || (kbps >= SourceCapMinKbps && kbps <= SourceCapMaxKbps)
+	okF := fps == 0 || (fps >= SourceCapMinFPS && fps <= SourceCapMaxFPS)
+	return okK && okF
+}
+
+// SourceCaps returns the per-source caps of a remembered receive (0 = none / not remembered).
+func (m MediaLinkFeature) SourceCaps(peer, sourceID string) (kbps, fps int) {
+	for _, r := range m.RememberedReceives {
+		if r.Peer == peer && r.SourceID == sourceID {
+			return max(r.MaxKbps, 0), max(r.MaxFPS, 0)
+		}
+	}
+	return 0, 0
+}
+
+// SetSourceCaps stores per-source caps on a remembered receive (0 = clear). Returns (changed, found);
+// a source that is not remembered (not received) is not added - caps live with the receive.
+func (m *MediaLinkFeature) SetSourceCaps(peer, sourceID string, kbps, fps int) (changed, found bool) {
+	for i := range m.RememberedReceives {
+		r := &m.RememberedReceives[i]
+		if r.Peer != peer || r.SourceID != sourceID {
+			continue
+		}
+		if r.MaxKbps == kbps && r.MaxFPS == fps {
+			return false, true
+		}
+		r.MaxKbps, r.MaxFPS = kbps, fps
+		return true, true
+	}
+	return false, false
 }
 
 // SetRememberedGeometry records the nominal geometry (and display name) of a remembered receive.

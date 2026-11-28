@@ -183,7 +183,14 @@ type Manager struct {
 	// kSinks: keeper-hosted destinations this process opened (live or parked), checked for loss on the
 	// scan cadence. One per sender name (replaced on reopen); bounded like parked/receives.
 	kSinks map[string]*keeperSink
+	// srcCaps: per-source caps pushed live by the daemon (SetSourceCaps), keyed peer\x00sourceID. An
+	// entry (zeros included) WINS over cfg().RememberedReceives, whose copy in the media child is only
+	// the spawn snapshot. Bounded: one entry per user-capped source, refused past srcCapsMax.
+	srcCaps map[string][2]int
 }
+
+// srcCapsMax bounds the live per-source cap overrides (user-set; far above any real source count).
+const srcCapsMax = 256
 
 // New builds the manager (inert until Start).
 func New(o Options) *Manager {
@@ -196,7 +203,7 @@ func New(o Options) *Manager {
 		parked: map[string]*parkedSink{}, stopping: map[string]bool{}, now: time.Now,
 		holds: map[string]Hold{}, holdLog: map[string]time.Time{}, release: map[string]*releaseState{}, attempts: map[string]*attemptState{},
 		pending: map[string]Admission{}, claimAt: map[string]time.Time{}, keeper: o.Keeper,
-		kSinks: map[string]*keeperSink{},
+		kSinks: map[string]*keeperSink{}, srcCaps: map[string][2]int{},
 	}
 	m.pressureFloor = m.systemFloorMB
 	m.hub = newCaptureHub(o.Log, o.OpenReceiver, o.PutPix)
@@ -548,18 +555,7 @@ func (m *Manager) StartReceive(peer, sourceID string) (string, error) {
 		func(context.Context, medialink.Answer) (medialink.Sink, error) {
 			return m.openReceiveSink(sender, w, h)
 		})
-	cfg := m.cfg()
-	// Adaptive budget: in auto mode the Offer carries the quality-model target (capped by the user
-	// ceiling) for the preferred codec + source geometry, and asks the sender for constant-quality
-	// rate control; fixed mode sends the configured number as today. The governor refines continuously.
-	mode := medialink.NormalizeBitrateMode(cfg.BitrateModeString())
-	base := medialink.AdaptiveBaseKbps(mode, cfg.UserBitrateCeilKbps(), cfg.Bitrate(),
-		preferredCodecForModel(cfg.PreferCodec), desc.Width, desc.Height, int(desc.FPS))
-	opt := medialink.OfferOptions{
-		BitrateKbps: base,
-		Decoders:    preferDecoders(cfg.PreferCodec, ad.Caps),
-		QualityMode: mode == medialink.BitrateAuto,
-	}
+	opt := m.offerOptions(peer, sourceID, desc, ad.Caps)
 	session, err := m.router.OfferRoute(peer, sourceID, sinkID, opt)
 	if err != nil {
 		m.router.UnregisterSink(sinkID)
@@ -572,6 +568,54 @@ func (m *Manager) StartReceive(peer, sourceID string) (string, error) {
 	m.log.Info(source, "receive offered", map[string]any{"peer": peer, "source": desc.Name,
 		"session": session, "sender": sender})
 	return session, nil
+}
+
+// offerOptions builds a receive Offer's options. Adaptive budget: in auto mode the Offer carries the
+// quality-model target (capped by the user ceiling) for the preferred codec + source geometry, and
+// asks the sender for constant-quality rate control; fixed mode sends the configured number. The
+// per-source cap (SourceCaps) then caps it in both modes. The governor refines continuously.
+func (m *Manager) offerOptions(peer, sourceID string, desc medialink.SourceDesc, caps *medialink.Caps) medialink.OfferOptions {
+	cfg := m.cfg()
+	mode := medialink.NormalizeBitrateMode(cfg.BitrateModeString())
+	base := medialink.AdaptiveBaseKbps(mode, cfg.UserBitrateCeilKbps(), cfg.Bitrate(),
+		preferredCodecForModel(cfg.PreferCodec), desc.Width, desc.Height, int(desc.FPS))
+	capK, _ := m.SourceCaps(peer, sourceID)
+	return medialink.OfferOptions{
+		BitrateKbps: medialink.CapOfferKbps(base, capK),
+		Decoders:    preferDecoders(cfg.PreferCodec, caps),
+		QualityMode: mode == medialink.BitrateAuto,
+	}
+}
+
+// SourceCaps returns the per-source caps (kbps, fps; 0 = none) for a received source: the live
+// override when the daemon pushed one, else the config's remembered receive. Wired into the router
+// (medialink.Options.RouteCaps) so both governors read it every tick.
+func (m *Manager) SourceCaps(peer, sourceID string) (kbps, fps int) {
+	m.mu.Lock()
+	c, ok := m.srcCaps[peer+"\x00"+sourceID]
+	m.mu.Unlock()
+	if ok {
+		return c[0], c[1]
+	}
+	return m.cfg().SourceCaps(peer, sourceID)
+}
+
+// SetSourceCaps installs a live per-source cap override (0 = none on that axis). A running route
+// applies it on its next governor tick; the next offer carries the bitrate cap.
+func (m *Manager) SetSourceCaps(peer, sourceID string, kbps, fps int) error {
+	if !config.ValidSourceCaps(kbps, fps) {
+		return fmt.Errorf("mediaroute: caps out of range (kbps 0 or %d..%d, fps 0 or %d..%d)",
+			config.SourceCapMinKbps, config.SourceCapMaxKbps, config.SourceCapMinFPS, config.SourceCapMaxFPS)
+	}
+	key := peer + "\x00" + sourceID
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.srcCaps[key]; !ok && len(m.srcCaps) >= srcCapsMax {
+		return errors.New("mediaroute: too many per-source caps")
+	}
+	m.srcCaps[key] = [2]int{kbps, fps}
+	m.log.Info(source, "per-source caps set", map[string]any{"peer": peer, "source": sourceID, "maxKbps": kbps, "maxFps": fps})
+	return nil
 }
 
 // heldPrefix marks a receive refused BEFORE the offer (VRAM admission); survives the media-child RPC
