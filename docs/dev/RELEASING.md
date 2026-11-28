@@ -25,8 +25,8 @@ library/config, authors not liable for file/system damage (LICENSE §15–16). D
 GitHub Releases are the distribution + self-update feed. Both workflows cross-build the
 full-feature Windows exe on Linux via mingw (`-tags "spout vr abletonlink zigdsp zigui
 zigvr"`; SDKs fetched SHA-pinned by `scripts/fetch-spout.sh` / `fetch-link.sh`; Zig libs
-cross-built windows-gnu by a pinned, checksum-verified zig), the Linux binary (zig tags
-too), and the NSIS
+cross-built windows-gnu by a pinned, checksum-verified zig), the Linux binary (pipewire + zig
+tags, pinned `contrib/linux-build` box), and the NSIS
 installer, then publish the complete feed set to a release:
 
 - versioned raw exe `rave-mate-<build>-<date>-<commit>.exe` (updater target; immutable name
@@ -105,6 +105,43 @@ update" / "Restart to finish update"), and Settings → System → Updates. `sel
 split into `Download` (stage + verify next to the exe, exe untouched) and `Staged.Install`
 (atomic rename swap); one-shot callers (ctl `SELF-UPDATE`, peer remote update) still use
 `Apply`. Signature/checksum failures surface in the UI verbatim and never advance the machine.
+
+### Linux unattended update (headless `--service`, `internal/updater/auto.go`)
+
+Linux target = `linux_url`/`linux_sha256` (`Release.Target`), same Ed25519-signed manifest +
+sha256 as Windows. Nightly/release Linux binary is built in the pinned `contrib/linux-build`
+box with tags `pipewire zigdsp zigui zigvr` (sender-capable; glibc baseline Debian 13 = 2.41,
+box prints the max `GLIBC_` symbol actually needed) and stamped FeedURL/Channel/Build.
+
+Runs only when `--service` on Linux with a stamped FeedURL. Every 5 min (30 s after boot):
+1. manifest + sig verify; build must be `>` own and not pinned bad.
+2. install dir writable? (create+remove probe in the exe's dir, symlinks resolved). No →
+   ONE log line per feed build + `update=notwritable(...)` in `ctl status` / `rave-mate status`;
+   no download, no retry until the feed build changes.
+3. download to `<exe>.new` (same dir; stall watchdog, 30 min cap, 512 MiB cap; failed = removed),
+   sha256 verify, chmod 0755, fsync. Checksum fail → build skipped (one log line).
+4. probe: `<exe>.new version` must report the manifest build within 20 s (loader/glibc/init) -
+   fail → build pinned bad.
+5. defer while busy: any media route (send or receive) or a live stream-bridge session; swap only
+   after 2 min continuous idle (`update=deferred(...)`). A connected peer without a route is idle.
+6. mark attempt (`.<exe>.update.json`), hardlink exe → `<exe>.prev`, `rename(2)` new over exe,
+   fsync dir; clean shutdown (modules, feature/media children, listeners) → `execve` same
+   path + argv (same PID; works with or without systemd `Restart=`; 60 s backstop exec).
+7. rollback guard: new build must serve ctl for 30 s → attempt confirmed. Each boot of the
+   unconfirmed build counts; the 3rd boot restores `<exe>.prev`, pins the build bad, re-execs
+   the old one. Failed `execve` → same rollback immediately.
+
+**Required install layout** (a user process cannot replace a root-owned file):
+- binary in a directory owned by the service user, e.g. `~/.local/share/rave-mate/rave-mate`
+  (dir `0755 user:user`); a `/usr/local/bin/rave-mate` symlink to it is fine.
+- systemd `--user` unit: `ExecStart=%h/.local/share/rave-mate/rave-mate --service`,
+  `Restart=on-failure`, `RestartSec=5` (crash restarts feed the rollback guard), `TimeoutStopSec=30`.
+  `rave-mate install` writes exactly this for the exe it runs from.
+- bootstrap once with an armed nightly (`rave-mate version` shows `build N`, N = nightly run
+  number); an unstamped/box-local build has no FeedURL and never updates.
+
+**Disable:** `Environment=RAVE_MATE_NO_AUTOUPDATE=1` in the unit (status shows
+`update=off(...)`), or a root-owned install (status `notwritable`, nothing downloaded).
 
 ## Exporting rave-mate from the rave-suite monorepo → GitHub
 
