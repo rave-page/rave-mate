@@ -23,6 +23,29 @@ func TestSetRememberedGeometry(t *testing.T) {
 	}
 }
 
+// Sender keeper: default ON (nil), explicit false opts out, env overrides both ways.
+func TestSenderKeeperDefaultOn(t *testing.T) {
+	t.Setenv("RAVE_MATE_SENDER_KEEPER", "")
+	var m MediaLinkFeature
+	if !m.SenderKeeperEnabled() {
+		t.Fatal("unset senderKeeper must be ON")
+	}
+	off := false
+	m.SenderKeeper = &off
+	if m.SenderKeeperEnabled() {
+		t.Fatal("explicit false must opt out")
+	}
+	t.Setenv("RAVE_MATE_SENDER_KEEPER", "1")
+	if !m.SenderKeeperEnabled() {
+		t.Fatal("env 1 must win over config false")
+	}
+	m.SenderKeeper = nil
+	t.Setenv("RAVE_MATE_SENDER_KEEPER", "0")
+	if m.SenderKeeperEnabled() {
+		t.Fatal("env 0 must win over the default")
+	}
+}
+
 func TestVramPolicyAndFallbackDefaults(t *testing.T) {
 	t.Setenv("RAVE_MATE_VRAM_POLICY", "")
 	t.Setenv("RAVE_MATE_CPU_DECODE_FALLBACK", "")

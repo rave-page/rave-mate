@@ -160,6 +160,14 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 	}
 	f.router.SetSyncPeer(in.SyncPeer)
 
+	// 1b: adopt keeper-hosted destinations (mediaLink.senderKeeper, default on). ADOPT-ONLY here: this
+	// child sits in the daemon's kill-on-close job, so it must never be the keeper's parent (the daemon
+	// starts + keeps it alive). Unreachable keeper => in-process sender, charged the GL interop cost.
+	keeper := senderkeeper.NewSupervisor(senderkeeper.Options{Dial: senderkeeper.DialPipe})
+	f.vram.Budget.SetKeeperHosted(func() bool {
+		c := liveCfg()
+		return c.ZeroCopyDecode() && c.SenderKeeperEnabled() && keeper.Ping() == nil
+	})
 	f.routes = mediaroute.New(mediaroute.Options{
 		Log: rt.Log, Router: f.router,
 		Cfg:      liveCfg,
@@ -172,9 +180,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 		},
 		AdmitSender:  f.vram.AdmitSender, // unified budget gate (static-floor fallback stays via Headroom)
 		AdmitReceive: f.vram.AdmitReceive,
-		// 1b: adopt keeper-hosted destinations (config mediaLink.senderKeeper, default off). ADOPT-ONLY
-		// here: this child sits in the daemon's kill-on-close job, so it must never be the keeper's parent.
-		Keeper: senderkeeper.NewSupervisor(senderkeeper.Options{Dial: senderkeeper.DialPipe}),
+		Keeper:       keeper,
 	})
 
 	// Throughput micro-benchmark: lazy + idle-gated, skips while any route is live. Feeds the

@@ -3,10 +3,12 @@
 package senderkeeper
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 
@@ -23,17 +25,32 @@ func PipeName() string {
 	return fmt.Sprintf(`\\.\pipe\rave-mate-keeper-%d`, sid)
 }
 
-// DialPipe connects to the running keeper (no start).
+var procWaitNamedPipe = windows.NewLazySystemDLL("kernel32.dll").NewProc("WaitNamedPipeW")
+
+// busyWaitMs bounds the wait for the keeper's single pipe instance (a daemon keep-alive ping holds it
+// for a few ms).
+const busyWaitMs = 500
+
+// DialPipe connects to the running keeper (no start). The pipe has ONE instance: a busy pipe waits
+// busyWaitMs once, then reports ErrBusy (keeper alive).
 func DialPipe() (Conn, error) {
 	p, err := windows.UTF16PtrFromString(PipeName())
 	if err != nil {
 		return nil, err
 	}
-	h, err := windows.CreateFile(p, windows.GENERIC_READ|windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, 0, 0)
-	if err != nil {
-		return nil, err
+	for try := 0; ; try++ {
+		h, err := windows.CreateFile(p, windows.GENERIC_READ|windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, 0, 0)
+		if err == nil {
+			return NewConn(os.NewFile(uintptr(h), PipeName())), nil
+		}
+		if !errors.Is(err, windows.ERROR_PIPE_BUSY) {
+			return nil, err
+		}
+		if try > 0 {
+			return nil, fmt.Errorf("%w: %v", ErrBusy, err)
+		}
+		_, _, _ = procWaitNamedPipe.Call(uintptr(unsafe.Pointer(p)), busyWaitMs)
 	}
-	return NewConn(os.NewFile(uintptr(h), PipeName())), nil
 }
 
 // StartDetached spawns the keeper so it OUTLIVES this process: detached, own process group, no window,

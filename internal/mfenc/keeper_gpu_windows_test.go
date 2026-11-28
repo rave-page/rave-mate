@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/senderkeeper"
 	"rave.page/mate/internal/videoshare"
 )
@@ -71,6 +72,16 @@ func TestKeeperGPU(t *testing.T) {
 	}
 	kpid := procs[0].Process.Pid
 	t.Logf("keeper pid=%d idle: VRAM=%dMB RAM(ws)=%sMB", kpid, childVRAM(s, uint32(kpid)), workingSetMB(kpid))
+
+	// One pipe instance: while sup holds it (the media child's role), a daemon keep-alive sees the
+	// keeper BUSY = alive and must not start a second one.
+	daemonStarts := 0
+	daemon := senderkeeper.NewSupervisor(senderkeeper.Options{Dial: senderkeeper.DialPipe, Start: func() error { daemonStarts++; return nil }})
+	t0 := time.Now()
+	if err := daemon.KeepAlive(); err != nil || daemonStarts != 0 {
+		t.Fatalf("keep-alive vs a held pipe: err=%v starts=%d", err, daemonStarts)
+	}
+	t.Logf("keep-alive against a held pipe: busy=alive after %s, no second keeper", time.Since(t0).Round(time.Millisecond))
 
 	for _, sz := range []struct{ w, h int }{{1920, 1080}, {3840, 2160}} {
 		requireFreeVRAM(t, s, 3072)
@@ -158,4 +169,17 @@ func TestKeeperGPU(t *testing.T) {
 			t.Logf("note: %q still listed after the keeper died (stale Spout name entry; receivers validate the info map)", n)
 		}
 	}
+
+	// (f) mediaroute's fallback after the keeper is gone: the in-process SpoutLibrary sender takes the
+	// SAME name and registers (no stale keeper entry blocks it).
+	ss, err := videoshare.NewSharedSender(logbus.New(16), name, 1920, 1080)
+	if err != nil {
+		t.Fatalf("in-process fallback sender under the keeper's old name: %v", err)
+	}
+	defer ss.Close()
+	h, _, w, hh, ok := videoshare.SenderShare(name)
+	if !ok || h != ss.Handle() || w != 1920 || hh != 1080 {
+		t.Fatalf("fallback sender registry view: handle=%#x %dx%d ok=%v, want %#x 1920x1080", h, w, hh, ok, ss.Handle())
+	}
+	t.Logf("in-process fallback sender after keeper death: %q handle %#x", name, h)
 }

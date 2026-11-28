@@ -23,6 +23,29 @@ type Budget struct {
 
 	lastMu sync.Mutex
 	last   map[Op]Decision // most recent decision per op (ctl explainability)
+
+	keeperMu sync.Mutex
+	keeper   func() bool // a NEW destination will be keeper-hosted (no GL interop); nil => in-process
+}
+
+// SetKeeperHosted installs the "new destinations go to rave-mate-keeper" probe (nil = in-process GL
+// sender). Evaluated per sender admission (≤ the 2 s receive re-check), never per frame.
+func (b *Budget) SetKeeperHosted(fn func() bool) {
+	b.keeperMu.Lock()
+	b.keeper = fn
+	b.keeperMu.Unlock()
+}
+
+// senderOp is the cost op of a NEW destination: keeper-hosted (texture + keeper device share) or the
+// in-process SpoutLibrary GL sender (+ GL/DX interop). The receiver follow cost is the same either way.
+func (b *Budget) senderOp() Op {
+	b.keeperMu.Lock()
+	fn := b.keeper
+	b.keeperMu.Unlock()
+	if fn != nil && fn() {
+		return OpSenderKeeper
+	}
+	return OpSender
 }
 
 // Options wires a Budget. All funcs are nil-safe (nil => that input is unknown / fail open).
@@ -134,7 +157,7 @@ func (b *Budget) AdmitDecodeTiered(w, h, fps int, codec string, cpuMB, minGainMB
 // follow cost the new handle triggers in Resolume.
 func (b *Budget) AdmitSender(w, h int) Decision {
 	g := Geom{W: w, H: h, Codec: "nrgba"}
-	d := AdmitNeed(b.inputs(), OpSender, g, b.cost(OpSender, g), FollowCostMB(g), b.pol)
+	d := AdmitNeed(b.inputs(), OpSender, g, b.cost(b.senderOp(), g), FollowCostMB(g), b.pol)
 	b.record(OpSender, d)
 	return d
 }
@@ -158,7 +181,7 @@ func (b *Budget) AdmitReceiveDecode(w, h, fps int, codec string, newSender bool,
 	follow := 0.0
 	if newSender {
 		gs := Geom{W: w, H: h, Codec: "nrgba"}
-		sc := b.cost(OpSender, gs)
+		sc := b.cost(b.senderOp(), gs)
 		cost = Cost{MB: cost.MB + sc.MB, Measured: cost.Measured && sc.Measured, Source: "composed"}
 		follow = FollowCostMB(gs)
 	}
@@ -201,7 +224,7 @@ func (b *Budget) AdmitReceiveTiered(w, h, fps int, codec string, newSender bool,
 	follow := 0.0
 	if newSender {
 		gs := Geom{W: w, H: h, Codec: "nrgba"}
-		cost.MB += b.cost(OpSender, gs).MB
+		cost.MB += b.cost(b.senderOp(), gs).MB
 		follow = FollowCostMB(gs)
 	}
 	l := AdmitLight(b.inputs(), OpReceive, Geom{W: w, H: h, FPS: fps, Codec: codec}, cost, follow, b.pol)

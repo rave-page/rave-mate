@@ -746,18 +746,17 @@ func run(parent context.Context, serviceMode bool) error {
 	// (live headroom/cap/reserve + the shared learned-cost file).
 	vramBudget := featurehost.WireVramBudget(mediaLinkCfg, gpuGovSampler, featurehost.VramCostPath(), log)
 	// 1b sender keeper: the DAEMON (not in any job) is the only process that starts rave-mate-keeper, so
-	// the keeper outlives daemon/media-child restarts and self-updates. Off unless
-	// mediaLink.senderKeeper; started once at boot (adoption happens in whichever process opens sinks).
+	// the keeper outlives daemon/media-child restarts and self-updates. Default on (mediaLink.senderKeeper
+	// =false opts out). Started at boot, then a keep-alive per keeperKeepAlive that restarts a dead
+	// keeper and never holds its single pipe instance (the media child adopts through it).
 	keeperSup := senderkeeper.NewSupervisor(senderkeeper.Options{Dial: senderkeeper.DialPipe, Start: senderkeeper.StartDetached})
-	if mediaLinkCfg().SenderKeeperEnabled() {
-		debuglog.Go(log, "sender-keeper", func() {
-			if err := keeperSup.Ping(); err != nil {
-				log.Warn("mediaroute", "sender keeper not available - destinations stay in-process", map[string]any{"err": err.Error()})
-				return
-			}
-			log.Info("mediaroute", "sender keeper up - receive destinations survive restarts/updates", map[string]any{"pipe": senderkeeper.PipeName()})
-		})
-	}
+	debuglog.Go(log, "sender-keeper", func() { runKeeperKeepAlive(ctx, log, keeperSup, mediaLinkCfg) })
+	// Legacy in-proc media path: a keeper-hosted destination is not charged the GL interop cost.
+	// KeepAlive (dial + hang up), never Ping: the daemon must not hold the keeper's single pipe instance.
+	vramBudget.Budget.SetKeeperHosted(func() bool {
+		c := mediaLinkCfg()
+		return c.ZeroCopyDecode() && c.SenderKeeperEnabled() && keeperSup.KeepAlive() == nil
+	})
 	medialink.OnResolutionCapChange = mfenc.NoteDecodeResizeGrace // decoder re-init grace on a cap change
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,
