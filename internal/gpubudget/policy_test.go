@@ -177,3 +177,34 @@ func TestFreeAveragerDampsOscillation(t *testing.T) {
 		t.Fatalf("averaged free must sit near 425 MB with small ripple, got %d..%d", lo, hi)
 	}
 }
+
+// Incident 2026-11-28: a decoder whose CPU mode frees next to nothing opens in HW down to the hard
+// floor; a costly one (the rig's 114 MB pool) still falls to CPU below the system floor.
+func TestAdmitDecodeTieredTrivialGain(t *testing.T) {
+	const cpu = 20.0 // mfenc.CPUDecodeCostMB(3840, 2160)
+	free, present, self := uint64(338), true, uint64(0)
+	adp := Adapter{Vendor: "nvidia", Driver: "NVIDIA GeForce RTX 3060@32.0.16.1088"}
+	st := NewCostStore("", nil)
+	g := Geom{W: 3840, H: 2160, FPS: 60, Codec: "hevc"}
+	if !st.Observe(adp, OpDecode, g, 34) {
+		t.Fatal("seed learned cost")
+	}
+	light := New(Options{Policy: Policy{Mode: ModeBalanced}, Store: st,
+		Headroom: func() gpumem.Headroom { return gpumem.Headroom{Present: present, FreeMB: free, BudgetMB: 12288} },
+		Self:     func() (uint64, bool) { return self, true }, Adapter: func() Adapter { return adp }})
+	if d := light.AdmitDecode(3840, 2160, 60, "hevc"); d.Admit {
+		t.Fatalf("precondition: plain admission must refuse below the system floor: %s", d.String())
+	}
+	if d := light.AdmitDecodeTiered(3840, 2160, 60, "hevc", cpu, 64); !d.Admit {
+		t.Fatalf("14 MB gain must keep HW at free 338: %s", d.String())
+	}
+	free = 270 // 270 - 34 < hard floor 256
+	if d := light.AdmitDecodeTiered(3840, 2160, 60, "hevc", cpu, 64); d.Admit {
+		t.Fatalf("HW admitted below the hard floor: %s", d.String())
+	}
+	free = 500
+	heavy := rigBudget(t, ModeBalanced, &free, &present, &self) // 114 MB: CPU mode frees 94 MB
+	if d := heavy.AdmitDecodeTiered(3840, 2160, 60, "hevc", cpu, 64); d.Admit {
+		t.Fatalf("94 MB gain must still fall back to CPU: %s", d.String())
+	}
+}

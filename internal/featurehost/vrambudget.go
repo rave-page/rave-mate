@@ -90,6 +90,9 @@ func WireVramBudget(liveCfg func() config.MediaLinkFeature, sampler gpumem.Sampl
 
 	mfenc.DecAdmit = func(inW, inH, _, _, fps int, hevc bool) mfenc.DecVerdict {
 		d := b.AdmitDecode(inW, inH, fps, decCodec(hevc))
+		if !d.Admit && liveCfg().CPUDecodeFallbackEnabled() { // no CPU fallback for a trivial VRAM gain
+			d = b.AdmitDecodeTiered(inW, inH, fps, decCodec(hevc), mfenc.CPUDecodeCostMB(inW, inH), decmode.DefaultYieldMinGainMB)
+		}
 		return mfenc.DecVerdict{Allow: d.Admit, Present: d.Present, FreeMB: d.FreeMB,
 			CostMB: d.CostMB, ReserveMB: d.ReserveMB, Reason: d.Reason}
 	}

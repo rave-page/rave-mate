@@ -327,3 +327,29 @@ func TestNoYieldWhenGainIsTrivial(t *testing.T) {
 		t.Fatalf("HW failure must still demote, got %+v", sw)
 	}
 }
+
+// A route that landed in CPU mode with a trivial gain returns to HW after the dwell as soon as the
+// budget admits it - no system-floor headroom needed; a refused HW pipeline never promotes.
+func TestTrivialGainPromotesWithoutFloor(t *testing.T) {
+	c := New(Config{SystemFloorMB: 700}, CPU, t0, "HW failed")
+	now := t0
+	tick := func(admit bool) *Switch {
+		now = now.Add(2 * time.Second)
+		return drive(c, Input{Now: now, Present: true, FreeMB: 300, HWAdmit: admit, HWNeedMB: 34, CPUNeedMB: 20, DestOK: true})
+	}
+	for k := 0; k < 60; k++ {
+		if sw := tick(false); sw != nil {
+			t.Fatalf("promoted a refused HW pipeline: %+v", sw)
+		}
+	}
+	var at time.Duration
+	start := now
+	for k := 0; k < 60 && c.Mode() == CPU; k++ {
+		if sw := tick(true); sw != nil && sw.To == HW {
+			at = now.Sub(start)
+		}
+	}
+	if c.Mode() != HW || at < defaultDwell {
+		t.Fatalf("want promotion after the dwell, mode=%s after %s", c.Mode(), at)
+	}
+}

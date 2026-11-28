@@ -110,6 +110,26 @@ func (b *Budget) AdmitDecode(w, h, fps int, codec string) Decision {
 	return b.Admit(OpDecode, Geom{W: w, H: h, FPS: fps, Codec: codec})
 }
 
+// AdmitDecodeTiered is AdmitDecode for a route that can fall back to CPU decode (cpuMB = that mode's
+// GPU cost). A HW pipeline the system floor refuses is still admitted, down to the HARD floor, when CPU
+// mode would free less than minGainMB: the fallback then gives other apps nothing and costs the host a
+// software decode. Incident 2026-11-28: 34 MB HW vs 20 MB CPU at 4K, routes reopened in CPU mode on a
+// card Resolume had filled.
+func (b *Budget) AdmitDecodeTiered(w, h, fps int, codec string, cpuMB, minGainMB float64) Decision {
+	d := b.AdmitDecode(w, h, fps, codec)
+	if d.Admit || d.CostMB-cpuMB >= minGainMB {
+		return d
+	}
+	g := Geom{W: w, H: h, FPS: fps, Codec: codec}
+	l := AdmitLight(b.inputs(), OpDecode, g, b.cost(OpDecode, g), 0, b.pol)
+	if !l.Admit {
+		return d
+	}
+	l.Reason = fmt.Sprintf("HW kept below the system floor - CPU mode would free only %.0f MB: %s", d.CostMB-cpuMB, l.Reason)
+	b.record(OpDecode, l)
+	return l
+}
+
 // AdmitSender gates a NEW Spout sender: our texture (+ interop on the GL backend) plus the receiver
 // follow cost the new handle triggers in Resolume.
 func (b *Budget) AdmitSender(w, h int) Decision {

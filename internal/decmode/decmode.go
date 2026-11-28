@@ -45,13 +45,14 @@ type Config struct {
 	YieldMinGainMB uint64
 }
 
-const defaultYieldMinGainMB = 64
+// DefaultYieldMinGainMB is the default YieldMinGainMB (also the open/rebuild admission's threshold).
+const DefaultYieldMinGainMB = 64
 
 func (c Config) yieldMinGainMB() uint64 {
 	if c.YieldMinGainMB > 0 {
 		return c.YieldMinGainMB
 	}
-	return defaultYieldMinGainMB
+	return DefaultYieldMinGainMB
 }
 
 // yieldGainMB is the VRAM a HW -> CPU demotion frees.
@@ -264,6 +265,9 @@ func (c *Controller) Tick(in Input) *Switch {
 		return nil
 	case CPU:
 		floor := c.cfg.PromoteFloorMB(in.HWNeedMB)
+		if yieldGainMB(in) < c.cfg.yieldMinGainMB() {
+			floor = 0 // CPU mode frees next to nothing: back to HW once admitted (dwell + back-off still apply)
+		}
 		ready := in.Present && in.HWAdmit && in.FreeMB >= floor && c.avgFree >= floor
 		if !ready {
 			c.readySince = time.Time{}
