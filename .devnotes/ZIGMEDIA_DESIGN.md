@@ -229,6 +229,9 @@ skipped-macroblock P-frames instead of going quiet. This is arguably better for 
 (the peer's jitter buffer never starves), costs a few hundred bytes/frame, and is visible via
 `capFrames` vs. AU sizes. Frame-new gating (metadata-only receiver, or the sender's
 frame-count shared memory) is an increment-2 optimisation, not a blocker.
+**Superseded 2026-11-28:** gating shipped via the sender's `<name>_Count_Semaphore` (no receiver,
+no GL); see docs/dev/MF_NATIVE_ENCODE.md "New-frame gating". Blind pacing remains the per-sender
+fallback when no counter exists.
 
 ## 7. Wiring, flag gate, fallback semantics
 

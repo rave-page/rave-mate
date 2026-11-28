@@ -147,6 +147,14 @@ type PipelineStats struct {
 	CapSkips    uint64  // pacing ticks skipped (previous encode still running)
 	MtxTimeouts uint64  // shared-texture mutex acquire timeouts (sender contention)
 	SrcErrors   uint64  // capture hard failures (CopyResource/acquire)
+	// DupSkips: tick slots skipped because the sender's frame counter had not advanced (no copy,
+	// CSC or encode - zigmedia new-frame gating); SrcFPS: the producer's real rate from that
+	// counter. Zero when the sender publishes no counter (blind pacing).
+	DupSkips uint64
+	SrcFPS   float64
+	// EncPool/EncPoolGrows: native encoder NV12 input pool depth + on-demand growth count.
+	EncPool      uint32
+	EncPoolGrows uint32
 	// CapSync names which synchronisation the live capture actually got: "keyed", "named" or
 	// "unsync". Rendered because the branch decides correctness, not just contention - a real
 	// Spout sender is a LEGACY shared texture with no keyed mutex, so the field takes a different

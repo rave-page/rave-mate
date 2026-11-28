@@ -54,4 +54,16 @@ type ProcStats struct {
 	// is what encoder SATURATION looks like now - previously the same condition blocked long
 	// enough for the parent's deadline to end the route.
 	BusyDrops uint32
+	// New-frame gating: FrameCounter = the sender publishes Spout's frame counter, so only NEW
+	// frames are captured+encoded (plus a 2 fps keep-alive); DupSkips = tick slots skipped because
+	// the counter had not moved; SrcFPS = the producer's real rate from that counter. All zero on a
+	// blind-paced (counter-less) sender.
+	FrameCounter bool
+	DupSkips     uint64
+	SrcFPS       float64
+	// PoolDepth/PoolGrows: the encoder child's live NV12 input pool depth (starts at 4, the
+	// gpubudget charge) and how often it grew because the encoder held every slot. Growth to 8 on
+	// every session means the cost model under-charges this rig's driver.
+	PoolDepth uint32
+	PoolGrows uint32
 }

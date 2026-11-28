@@ -38,6 +38,7 @@ pub fn build(b: *std.Build) void {
     mod.linkSystemLibrary("dxgi", .{});
     mod.linkSystemLibrary("ole32", .{});
     mod.linkSystemLibrary("ws2_32", .{});
+    mod.linkSystemLibrary("ntdll", .{}); // NtQuerySemaphore: Spout frame-counter read (cap.zig)
     const exe = b.addExecutable(.{ .name = "rave-mate-enc", .root_module = mod });
     exe.subsystem = .Console; // stdio control plane; parent hides the window
     b.installArtifact(exe);

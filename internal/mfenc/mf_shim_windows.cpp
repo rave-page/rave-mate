@@ -76,7 +76,8 @@ struct auEntry {
     int      key;
 };
 
-#define NVPOOL 8 // NV12 round-robin depth (encoder queue is 2-4 deep; 8 = safe slack)
+#define NVPOOL 8 // NV12 round-robin depth. In-proc test/reference encoder only; the product path
+                 // (native/zigenc) starts at 4 and grows on demand to 8
 
 struct mfenc {
     ID3D11Device*           dev;

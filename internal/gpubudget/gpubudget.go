@@ -165,7 +165,9 @@ func EstimateCostMB(op Op, g Geom) float64 {
 		// One shared BGRA texture + interop registration overhead.
 		return sndInteropMB + (px*bppRGBA)/mib
 	case OpEncode:
-		// A small VP NV12 input pool + one RGBA staging + device overhead.
+		// The VP NV12 input pool + one RGBA staging + device overhead. pool = zigenc NVPOOL_INIT: the
+		// child starts there and grows (max 8) only when the encoder holds every slot - visible as
+		// encPoolGrows in route encode telemetry, the signal that this charge is low for a driver.
 		pool := 4.0
 		return encDeviceMB + (px*bppNV12*pool)/mib + (px*bppRGBA)/mib
 	default:

@@ -1,21 +1,21 @@
 package videoshare
 
-// frame.go - a sender's frame counter: PERMANENTLY UNAVAILABLE on this SDK pairing.
+// frame.go - a sender's frame counter, read straight from Spout 2.007's named semaphore
+// "<sender>_Count_Semaphore" whose COUNT is the sender's frame number (SpoutFrameCount.cpp: created
+// with count 1, Wait(0) + Release(2) per sent frame). No SpoutLibrary.dll call: the SPOUTLIBRARY
+// GetSenderFrame slot is vtable-skewed against the shipped DLL and returned junk (see
+// .devnotes/SPOUT_RECV_BLACK_P0.md); the semaphore is the SDK's own source of truth, and the
+// zero-copy encoder child (native/zigenc cap.FrameCounter) reads the same object.
 //
-// Increment 3 added this over SPOUTLIBRARY's GetSenderFrame and measured it returning constant junk
-// (a fixed negative number, with GetSenderFps reporting the MONITOR's refresh rate). The black-frame
-// P0 found the reason: the vendored SpoutLibrary.h and the shipped SpoutLibrary.dll disagree about
-// vtable slot order across a window covering the whole receiver block, so GetSenderFrame was never
-// actually being called. See .devnotes/SPOUT_RECV_BLACK_P0.md.
-//
-// The implementation is gone rather than "fixed": nothing in that window can be trusted, and a
-// plausible-looking number is worse than no number. The declaration stays so callers compile and get
-// an honest "unavailable" instead of junk. Restoring it needs a header that MATCHES the DLL - a
-// supply-chain change (SUPPLY_CHAIN.md), not a code change.
+// Absent (registry "Framecount" off, pre-2.007 or non-SDK sender) = ok false; consumers fail OPEN
+// (treat every tick as new) rather than gate on a missing signal.
 
-// SenderFrame reports a sender's frame counter. ok is ALWAYS false on this SDK pairing; consumers
-// must fail OPEN (treat every tick as new) rather than gate on a missing signal.
-func SenderFrame(string) (frame int64, fps float64, ok bool) { return 0, 0, false }
+// SenderFrame reports a sender's frame counter. fps is always 0: the caller derives the rate from
+// two readings (the counter is the only trustworthy input).
+func SenderFrame(name string) (frame int64, fps float64, ok bool) {
+	f, got := senderFrameCount(name)
+	return f, 0, got
+}
 
 // FrameCountUsable reports whether a sender publishes a usable (non-negative) counter.
 func FrameCountUsable(frame int64, ok bool) bool { return ok && frame >= 0 }

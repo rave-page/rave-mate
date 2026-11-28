@@ -223,6 +223,15 @@ const off_dec_mtx_timeouts = 200;
 // (w<<32 | h). The parent reads these to confirm the receiver VRAM cap engaged at the right size.
 const off_dec_resizes = 208;
 const off_dec_coded = 216;
+// New-frame gating (src:"spout", 224..239): ticks whose sender frame counter had not advanced, so
+// copy + CSC + encode were skipped (no duplicate P-frame); and counter advances seen = the
+// PRODUCER's frame count (the parent derives the real source rate from it). Both stay 0 when the
+// sender publishes no counter (blind pacing, capFlags bit 4 clear).
+const off_dup_skips = 224;
+const off_src_frames = 232;
+// NV12 input pool (every encode session): live depth + how often it grew under encoder pressure.
+const off_pool_depth = 240;
+const off_pool_grows = 244;
 
 // fault_after_frames > 0: crash the process after N encoded frames (test hook - proves
 // route continuity across an encoder-child death; parent injects on first spawn only).
@@ -598,6 +607,7 @@ fn sessionMain(s: *Session) void {
             const t0 = qpcNs();
             const rc = enc.feed(s.frame, @divTrunc(pts, 100), sink);
             s.hdr.addBusy(qpcNs() - t0);
+            publishPool(s, enc);
             s.hdr.setConsSeq(seq);
             _ = SetEvent(s.ev_cons);
             // A hard feed error was IGNORED before: the loop re-entered feed and burned
@@ -644,22 +654,41 @@ fn drainMailbox(s: *Session) Mailbox {
     return m;
 }
 
-// spoutLoop is the zero-copy session body: pace, sample whatever the sender currently has,
-// encode. ALLOCATION-FREE - no queue exists, so backpressure is newest-wins by construction: a
-// late encode delays the next tick and the tick is then RESYNCED, never caught up (no burst).
+// spoutLoop is the zero-copy session body: pace, capture only what is NEW, encode. ALLOCATION-FREE
+// - no queue exists, so backpressure is newest-wins by construction: a late encode delays the next
+// tick and the tick is then RESYNCED, never caught up (no burst).
 //
-// Pacing is BLIND (design Â§6): we do not consult Spout's IsFrameNew, which would need a bound
-// receiver - the very GL/readback object this path removes. A static sender therefore encodes
-// duplicate frames as near-free skipped-macroblock P-frames instead of going quiet, which keeps
-// the peer's jitter buffer fed. capFrames vs AU sizes makes the cost visible.
+// New-frame gating. Spout carries no fps metadata, so the negotiated rate is often an assumption
+// (60) above the producer's real rate; blind pacing then copied, converted and encoded a 30 fps
+// source twice per frame (measured on the 2-PC rig) and the receiver decoded it twice. When the
+// sender publishes Spout's frame counter (cap.FrameCounter: named semaphore, read-only, no GL, no
+// pixels) a due tick whose counter has not advanced does nothing but poll again shortly; the
+// negotiated rate stays the CAP. No counter = the old blind pacing, per sender.
+//
+// Keep-alive: a fully static source still encodes one frame per keepalive_ns, so liveness holds
+// wherever it is measured - the parent's frozen-source oracle (capFrames must move inside its 2 s
+// watch; recycle after 3 s stale), the receiver's frozen-destination oracle (3 s publish silence),
+// the TCP receive idle timeout (10 s) - and framedebug keeps sampling real decoded frames. An IDR
+// request is served by the next due tick regardless of the counter, so a newly joined receiver gets
+// its keyframe at once instead of waiting for motion.
+const keepalive_ns: u64 = 500 * std.time.ns_per_ms; // 2 fps: 4x margin under the 2 s watch window
+
 fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
     const cap_n: i64 = if (s.cap_n > 0) @intCast(s.cap_n) else @intCast(s.fps_n);
     const cap_d: i64 = if (s.cap_d > 0) @intCast(s.cap_d) else 1;
     const period: u64 = @intCast(@max(@divTrunc(std.time.ns_per_s * cap_d, @max(cap_n, 1)), 1_000_000));
+    // Poll cadence while a due tick waits for a new frame: a new frame is encoded within ~2 ms of
+    // publish at 60 fps, and an idle session costs a few hundred cheap syscalls/s.
+    const poll_ms: u32 = @intCast(std.math.clamp(period / 8 / std.time.ns_per_ms, 1, 4));
     const qpc0 = qpcNs();
     var next = qpc0;
     var live = true; // false after srcgone: session + encoder stay alive, capture stops
     var feed_fails: u32 = 0;
+    var idr_due = true; // a session's first frame is never gated
+    var last_feed: u64 = 0;
+    var gated = false; // last poll found a counter (mirrored in capFlags bit 4)
+    var dup_skips: u64 = 0;
+    var polling = false; // a due tick is waiting for a new frame
     while (true) {
         // Sleep only up to the next tick (1..20 ms) - prompt for close/idr/bitrate, and never
         // a hot spin. timeBeginPeriod(1) is already set, so Sleep granularity is ~1 ms.
@@ -669,12 +698,15 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
             const rem = (next - now0) / std.time.ns_per_ms;
             wait_ms = @intCast(@min(@max(rem, 1), 20));
         } else if (live) {
-            wait_ms = 1;
+            wait_ms = if (polling) poll_ms else 1;
         }
         _ = WaitForSingleObject(s.ev_frame, wait_ms);
         const m = drainMailbox(s);
         if (m.closing) break;
-        if (m.idr) enc.forceIDR();
+        if (m.idr) {
+            enc.forceIDR();
+            idr_due = true;
+        }
         if (m.kbps > 0) _ = enc.setBitrate(m.kbps);
         if (m.cap_w > 0 and m.cap_h > 0 and enc.reconfigureOutput(m.cap_w, m.cap_h, sink) == -2) break; // device lost
         if (!live) {
@@ -686,15 +718,40 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
             _ = enc.pump(sink);
             continue;
         }
+        const c = &s.cap_open.?;
+        const fresh = c.fc.poll(now);
+        if ((fresh != .unknown) != gated) {
+            gated = fresh != .unknown;
+            c.flags = if (gated) c.flags | cap.flag_frame_counter else c.flags & ~cap.flag_frame_counter;
+            s.hdr.setCapFlags(c.flags);
+        }
+        s.hdr.setU64At(off_src_frames, c.fc.advances);
+        if (fresh == .same and !idr_due and now - last_feed < keepalive_ns) {
+            // Duplicate: nothing to capture. Counted once per elapsed tick slot (not per poll), and
+            // `next` trails by at most one period, so the first new frame after a quiet spell is
+            // not followed by a catch-up burst.
+            if (now - next >= period) {
+                next += period;
+                dup_skips += 1;
+                s.hdr.setU64At(off_dup_skips, dup_skips);
+            }
+            polling = true;
+            _ = enc.pump(sink);
+            continue;
+        }
+        polling = false;
+        // PTS = capture time on the parent's wall clock, never a frame index: gated ticks are not
+        // evenly spaced, and the receiver's playout is PTS-locked.
         const pts_ns: i64 = s.pts0 + @as(i64, @intCast(now - qpc0));
         const t0 = now;
-        const c = &s.cap_open.?;
         switch (c.feed(enc, @divTrunc(pts_ns, 100), sink)) {
             .ok => {
                 s.hdr.bumpAt(off_cap_frames);
                 s.hdr.setLastCapNs(@intCast(qpcNs()));
                 s.fed += 1;
                 s.hdr.addBusy(qpcNs() - t0);
+                last_feed = now;
+                idr_due = false;
                 if (feed_fails != 0) {
                     feed_fails = 0;
                     s.hdr.setU32At(off_feed_fails, 0);
@@ -721,6 +778,7 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
                 }
             },
         }
+        publishPool(s, enc);
         next += period;
         const after = qpcNs();
         if (after > next and after - next > 2 * period) {
@@ -728,6 +786,12 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
             s.hdr.bumpAt(off_cap_skips);
         }
     }
+}
+
+// publishPool mirrors the encoder's NV12 pool depth + growth count into the header (two stores).
+fn publishPool(s: *Session, enc: *const mf.Enc) void {
+    s.hdr.setU32At(off_pool_depth, @intCast(enc.nv_n));
+    s.hdr.setU32At(off_pool_grows, enc.pool_grows);
 }
 
 // decSessionMain owns one DECODE pipeline: inbound AU ring -> decoder MFT -> VideoProcessorBlt into
@@ -1064,6 +1128,9 @@ pub fn main(init: std.process.Init) !void {
     }
     if (init.environ_map.get("RAVE_MATE_MFENC_FAULT_AFTER_FRAMES")) |v| {
         fault_after_frames = std.fmt.parseInt(u64, v, 10) catch 0;
+    }
+    if (init.environ_map.get("RAVE_MATE_MFENC_POOL_INIT")) |v| { // test hook: force pool growth
+        mf.pool_init = std.math.clamp(std.fmt.parseInt(usize, v, 10) catch 4, 1, 8); // 1 = grow on the first frame
     }
     if (init.environ_map.get("RAVE_MATE_MFDEC_PROBE_BANDS")) |v| {
         probe_bands = std.mem.eql(u8, v, "1");
