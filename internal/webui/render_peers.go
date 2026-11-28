@@ -608,7 +608,7 @@ func (u *UI) sourceCaps(peer, sourceID string) (kbps, fps int) {
 // capKbpsOptions lists the per-source bitrate caps (kbps values, Mbps labels). A value set via ctl
 // that is no preset is kept, in order, so the select shows the truth.
 func capKbpsOptions(cur int) [][2]string {
-	return capOptions(cur, []int{4000, 8000, 12000, 20000, 30000, 50000}, func(k int) string {
+	return capOptions(cur, []int{1000, 2000, 4000, 8000, 12000, 20000, 30000, 50000}, func(k int) string { // 1/2 Mbps: webcams
 		return i18n.T("peers.capMbps", i18n.A{"n": strconv.FormatFloat(float64(k)/1000, 'f', -1, 64)})
 	})
 }

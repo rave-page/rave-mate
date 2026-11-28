@@ -54,8 +54,11 @@ func TestPeersRecvCapsStateAndAction(t *testing.T) {
 		t.Fatalf("current labels: kbps %q fps %q", r.Kbps.CurLabel, r.FPS.CurLabel)
 	}
 	opts := capKbpsOptions(12500)
-	if opts[0][0] != "0" || opts[3][0] != "12000" || opts[4][0] != "12500" || opts[5][0] != "20000" {
+	if opts[0][0] != "0" || opts[5][0] != "12000" || opts[6][0] != "12500" || opts[7][0] != "20000" {
 		t.Fatalf("non-preset 12500 not kept in order: %v", opts)
+	}
+	if opts[1] != [2]string{"1000", "1 Mbps"} || opts[2] != [2]string{"2000", "2 Mbps"} { // webcam presets
+		t.Fatalf("low presets missing: %v", opts)
 	}
 	u.mediaSetCap("node1/spout:cam", "8000", true)
 	deadline := time.Now().Add(2 * time.Second)
