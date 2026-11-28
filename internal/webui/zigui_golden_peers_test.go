@@ -132,10 +132,23 @@ func peersFixtures() map[string]peersSt {
 			Show: true, Head: "Receive video",
 			Rows: []peerRecvRowSt{
 				{Mark: "◂ ", Line: "cam @ Studio PC",
-					Btn: uiBtn{Label: "Stop", Variant: "destructive", Act: "media-stop:sess-1"}},
+					Btn:  uiBtn{Label: "Stop", Variant: "destructive", Act: "media-stop:sess-1"},
+					Caps: true,
+					Kbps: peerSel("media-cap-kbps-node-1-spout-cam", "Max bitrate", "8 Mbps", [2]string{"0", "No cap"}, [2]string{"8000", "8 Mbps"}, [2]string{"12500", "12.5 Mbps"}),
+					FPS:  peerSel("media-cap-fps-node-1-spout-cam", "Max fps", "No cap", [2]string{"0", "No cap"}, [2]string{"30", "30"})},
+				{Mark: "◂ ", Line: "4K @ Studio PC",
+					Btn:  uiBtn{Label: "Stop", Variant: "destructive", Act: "media-stop:sess-2"},
+					Caps: true,
+					Kbps: func() selState { // dropdown OPEN with a filter typed
+						s := peerSel("media-cap-kbps-node-1-spout-4K", "Max bitrate", "No cap", [2]string{"0", "No cap"}, [2]string{"50000", "50 Mbps"})
+						s.Open, s.Filter = true, "50"
+						return s
+					}(),
+					FPS: peerSel("media-cap-fps-node-1-spout-4K", "Max fps", "60", [2]string{"0", "No cap"}, [2]string{"60", "60"})},
 				{Line: "screen @ Laptop · 1920x1080@60",
 					Btn: uiBtn{Label: "Receive", Variant: "go", Act: "media-recv:node-2\x1fdesc-9"}},
 			},
+			Note: "Per-source caps, saved with the source. Bitrate applies within a second.",
 		},
 	}
 	populated.Body.Cam = peerCamSt{
@@ -263,9 +276,13 @@ func peersFixtures() map[string]peersSt {
 			Show: true, Head: `R&ecv "video"`,
 			Rows: []peerRecvRowSt{
 				{Mark: "◂ ", Line: `c&am @ A"B'<>`,
-					Btn: uiBtn{Label: `St&op'`, Variant: "destructive", Act: `media-stop:s&"1'<>`}},
+					Btn:  uiBtn{Label: `St&op'`, Variant: "destructive", Act: `media-stop:s&"1'<>`},
+					Caps: true,
+					Kbps: peerSel(`media-cap-kbps-n&"1'<>`, `M&ax "bitrate"<>'`, `8 M&bps"`, [2]string{"0", `N&o "cap"`}, [2]string{"8000", `8 M&bps"`}),
+					FPS:  peerSel(`media-cap-fps-n&"1'<>`, `M&ax 'fps'<>`, `N&o "cap"`, [2]string{"0", `N&o "cap"`})},
 				{Line: `s&rc @ A"B`, Btn: uiBtn{Label: `R&ecv"`, Variant: "go", Act: "media-recv:n&2\x1fd\"9'<>"}},
 			},
+			Note: `C&aps "apply" <live>'`,
 		},
 	}
 	escaping.Body.Cam = peerCamSt{
@@ -341,8 +358,11 @@ func peersFixtures() map[string]peersSt {
 		RoutesHdr: longS,
 		Routes:    []peerRouteSt{{Title: longS, Detail: strings.Repeat("d", 800), Pipe: longS}},
 		Recv: peerRecvSt{Show: true, Head: longS, Rows: []peerRecvRowSt{
-			{Mark: "◂ ", Line: longS, Btn: uiBtn{Label: longS, Variant: "destructive", Act: strings.Repeat("media-stop:s", 80)}},
-		}},
+			{Mark: "◂ ", Line: longS, Btn: uiBtn{Label: longS, Variant: "destructive", Act: strings.Repeat("media-stop:s", 80)},
+				Caps: true,
+				Kbps: peerSel(strings.Repeat("media-cap-kbps-n", 40), longS, longS, [2]string{longS, longS}),
+				FPS:  peerSel(strings.Repeat("media-cap-fps-n", 40), longS, "", [2]string{"", longS})},
+		}, Note: longS},
 	}
 	long.Body.Cam = peerCamSt{Show: true, Empty: longS, Nodes: []camNodeSt{
 		{Name: longS, RefreshAct: strings.Repeat("peers-cam-refresh:n", 40), Status: longS,
@@ -397,8 +417,11 @@ func peersFixtures() map[string]peersSt {
 		NoRoutes: "нет активных маршрутов", RoutesHdr: "Маршруты: 1",
 		Routes: []peerRouteSt{{Title: "Отправка → Студія", Detail: "потери 0 · дрожание 0.31 ms", Pipe: "h264_nvenc уровень 2 · 6.2 Mbps"}},
 		Recv: peerRecvSt{Show: true, Head: "Приём видео", Rows: []peerRecvRowSt{
-			{Mark: "◂ ", Line: "камера @ Студія", Btn: uiBtn{Label: "止める", Variant: "destructive", Act: "media-stop:сесія☂"}},
-		}},
+			{Mark: "◂ ", Line: "камера @ Студія", Btn: uiBtn{Label: "止める", Variant: "destructive", Act: "media-stop:сесія☂"},
+				Caps: true,
+				Kbps: peerSel("media-cap-kbps-узел☂", "Макс. битрейт", "8 Мбит/с", [2]string{"0", "Без ограничения"}, [2]string{"8000", "8 Мбит/с"}),
+				FPS:  peerSel("media-cap-fps-узел☂", "最大 fps", "30", [2]string{"0", "なし"}, [2]string{"30", "30"})},
+		}, Note: "Ограничения на источник · 上限"},
 	}
 	unicode.Body.Cam = peerCamSt{Show: true, Empty: "нет камер", Nodes: []camNodeSt{
 		{Name: "Этот экземпляр", RefreshAct: "peers-cam-refresh:узел☂", Status: "В эфире 1280x720 @ 30",

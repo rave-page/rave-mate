@@ -41,7 +41,7 @@ const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 const pickbrowse = @import("pickbrowse.zig");
 
-pub const schema_hash: u32 = 0x755e25bc;
+pub const schema_hash: u32 = 0x2dd61d20;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -2360,6 +2360,9 @@ pub fn decodePeerRecvRow(r: *wire.Reader, out: *peers.RecvRow) wire.Error!void {
         1 => out.mark = try r.str(t),
         2 => out.line = try r.str(t),
         3 => out.btn = try r.sub(c.Btn, decodeUiBtn, t),
+        4 => out.caps = try r.boolean(t),
+        5 => out.kbps = try r.sub(c.Select, decodeSelState, t),
+        6 => out.fps = try r.sub(c.Select, decodeSelState, t),
         else => try r.skip(t),
     };
 }
@@ -2369,6 +2372,7 @@ pub fn decodePeerRecv(r: *wire.Reader, out: *peers.Recv) wire.Error!void {
         1 => out.show = try r.boolean(t),
         2 => out.head = try r.str(t),
         3 => out.rows = try r.list(peers.RecvRow, decodePeerRecvRow, t),
+        4 => out.note = try r.str(t),
         else => try r.skip(t),
     };
 }

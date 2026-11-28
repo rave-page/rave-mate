@@ -839,11 +839,11 @@ var schema = []msg{
 	},
 	{
 		name: "PeerRecvRow", goT: "peerRecvRowSt", zigT: "peers.RecvRow",
-		fs: []field{s(1, "Mark", "mark"), s(2, "Line", "line"), st(3, "Btn", "btn", "UiBtn")},
+		fs: []field{s(1, "Mark", "mark"), s(2, "Line", "line"), st(3, "Btn", "btn", "UiBtn"), b(4, "Caps", "caps"), st(5, "Kbps", "kbps", "SelState"), st(6, "FPS", "fps", "SelState")},
 	},
 	{
 		name: "PeerRecv", goT: "peerRecvSt", zigT: "peers.Recv",
-		fs: []field{b(1, "Show", "show"), s(2, "Head", "head"), li(3, "Rows", "rows", "PeerRecvRow")},
+		fs: []field{b(1, "Show", "show"), s(2, "Head", "head"), li(3, "Rows", "rows", "PeerRecvRow"), s(4, "Note", "note")},
 	},
 	{
 		name: "PeerMedia", goT: "peerMediaSt", zigT: "peers.Media",

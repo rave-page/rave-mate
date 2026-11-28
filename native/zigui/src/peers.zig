@@ -56,12 +56,16 @@ pub const RecvRow = struct {
     mark: []const u8 = "", // trusted literal prefix, emitted raw
     line: []const u8 = "",
     btn: c.Btn = .{},
+    caps: bool = false, // active receive: per-source max bitrate + max fps selects under the row
+    kbps: c.Select = .{},
+    fps: c.Select = .{},
 };
 
 pub const Recv = struct {
     show: bool = false,
     head: []const u8 = "",
     rows: []const RecvRow = &.{},
+    note: []const u8 = "", // what the caps do + when they apply ("" = no active receive)
 };
 
 pub const Media = struct {
@@ -354,6 +358,17 @@ fn renderRecv(h: *Html, s: Recv) !void {
         try c.btnOf(h, r.btn);
         try c.btnRowClose(h);
         try h.raw("</div>");
+        if (r.caps) {
+            try h.raw("<div class=fpair>");
+            try c.selectBox(h, r.kbps);
+            try c.selectBox(h, r.fps);
+            try h.raw("</div>");
+        }
+    }
+    if (s.note.len != 0) {
+        try h.raw("<div class=media-sub>");
+        try h.esc(s.note);
+        try h.raw("</div>");
     }
     try h.raw("</div>");
 }
@@ -579,6 +594,21 @@ test "media plane: no routes + recv block" {
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, "<span class=row-label>◂ cam @ Studio</span>") != null);
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, "data-act=\"media-recv:n1\x1fd2\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, "<div class=media-clock>TC master: this instance</div>") != null);
+}
+
+test "recv: active row carries the per-source cap selects + note; offered row does not" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    const rows = [_]RecvRow{
+        .{ .mark = "◂ ", .line = "cam", .btn = .{ .label = "Stop", .variant = "destructive", .act = "media-stop:s1" }, .caps = true, .kbps = .{ .id = "media-cap-kbps-n1-cam", .label = "Max bitrate", .curLabel = "8 Mbps" }, .fps = .{ .id = "media-cap-fps-n1-cam", .label = "Max fps", .curLabel = "No cap" } },
+        .{ .line = "cam2", .btn = .{ .label = "Receive", .variant = "go", .act = "media-recv:n1\x1fd2" } },
+    };
+    try renderRecv(&h, .{ .show = true, .head = "Receive video", .rows = &rows, .note = "caps apply live" });
+    const out = h.b.items;
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, out, "<div class=fpair>"));
+    try std.testing.expect(std.mem.indexOf(u8, out, "id=\"ss-media-cap-kbps-n1-cam\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "id=\"ss-media-cap-fps-n1-cam\"") != null);
+    try std.testing.expect(std.mem.endsWith(u8, out, "<div class=media-sub>caps apply live</div></div>"));
 }
 
 test "media plane: routes with pipeline line" {
