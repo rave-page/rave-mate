@@ -70,7 +70,7 @@ func Factories(log *logbus.Bus) (medialink.EncoderFactory, medialink.DecoderFact
 					log.Warn(source, "VA-API native encode unavailable - falling back to the ffmpeg *_vaapi readback path (same codec; expect host readback)", map[string]any{"reason": reason, "encoder": spec.Encoder})
 				}
 			}
-			sub, ok := ffmpegVAAPIFallback(spec.Codec)
+			sub, ok := ffmpegVAAPIFallback(ctx, log, spec.Codec)
 			if !ok {
 				return nil, fmt.Errorf("mediapipe: VA-API native encode unavailable and no ffmpeg *_vaapi fallback probed for codec %d", spec.Codec)
 			}
@@ -180,10 +180,16 @@ func encodeEngine(spec medialink.EncodeSpec) encodeEngineKind {
 // ffmpegVAAPIFallback picks the ffmpeg *_vaapi encoder for a wire codec when the native VA engine
 // can't serve the source (non-dmabuf / non-importable). Same codec the peer was answered with, so the
 // readback substitution is invisible on the wire. ok=false when that encoder was not probed.
-func ffmpegVAAPIFallback(codec medialink.Codec) (string, bool) {
+//
+// The probe cache is per PROCESS and the daemon runs the probe, so in the media child it is empty
+// until someone asks: probe here (once, seconds) rather than fail every non-dmabuf route - the
+// webcam on a Linux sender could never start otherwise.
+func ffmpegVAAPIFallback(ctx context.Context, log *logbus.Bus, codec medialink.Codec) (string, bool) {
 	caps, ok := Cached()
 	if !ok {
-		return "", false
+		if caps, ok = Probe(ctx, log); !ok {
+			return "", false
+		}
 	}
 	want := "h264_vaapi"
 	if codec == medialink.CodecHEVC {
