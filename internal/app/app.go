@@ -2136,6 +2136,10 @@ func run(parent context.Context, serviceMode bool) error {
 		gpuMon = mon // wire the cached sample into Services (Live VRAM meter)
 		perfmon.RegisterProbe("gpu memory", mon.Probe)
 		debuglog.Go(log, "gpumem", func() { mon.Run(ctx) })
+		// Per-process CPU history beside it (procs.csv): who burned the CPU, after the fact.
+		if p := gpuCSVPath(); p != "" {
+			debuglog.Go(log, "perfmon", func() { perfmon.RunProcCSV(ctx, filepath.Join(filepath.Dir(p), "procs.csv")) })
+		}
 		log.Info("gpumem", "VRAM watchdog armed (per-adapter + per-process growth curve, low-VRAM toast)", nil)
 	}
 
