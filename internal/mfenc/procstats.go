@@ -61,4 +61,9 @@ type ProcStats struct {
 	FrameCounter bool
 	DupSkips     uint64
 	SrcFPS       float64
+	// PoolDepth/PoolGrows: the encoder child's live NV12 input pool depth (starts at 4, the
+	// gpubudget charge) and how often it grew because the encoder held every slot. Growth to 8 on
+	// every session means the cost model under-charges this rig's driver.
+	PoolDepth uint32
+	PoolGrows uint32
 }

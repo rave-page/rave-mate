@@ -152,6 +152,9 @@ type PipelineStats struct {
 	// counter. Zero when the sender publishes no counter (blind pacing).
 	DupSkips uint64
 	SrcFPS   float64
+	// EncPool/EncPoolGrows: native encoder NV12 input pool depth + on-demand growth count.
+	EncPool      uint32
+	EncPoolGrows uint32
 	// CapSync names which synchronisation the live capture actually got: "keyed", "named" or
 	// "unsync". Rendered because the branch decides correctness, not just contention - a real
 	// Spout sender is a LEGACY shared texture with no keyed mutex, so the field takes a different

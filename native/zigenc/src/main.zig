@@ -229,6 +229,9 @@ const off_dec_coded = 216;
 // sender publishes no counter (blind pacing, capFlags bit 4 clear).
 const off_dup_skips = 224;
 const off_src_frames = 232;
+// NV12 input pool (every encode session): live depth + how often it grew under encoder pressure.
+const off_pool_depth = 240;
+const off_pool_grows = 244;
 
 // fault_after_frames > 0: crash the process after N encoded frames (test hook - proves
 // route continuity across an encoder-child death; parent injects on first spawn only).
@@ -604,6 +607,7 @@ fn sessionMain(s: *Session) void {
             const t0 = qpcNs();
             const rc = enc.feed(s.frame, @divTrunc(pts, 100), sink);
             s.hdr.addBusy(qpcNs() - t0);
+            publishPool(s, enc);
             s.hdr.setConsSeq(seq);
             _ = SetEvent(s.ev_cons);
             // A hard feed error was IGNORED before: the loop re-entered feed and burned
@@ -774,6 +778,7 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
                 }
             },
         }
+        publishPool(s, enc);
         next += period;
         const after = qpcNs();
         if (after > next and after - next > 2 * period) {
@@ -781,6 +786,12 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
             s.hdr.bumpAt(off_cap_skips);
         }
     }
+}
+
+// publishPool mirrors the encoder's NV12 pool depth + growth count into the header (two stores).
+fn publishPool(s: *Session, enc: *const mf.Enc) void {
+    s.hdr.setU32At(off_pool_depth, @intCast(enc.nv_n));
+    s.hdr.setU32At(off_pool_grows, enc.pool_grows);
 }
 
 // decSessionMain owns one DECODE pipeline: inbound AU ring -> decoder MFT -> VideoProcessorBlt into
@@ -1117,6 +1128,9 @@ pub fn main(init: std.process.Init) !void {
     }
     if (init.environ_map.get("RAVE_MATE_MFENC_FAULT_AFTER_FRAMES")) |v| {
         fault_after_frames = std.fmt.parseInt(u64, v, 10) catch 0;
+    }
+    if (init.environ_map.get("RAVE_MATE_MFENC_POOL_INIT")) |v| { // test hook: force pool growth
+        mf.pool_init = std.math.clamp(std.fmt.parseInt(usize, v, 10) catch 4, 1, 8); // 1 = grow on the first frame
     }
     if (init.environ_map.get("RAVE_MATE_MFDEC_PROBE_BANDS")) |v| {
         probe_bands = std.mem.eql(u8, v, "1");

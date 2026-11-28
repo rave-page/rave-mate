@@ -519,7 +519,38 @@ fn h264LevelFor(w: i32, h: i32, fpsN: i32, fpsD: i32) u32 {
     return 52;
 }
 
-const NVPOOL = 8; // NV12 round-robin depth (encoder queue 2-4 deep; 8 = slack)
+// NV12 input pool: starts at NVPOOL_INIT, grows on demand one slot at a time up to NVPOOL_MAX
+// (the old fixed depth, ~95 MiB at 4K). Any depth >= 2 is CORRECT under gateInput's in-flight cap
+// (a slot is rewritten only once its submission is out of the encoder); depth only bounds how many
+// inputs the MFT may hold. That number is driver behaviour, not provable from this code - an async
+// MFT that wants K inputs queued before its first output would starve at a smaller pool - so
+// instead of guessing, the pool grows exactly when the cap would make the encoder wait.
+// NVPOOL_INIT = 4 is what internal/gpubudget charges an encode session.
+const NVPOOL_INIT = 4;
+const NVPOOL_MAX = 8;
+/// pool_init: initial depth; RAVE_MATE_MFENC_POOL_INIT (1..8) is a TEST hook that makes growth
+/// reachable on silicon whose MFT never holds an input across a submit (1 = grows on frame one).
+pub var pool_init: usize = NVPOOL_INIT;
+
+// rotateIn moves a[n] to a[k], shifting a[k..n) up one (pool growth splice).
+fn rotateIn(comptime T: type, a: *[NVPOOL_MAX]T, k: usize, n: usize) void {
+    const v = a[n];
+    var i = n;
+    while (i > k) : (i -= 1) a[i] = a[i - 1];
+    a[k] = v;
+}
+
+test "rotateIn splices the new slot at k and keeps rotation order" {
+    var a = [_]u8{ 0, 1, 2, 3, 9, 0, 0, 0 };
+    rotateIn(u8, &a, 1, 4);
+    try std.testing.expectEqualSlices(u8, &.{ 0, 9, 1, 2, 3 }, a[0..5]);
+    var b = [_]u8{ 0, 1, 2, 3, 9, 0, 0, 0 };
+    rotateIn(u8, &b, 0, 4);
+    try std.testing.expectEqualSlices(u8, &.{ 9, 0, 1, 2, 3 }, b[0..5]);
+    var c = [_]u8{ 0, 1, 2, 3, 9, 0, 0, 0 };
+    rotateIn(u8, &c, 4, 4); // nv_idx wrapped to the end: append
+    try std.testing.expectEqualSlices(u8, &.{ 0, 1, 2, 3, 9 }, c[0..5]);
+}
 const FEED_WAIT_MS = 2000; // CLOSE-time budget only (drain): a tail may legitimately take a while
 
 // SUBMIT_WAIT_MS bounds a SINGLE frame's wait for encoder credit, and it is deliberately far below
@@ -643,10 +674,12 @@ pub const Enc = struct {
     vproc: *anyopaque = undefined,
     in_view: *anyopaque = undefined,
     in_tex: *anyopaque = undefined,
-    nv_tex: [NVPOOL]?*anyopaque = @splat(null),
-    nv_view: [NVPOOL]?*anyopaque = @splat(null),
-    nv_sample: [NVPOOL]?*IMFSample = @splat(null),
+    nv_tex: [NVPOOL_MAX]?*anyopaque = @splat(null),
+    nv_view: [NVPOOL_MAX]?*anyopaque = @splat(null),
+    nv_sample: [NVPOOL_MAX]?*IMFSample = @splat(null),
     nv_idx: usize = 0,
+    nv_n: usize = 0, // live pool depth (NVPOOL_INIT..NVPOOL_MAX)
+    pool_grows: u32 = 0, // on-demand growth events this session (telemetry)
     enc: *IMFTransform = undefined,
     // act is the ACTIVATE the bound MFT came from, kept alive so close() can ShutdownObject it:
     // a hardware MFT created through IMFActivate is torn down by its activate, not by Release
@@ -661,8 +694,8 @@ pub const Enc = struct {
     // still does CSC + scale on whatever device we have (hardware or WARP).
     sw: bool = false,
     sw_stage_tex: ?*anyopaque = null, // STAGING NV12 for the GPU→host readback (sw tier only)
-    sw_sample: [NVPOOL]?*IMFSample = @splat(null), // system-memory NV12 samples (sw tier only)
-    sw_buf: [NVPOOL]?*IMFMediaBuffer = @splat(null),
+    sw_sample: [NVPOOL_MAX]?*IMFSample = @splat(null), // system-memory NV12 samples (sw tier only)
+    sw_buf: [NVPOOL_MAX]?*IMFMediaBuffer = @splat(null),
     stage_sink: StageSink = null,
     swz: ?[]u8 = null, // BGRA swizzle scratch when the VP rejects RGBA input
     in_w: i32,
@@ -1390,85 +1423,115 @@ pub const Enc = struct {
     fn buildNV12Pool(e: *Enc) OpenErr!void {
         e.st(.create_textures);
         e.nv_idx = 0;
-        var i: usize = 0;
-        while (i < NVPOOL) : (i += 1) {
-            var td = D3D11_TEXTURE2D_DESC{
-                .Width = @intCast(e.out_w),
-                .Height = @intCast(e.out_h),
-                .MipLevels = 1,
-                .ArraySize = 1,
-                .Format = DXGI_FORMAT_NV12,
-                .SampleCount = 1,
-                .SampleQuality = 0,
-                .Usage = 0,
-                // SHADER_RESOURCE alongside RENDER_TARGET: AMD's and Intel's encoder MFTs create
-                // an SRV over the input surface (they run a shader pass before submitting to the
-                // silicon), where NVENC consumes the texture directly. A render-target-only
-                // surface therefore worked on NVIDIA and is a driver-side view creation failure -
-                // in the worst case a fault - on the other two vendors.
-                .BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE,
-                .CPUAccessFlags = 0,
-                .MiscFlags = 0,
-            };
-            var nt: ?*anyopaque = null;
-            var hr = e.dev.v.CreateTexture2D(@ptrCast(e.dev), &td, null, &nt);
-            if (failed(hr) or nt == null) {
-                // Some drivers refuse NV12+SHADER_RESOURCE. Retry render-target-only rather than
-                // fail the route: the bind flag is a portability fix, not a requirement.
-                td.BindFlags = D3D11_BIND_RENDER_TARGET;
-                hr = e.dev.v.CreateTexture2D(@ptrCast(e.dev), &td, null, &nt);
-                if (failed(hr) or nt == null) return e.setErr("CreateTexture2D(nv12)", hr);
-            }
-            e.nv_tex[i] = nt.?;
-            const ovd = VPOV_DESC{ .ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D, .a = 0, .b = 0, .c = 0 };
-            var ov: ?*anyopaque = null;
-            hr = e.vdev.v.CreateVideoProcessorOutputView(@ptrCast(e.vdev), nt.?, e.vpe, &ovd, &ov);
-            if (failed(hr) or ov == null) return e.setErr("CreateVideoProcessorOutputView", hr);
-            e.nv_view[i] = ov.?;
-            if (e.sw) continue; // software tier: host samples below, no DXGI surface buffers
-            var mb: ?*IMFMediaBuffer = null;
-            hr = MFCreateDXGISurfaceBuffer(&IID_ID3D11Texture2D, nt.?, 0, 0, &mb);
-            if (failed(hr) or mb == null) return e.setErr("MFCreateDXGISurfaceBuffer(nv12)", hr);
-            var braw: ?*anyopaque = null;
-            if (!failed(qi(mb.?, &IID_IMF2DBuffer, &braw)) and braw != null) {
-                const b2: *IMF2DBuffer = @ptrCast(@alignCast(braw.?));
-                var cl: u32 = 0;
-                if (!failed(b2.v.GetContiguousLength(@ptrCast(b2), &cl))) {
-                    _ = mb.?.v.SetCurrentLength(@ptrCast(mb.?), cl);
-                }
-                release(b2);
-            }
-            var smp: ?*IMFSample = null;
-            hr = MFCreateSample(&smp);
-            if (failed(hr) or smp == null) {
-                release(mb.?);
-                return e.setErr("MFCreateSample(nv12)", hr);
-            }
-            _ = smp.?.v.AddBuffer(@ptrCast(smp.?), mb.?);
-            release(mb.?);
-            e.nv_sample[i] = smp.?;
-        }
+        e.nv_n = 0;
         if (e.sw) try e.openSoftwareInput();
+        while (e.nv_n < pool_init) : (e.nv_n += 1) try e.buildSlot(e.nv_n);
+    }
+
+    // buildSlot creates pool slot i: NV12 texture + VP output view + (hardware) DXGI surface sample or
+    // (software) system-memory sample. Partial state is left in the slot arrays for release().
+    fn buildSlot(e: *Enc, i: usize) OpenErr!void {
+        var td = D3D11_TEXTURE2D_DESC{
+            .Width = @intCast(e.out_w),
+            .Height = @intCast(e.out_h),
+            .MipLevels = 1,
+            .ArraySize = 1,
+            .Format = DXGI_FORMAT_NV12,
+            .SampleCount = 1,
+            .SampleQuality = 0,
+            .Usage = 0,
+            // SHADER_RESOURCE alongside RENDER_TARGET: AMD's and Intel's encoder MFTs create
+            // an SRV over the input surface (they run a shader pass before submitting to the
+            // silicon), where NVENC consumes the texture directly. A render-target-only
+            // surface therefore worked on NVIDIA and is a driver-side view creation failure -
+            // in the worst case a fault - on the other two vendors.
+            .BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE,
+            .CPUAccessFlags = 0,
+            .MiscFlags = 0,
+        };
+        var nt: ?*anyopaque = null;
+        var hr = e.dev.v.CreateTexture2D(@ptrCast(e.dev), &td, null, &nt);
+        if (failed(hr) or nt == null) {
+            // Some drivers refuse NV12+SHADER_RESOURCE. Retry render-target-only rather than
+            // fail the route: the bind flag is a portability fix, not a requirement.
+            td.BindFlags = D3D11_BIND_RENDER_TARGET;
+            hr = e.dev.v.CreateTexture2D(@ptrCast(e.dev), &td, null, &nt);
+            if (failed(hr) or nt == null) return e.setErr("CreateTexture2D(nv12)", hr);
+        }
+        e.nv_tex[i] = nt.?;
+        const ovd = VPOV_DESC{ .ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D, .a = 0, .b = 0, .c = 0 };
+        var ov: ?*anyopaque = null;
+        hr = e.vdev.v.CreateVideoProcessorOutputView(@ptrCast(e.vdev), nt.?, e.vpe, &ovd, &ov);
+        if (failed(hr) or ov == null) return e.setErr("CreateVideoProcessorOutputView", hr);
+        e.nv_view[i] = ov.?;
+        if (e.sw) return e.buildSwSlot(i); // software tier: host sample, no DXGI surface buffer
+        var mb: ?*IMFMediaBuffer = null;
+        hr = MFCreateDXGISurfaceBuffer(&IID_ID3D11Texture2D, nt.?, 0, 0, &mb);
+        if (failed(hr) or mb == null) return e.setErr("MFCreateDXGISurfaceBuffer(nv12)", hr);
+        var braw: ?*anyopaque = null;
+        if (!failed(qi(mb.?, &IID_IMF2DBuffer, &braw)) and braw != null) {
+            const b2: *IMF2DBuffer = @ptrCast(@alignCast(braw.?));
+            var cl: u32 = 0;
+            if (!failed(b2.v.GetContiguousLength(@ptrCast(b2), &cl))) {
+                _ = mb.?.v.SetCurrentLength(@ptrCast(mb.?), cl);
+            }
+            release(b2);
+        }
+        var smp: ?*IMFSample = null;
+        hr = MFCreateSample(&smp);
+        if (failed(hr) or smp == null) {
+            release(mb.?);
+            return e.setErr("MFCreateSample(nv12)", hr);
+        }
+        _ = smp.?.v.AddBuffer(@ptrCast(smp.?), mb.?);
+        release(mb.?);
+        e.nv_sample[i] = smp.?;
+    }
+
+    // growPool adds one slot (bounded by NVPOOL_MAX) and splices it in at nv_idx, so it is the slot
+    // written next and every existing slot keeps its rotation order: the oldest slot is then reused
+    // after nv_n (old depth) submissions, which the in-flight cap (<= new depth - 2) already covers.
+    // false = at max or creation failed (the caller waits for the encoder as before).
+    fn growPool(e: *Enc) bool {
+        const n = e.nv_n;
+        if (n >= NVPOOL_MAX) return false;
+        e.buildSlot(n) catch {
+            e.releaseSlot(n);
+            return false;
+        };
+        const k = e.nv_idx;
+        rotateIn(?*anyopaque, &e.nv_tex, k, n);
+        rotateIn(?*anyopaque, &e.nv_view, k, n);
+        rotateIn(?*IMFSample, &e.nv_sample, k, n);
+        rotateIn(?*IMFSample, &e.sw_sample, k, n);
+        rotateIn(?*IMFMediaBuffer, &e.sw_buf, k, n);
+        e.nv_n = n + 1;
+        e.pool_grows += 1;
+        trace("nv12 pool grew to {d} (grows={d})", .{ e.nv_n, e.pool_grows });
+        return true;
     }
 
     // releaseNV12Pool releases every NV12 pool slot (textures, views, samples) + the software staging
     // texture, and NULLS each entry so it is safe to call repeatedly (reconfigure + close). Does NOT
     // touch the VP, the input texture/view or the device - only the per-output-geometry pool.
     fn releaseNV12Pool(e: *Enc) void {
-        for (0..NVPOOL) |i| {
-            if (e.nv_sample[i]) |s| release(s);
-            if (e.sw_sample[i]) |s| release(s);
-            if (e.sw_buf[i]) |b| release(b);
-            if (e.nv_view[i]) |v_| release(@as(*IUnk, @ptrCast(@alignCast(v_))));
-            if (e.nv_tex[i]) |t| release(@as(*IUnk, @ptrCast(@alignCast(t))));
-            e.nv_sample[i] = null;
-            e.sw_sample[i] = null;
-            e.sw_buf[i] = null;
-            e.nv_view[i] = null;
-            e.nv_tex[i] = null;
-        }
+        for (0..NVPOOL_MAX) |i| e.releaseSlot(i);
+        e.nv_n = 0;
         if (e.sw_stage_tex) |t| release(@as(*IUnk, @ptrCast(@alignCast(t))));
         e.sw_stage_tex = null;
+    }
+
+    fn releaseSlot(e: *Enc, i: usize) void {
+        if (e.nv_sample[i]) |s| release(s);
+        if (e.sw_sample[i]) |s| release(s);
+        if (e.sw_buf[i]) |b| release(b);
+        if (e.nv_view[i]) |v_| release(@as(*IUnk, @ptrCast(@alignCast(v_))));
+        if (e.nv_tex[i]) |t| release(@as(*IUnk, @ptrCast(@alignCast(t))));
+        e.nv_sample[i] = null;
+        e.sw_sample[i] = null;
+        e.sw_buf[i] = null;
+        e.nv_view[i] = null;
+        e.nv_tex[i] = null;
     }
 
     // swNV12Bytes is the packed NV12 payload for the output geometry (Y plane + interleaved UV).
@@ -1499,21 +1562,22 @@ pub const Enc = struct {
         const hr = e.dev.v.CreateTexture2D(@ptrCast(e.dev), &td, null, &tex);
         if (failed(hr) or tex == null) return e.setErr("CreateTexture2D(nv12 staging)", hr);
         e.sw_stage_tex = tex.?;
+    }
+
+    // buildSwSlot creates software-tier slot i's packed system-memory NV12 sample.
+    fn buildSwSlot(e: *Enc, i: usize) OpenErr!void {
         const need = e.swNV12Bytes();
-        for (0..NVPOOL) |i| {
-            var mb: ?*IMFMediaBuffer = null;
-            if (failed(MFCreateMemoryBuffer(need, &mb)) or mb == null) return e.setErr("MFCreateMemoryBuffer(nv12)", E_FAIL);
-            _ = mb.?.v.SetCurrentLength(@ptrCast(mb.?), need);
-            var smp: ?*IMFSample = null;
-            if (failed(MFCreateSample(&smp)) or smp == null) {
-                release(mb.?);
-                return e.setErr("MFCreateSample(sw nv12)", E_FAIL);
-            }
-            _ = smp.?.v.AddBuffer(@ptrCast(smp.?), mb.?);
-            e.sw_buf[i] = mb.?; // kept: Lock/Unlock per frame without a per-frame QI
-            e.sw_sample[i] = smp.?;
+        var mb: ?*IMFMediaBuffer = null;
+        if (failed(MFCreateMemoryBuffer(need, &mb)) or mb == null) return e.setErr("MFCreateMemoryBuffer(nv12)", E_FAIL);
+        _ = mb.?.v.SetCurrentLength(@ptrCast(mb.?), need);
+        var smp: ?*IMFSample = null;
+        if (failed(MFCreateSample(&smp)) or smp == null) {
+            release(mb.?);
+            return e.setErr("MFCreateSample(sw nv12)", E_FAIL);
         }
-        return;
+        _ = smp.?.v.AddBuffer(@ptrCast(smp.?), mb.?);
+        e.sw_buf[i] = mb.?; // kept: Lock/Unlock per frame without a per-frame QI
+        e.sw_sample[i] = smp.?;
     }
 
     // swReadback copies NV12 pool slot -> staging -> the slot's system-memory sample, honouring
@@ -1654,14 +1718,16 @@ pub const Enc = struct {
     /// gateInput waits until the next NV12 pool slot is safe to reuse. Bounded; <0 = error.
     /// In-flight cap: a pool sample must NOT be resubmitted while the encoder still queues it
     /// (async MFTs queue deeply; reuse corrupts the queue → E_UNEXPECTED storm + lost
-    /// outputs). Also bounds latency: queue depth <= NVPOOL-1. Called BEFORE a zero-copy
+    /// outputs). Also bounds latency: queue depth <= nv_n-1. Called BEFORE a zero-copy
     /// session touches the sender's mutex - never wait on the encoder while holding it.
+    /// At the cap the pool first GROWS (bounded, NVPOOL_MAX) - only then does it wait.
     pub fn gateInput(e: *Enc, sink: AuSink) i32 {
         e.st(.gate_input);
         var gate_waited: u32 = 0;
-        while (e.fed_n - e.out_n >= NVPOOL - 1) {
+        while (e.fed_n - e.out_n >= e.nv_n - 1) {
             if (e.pump(sink) < 0) return -5;
-            if (e.fed_n - e.out_n < NVPOOL - 1) break;
+            if (e.fed_n - e.out_n < e.nv_n - 1) break;
+            if (e.growPool()) break;
             if (gate_waited >= SUBMIT_WAIT_MS) return -9; // busy: drop this frame
             Sleep(1);
             gate_waited += 1;
@@ -1675,7 +1741,7 @@ pub const Enc = struct {
     pub fn bltView(e: *Enc, in_view: *anyopaque) i32 {
         e.st(.vp_blt);
         const slot = e.nv_idx;
-        e.nv_idx = (e.nv_idx + 1) % NVPOOL;
+        e.nv_idx = (e.nv_idx + 1) % e.nv_n;
         const stream = D3D11_VIDEO_PROCESSOR_STREAM{
             .Enable = 1,
             .OutputIndex = 0,
@@ -1720,8 +1786,17 @@ pub const Enc = struct {
         return e.submitSlot(@intCast(slot), pts100, sink);
     }
 
-    /// submitSlot hands a converted NV12 pool slot to the encoder (bounded waits). <0 = error.
+    /// submitSlot hands a converted NV12 pool slot to the encoder (bounded waits). <0 = error. A slot
+    /// that never reached the encoder (busy / refused) is handed out again next: the rotation then
+    /// counts only real submissions, so the in-flight cap's reuse guarantee holds across drops.
     pub fn submitSlot(e: *Enc, slot: usize, pts100: i64, sink: AuSink) i32 {
+        const fed0 = e.fed_n;
+        const rc = e.submitSlotInner(slot, pts100, sink);
+        if (e.fed_n == fed0) e.nv_idx = slot;
+        return rc;
+    }
+
+    fn submitSlotInner(e: *Enc, slot: usize, pts100: i64, sink: AuSink) i32 {
         if (e.sw) { // software tier: the MFT needs the pixels in system memory
             const rc = e.swReadback(slot);
             if (rc < 0) return rc;

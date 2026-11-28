@@ -106,6 +106,9 @@ const (
 	offDupSkips         = 224 // tick slots skipped: sender frame counter had not advanced
 	offSrcFrames        = 232 // sender frame-counter advances seen = producer frames
 	capFlagFrameCounter = 1 << 4
+	// NV12 input pool (every encode session; mirrors zigenc off_pool_depth/off_pool_grows).
+	offPoolDepth = 240
+	offPoolGrows = 244
 
 	// AU ring for a zero-copy session: half a second of bitstream, floor 4 MiB, ceiling
 	// 16 MiB - GEOMETRY-INDEPENDENT, so a sender resize costs zero SHM realloc.
@@ -1912,6 +1915,10 @@ func (s *ProcSession) Stats() ProcStats {
 	// Everything below reads the MAPPING: hold shmMu so Close() cannot unmap underneath us.
 	s.shmMu.RLock()
 	defer s.shmMu.RUnlock()
+	if !s.shmGone {
+		st.PoolDepth = atomic.LoadUint32((*uint32)(unsafe.Add(s.shm.base, offPoolDepth)))
+		st.PoolGrows = atomic.LoadUint32((*uint32)(unsafe.Add(s.shm.base, offPoolGrows)))
+	}
 	if s.zeroCopy && !s.shmGone {
 		st.ZeroCopy = true
 		st.CapFrames = atomic.LoadUint64(s.shm.u64(offCapFrames))

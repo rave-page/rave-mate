@@ -199,5 +199,52 @@ func TestZeroCopyFrameGate(t *testing.T) {
 		if rate < 45 {
 			t.Fatalf("%.1f encodes/s without a counter, want blind ~60 (fallback must keep the old pacing)", rate)
 		}
+		// Unit B: the NV12 pool starts at the gpubudget charge (4) and only grows under pressure.
+		t.Logf("nv12 pool: depth=%d grows=%d", st.PoolDepth, st.PoolGrows)
+		if st.PoolDepth < 4 || st.PoolDepth > 8 || st.PoolDepth != 4+st.PoolGrows {
+			t.Fatalf("pool depth=%d grows=%d, want 4 + grows, <= 8", st.PoolDepth, st.PoolGrows)
+		}
 	})
+}
+
+// TestNV12PoolGrowsOnDemand executes the pool-growth splice on real silicon. This rig's NVENC never
+// holds an input across a submit (depth 2 at 4K60 never grows), so the child starts at depth 1 (test
+// hook): the in-flight cap then fires on frame one and the pool must GROW at runtime (real slot
+// creation + rotation splice, never past 8) and keep encoding with the picture intact - a
+// mis-spliced rotation would hand the encoder a slot it still reads (corrupt or stale content).
+func TestNV12PoolGrowsOnDemand(t *testing.T) {
+	if !Available() {
+		t.Skip("no hardware H.264 MFT / D3D11 device")
+	}
+	requireEncExe(t)
+	t.Setenv("RAVE_MATE_MFENC_POOL_INIT", "1")
+	resetChildren(t)
+	const w, h = 3840, 2160
+	red, blue := [3]byte{255, 0, 0}, [3]byte{0, 0, 255}
+	tex, err := newTestTexture(0, w, h, dxgiB8G8R8A8UNorm, false, bgraBands(w, h, red, blue))
+	if err != nil {
+		t.Skipf("no 4K shared texture on this box: %v", err)
+	}
+	defer tex.Close()
+	s, err := riskSession(t, "rave-mate poolgrow gate", func() (uint64, uint32, int, int, bool) {
+		return tex.Share, dxgiB8G8R8A8UNorm, w, h, true
+	}, w, h)
+	if err != nil {
+		t.Fatalf("zero-copy open refused: %v", err)
+	}
+	sink := collectAUs(s)
+	time.Sleep(2 * time.Second)
+	st := s.Stats()
+	s.Close()
+	<-sink.done
+	aus := sink.from(0)
+	t.Logf("4K pool from 1: depth=%d grows=%d aus=%d busyDrops=%d capSkips=%d encBusy=%.2fms",
+		st.PoolDepth, st.PoolGrows, len(aus), st.BusyDrops, st.CapSkips, st.EncBusyMs)
+	if st.PoolGrows == 0 || st.PoolDepth != 1+st.PoolGrows || st.PoolDepth > 8 {
+		t.Fatalf("depth=%d grows=%d: want 1 + grows (>= 1), <= 8", st.PoolDepth, st.PoolGrows)
+	}
+	if len(aus) < 60 {
+		t.Fatalf("aus=%d in 2 s after growth - the grown pool is not sustaining the route", len(aus))
+	}
+	assertProbeBands(t, aus, w, h, red, blue)
 }
