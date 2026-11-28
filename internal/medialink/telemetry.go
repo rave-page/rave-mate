@@ -544,6 +544,7 @@ type RouteStat struct {
 	Peer      string
 	Stream    uint16
 	Direction string // "send" | "recv"
+	Source    string // offered SourceID (send: our source, e.g. "spout:<sender>"; recv: the peer's)
 	Frames    uint64
 	Bytes     uint64
 

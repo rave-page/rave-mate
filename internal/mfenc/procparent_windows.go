@@ -103,12 +103,18 @@ const (
 	offBusyDrops = 124 // frames the encoder had no credit for in time (saturation, not breakage)
 
 	// New-frame gating (child-written, src:"spout"; mirrors zigenc off_dup_skips/off_src_frames).
-	offDupSkips         = 224 // tick slots skipped: sender frame counter had not advanced
-	offSrcFrames        = 232 // sender frame-counter advances seen = producer frames
+	offDupSkips         = 224 // tick slots found duplicate (frame counter unmoved, or GPU compare equal)
+	offSrcFrames        = 232 // producer frames seen (counter advances + compare "changed" verdicts)
 	capFlagFrameCounter = 1 << 4
+	capFlagGPUCompare   = 1 << 5 // no counter: exact GPU compare vs last encoded frame gates CSC+encode
+	capFlagCompareOff   = 1 << 6 // no counter, compare unavailable on the device: blind pacing
 	// NV12 input pool (every encode session; mirrors zigenc off_pool_depth/off_pool_grows).
 	offPoolDepth = 240
 	offPoolGrows = 244
+	// GPU compare telemetry (mirrors zigenc off_cmp_timeouts/off_cmp_lat_us): u32 verdicts not ready
+	// in budget, u32 EWMA issue->verdict latency in us.
+	offCmpTimeouts = 248
+	offCmpLatUs    = 252
 
 	// AU ring for a zero-copy session: half a second of bitstream, floor 4 MiB, ceiling
 	// 16 MiB - GEOMETRY-INDEPENDENT, so a sender resize costs zero SHM realloc.
@@ -1936,9 +1942,14 @@ func (s *ProcSession) Stats() ProcStats {
 		}
 		st.CapFPS = s.capRate.sample(st.CapFrames, time.Now())
 		st.DupSkips = atomic.LoadUint64(s.shm.u64(offDupSkips))
-		if st.FrameCounter = st.CapFlags&capFlagFrameCounter != 0; st.FrameCounter {
+		st.FrameCounter = st.CapFlags&capFlagFrameCounter != 0
+		st.Detector = frameDetector(st.CapFlags)
+		if st.FrameCounter || st.CapFlags&capFlagGPUCompare != 0 {
 			st.SrcFPS = s.srcRate.sample(atomic.LoadUint64(s.shm.u64(offSrcFrames)), time.Now())
 		}
+		st.CmpTimeouts = atomic.LoadUint32((*uint32)(unsafe.Add(s.shm.base, offCmpTimeouts)))
+		st.CmpLatMs = float64(atomic.LoadUint32((*uint32)(unsafe.Add(s.shm.base, offCmpLatUs)))) / 1000
+		st.TickFPS = s.fps
 		st.EncBusyMs = s.busyRate.mean(atomic.LoadUint64(s.shm.u64(56)), st.CapFrames)
 	}
 	s.child.mu.Lock()
@@ -1946,6 +1957,19 @@ func (s *ProcSession) Stats() ProcStats {
 	s.child.mu.Unlock()
 	st.ChildCPUPct = s.child.cpuPercent()
 	return st
+}
+
+// frameDetector names the zero-copy new-frame detector from the child's capFlags (bits 4-6).
+func frameDetector(flags uint32) string {
+	switch {
+	case flags&capFlagFrameCounter != 0:
+		return DetectCounter
+	case flags&capFlagGPUCompare != 0:
+		return DetectGPUCompare
+	case flags&capFlagCompareOff != 0:
+		return DetectBlindNoCompare
+	}
+	return DetectBlind
 }
 
 // cpuPercent samples the child's CPU usage since the previous call (all sessions).

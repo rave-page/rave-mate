@@ -1,5 +1,13 @@
 package mfenc
 
+// New-frame detector names (ProcStats.Detector, route telemetry "detect").
+const (
+	DetectCounter        = "counter"     // sender's Spout frame counter: copy + CSC + encode skipped
+	DetectGPUCompare     = "gpu-compare" // exact GPU compare: CSC + encode skipped, copy paid
+	DetectBlind          = "blind"       // no detector yet / readback path
+	DetectBlindNoCompare = "blind-nocmp" // compare unavailable on this device (WARP, FL<10, self-test)
+)
+
 // ProcStats is one encode session's live telemetry (per SESSION, not per child - the
 // Phase-2 load governor consumes rising p99 as an early saturation signal).
 type ProcStats struct {
@@ -61,6 +69,15 @@ type ProcStats struct {
 	FrameCounter bool
 	DupSkips     uint64
 	SrcFPS       float64
+	// Detector: which new-frame detector the session runs (Detect* consts). Without a counter the
+	// child compares each copy against the last encoded frame on the GPU (exact; duplicates skip CSC
+	// + encode but still pay the copy); DupSkips/SrcFPS then come from that compare. CmpTimeouts =
+	// verdicts not ready in budget (encoded anyway); CmpLatMs = mean issue->verdict latency.
+	// TickFPS = the session's capture tick rate (SrcFPS near it = the producer may be faster).
+	Detector    string
+	CmpTimeouts uint32
+	CmpLatMs    float64
+	TickFPS     float64
 	// PoolDepth/PoolGrows: the encoder child's live NV12 input pool depth (starts at 4, the
 	// gpubudget charge) and how often it grew because the encoder held every slot. Growth to 8 on
 	// every session means the cost model under-charges this rig's driver.

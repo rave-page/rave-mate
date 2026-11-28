@@ -8,6 +8,7 @@
 *.a binary
 *.lib binary
 *.so binary
+*.dxbc binary
 *.dylib binary
 *.exe binary
 *.woff binary

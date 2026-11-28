@@ -99,7 +99,7 @@ func gateArm(t *testing.T, tex *testTexture, name string, producer *fakeProducer
 
 // TestZeroCopyFrameGate: a sender whose counter never advances produces nothing beyond the 2 fps
 // keep-alive; a 30 fps producer on a 60 fps route yields ~30 encodes/s (not 60); a sender with no
-// counter keeps the blind 60 fps pacing (fallback).
+// counter and no GPU compare keeps the blind 60 fps pacing (fallback).
 func TestZeroCopyFrameGate(t *testing.T) {
 	if !Available() {
 		t.Skip("no hardware H.264 MFT / D3D11 device")
@@ -189,12 +189,16 @@ func TestZeroCopyFrameGate(t *testing.T) {
 		}
 	})
 
+	// No counter and the GPU frame compare switched off (RAVE_MATE_MFENC_FRAMECMP=0): the blind
+	// pacing fallback a device without the compare gets. (No counter WITH the compare =
+	// TestZeroCopyFrameCompare.)
 	t.Run("no-counter-fallback", func(t *testing.T) {
+		blindPacing(t)
 		st, aus := gateArm(t, tex, "rave-mate framegate blind", nil, 0, span)
 		rate := float64(aus) / secs
-		t.Logf("no counter: aus=%d (%.1f/s) capFPS=%.1f dupSkips=%d capFlags=%#x", aus, rate, st.CapFPS, st.DupSkips, st.CapFlags)
-		if st.FrameCounter || st.DupSkips != 0 {
-			t.Fatalf("gating engaged without a counter (flags=%#x dupSkips=%d)", st.CapFlags, st.DupSkips)
+		t.Logf("no counter: aus=%d (%.1f/s) capFPS=%.1f dupSkips=%d capFlags=%#x detect=%s", aus, rate, st.CapFPS, st.DupSkips, st.CapFlags, st.Detector)
+		if st.FrameCounter || st.DupSkips != 0 || st.Detector != DetectBlindNoCompare {
+			t.Fatalf("gating engaged without a counter or compare (flags=%#x dupSkips=%d detect=%s)", st.CapFlags, st.DupSkips, st.Detector)
 		}
 		if rate < 45 {
 			t.Fatalf("%.1f encodes/s without a counter, want blind ~60 (fallback must keep the old pacing)", rate)
@@ -218,6 +222,7 @@ func TestNV12PoolGrowsOnDemand(t *testing.T) {
 	}
 	requireEncExe(t)
 	t.Setenv("RAVE_MATE_MFENC_POOL_INIT", "1")
+	t.Setenv("RAVE_MATE_MFENC_FRAMECMP", "0") // static texture: blind 60 fps is the encoder load under test
 	resetChildren(t)
 	const w, h = 3840, 2160
 	red, blue := [3]byte{255, 0, 0}, [3]byte{0, 0, 255}

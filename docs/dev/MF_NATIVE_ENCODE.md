@@ -413,9 +413,28 @@ number; the child reads it with `NtQuerySemaphore` (read-only, no GL, no pixels;
 and a due tick whose count has not moved skips copy + CSC + encode (`dupSkips`). Negotiated rate =
 ceiling; 2 fps keep-alive on a static source (parent frozen-source watch 2 s/3 s, receiver publish
 oracle 3 s, TCP idle 10 s); an IDR request bypasses the gate. No semaphore (registry `Framecount`
-off, pre-2.007, non-SDK sender) = blind pacing as before, per sender; capFlags bit 4 says which.
+off, pre-2.007, non-SDK sender) = GPU compare below; capFlags bit 4 says counter.
 mediaroute advertises the MEASURED producer rate (scan cadence, clamped 15..60) once known.
 Gate: `go test ./internal/mfenc -run TestZeroCopyFrameGate -v`.
+
+**Counter-less detection: exact GPU compare (2026-11-28).** Frame counting is OFF by default, so on
+most rigs no sender publishes the semaphore. Without it every due tick still copies (the one read of
+the sender's texture the lock permits - mutex hold unchanged: same single CopyResource + flush, only
+the destination alternates), then `cap.FrameCmp` compares that copy against the copy of the LAST
+ENCODED frame: full-screen pass, `Load` both texel-exact, `discard` where all four channels are
+equal, wrapped in an occlusion query - the query count is the number of changed pixels, so one
+changed pixel = new frame; nothing is subsampled, no render target, no pixel reaches the CPU.
+Duplicate = no CSC, no encode (`dupSkips`); "changed" verdicts feed `srcFrames` -> `srcFps` ->
+mediaroute `advertFPS` (`compareFPS`: unsaturated routes only, so a route ticking at or below the
+producer can never pin the advert). Verdict wait: GetData DONOTFLUSH polling, budget period/3 (2..8
+ms); unready = encode (never a miss, `cmpTimeouts`). Cost at 3840x2160 on an RTX 3060 (GPU
+timestamps, incompressible content): copy 0.195 ms, compare 0.20 ms; verdict latency 0.1-0.3 ms.
+Second copy texture (+33 MB at 4K) is lazy, counter-less sessions only (gpubudget charges it).
+Shaders: `framecmp.hlsl`, committed DXBC (no d3dcompiler at runtime). Self-tested once per session
+(identical pair = 0, one texel = >= 1); WARP / FL < 10 / failed self-test / `RAVE_MATE_MFENC_FRAMECMP=0`
+= blind pacing, capFlags bit 6, one log line. capFlags bit 5 = gpu-compare; route telemetry `detect`.
+Gate: `go test ./internal/mfenc -run 'TestZeroCopyFrameCompare' -v`; Zig: `zig build test` (exactness +
+4K cost).
 
 ### Produce paths (zigmedia increment 4)
 

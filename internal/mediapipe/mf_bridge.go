@@ -286,6 +286,7 @@ func (b *mfBridge) routeTelemetry(ctx context.Context) {
 	t := time.NewTicker(routeTelemetryEvery)
 	defer t.Stop()
 	var prevBytes, prevCount uint64
+	nocmpLogged := false
 	prev := time.Now()
 	for {
 		select {
@@ -308,13 +309,19 @@ func (b *mfBridge) routeTelemetry(ctx context.Context) {
 			kbps = float64(dB) * 8 / 1000 / secs
 		}
 		b.noteNoContent(dN, perFrame)
+		if st.FrameDetect == mfenc.DetectBlindNoCompare && !nocmpLogged {
+			nocmpLogged = true
+			b.log.Info(source, "sender publishes no Spout frame counter and the GPU frame compare is unavailable on this device - capture is blind-paced (duplicates are encoded)", map[string]any{
+				"adapter": b.adapterName, "tickFps": st.TickFPS})
+		}
 		b.log.Info(source, "route encode telemetry", map[string]any{
 			"engine": st.Encoder, "tier": tierLabel(st.SoftwareEncode), "drive": st.Drive,
 			// capSync is not cosmetic: it decides whether the shared-texture read is coherent at
 			// all, and only the log makes the field's branch visible.
 			"capture": captureLabel(b.zeroCopy), "capSync": st.CapSync, "device": st.DevPolicy,
-			// New-frame gating: capFps vs srcFps vs dupSkips says whether duplicates are skipped
-			// (srcFps > 0) or the sender is blind-paced (no Spout frame counter).
+			// New-frame gating: detect names the detector (counter / gpu-compare / blind[-nocmp]);
+			// capFps vs srcFps vs dupSkips says how many duplicates it skipped.
+			"detect": st.FrameDetect,
 			"capFps": fmt.Sprintf("%.1f", st.CapFPS), "srcFps": fmt.Sprintf("%.1f", st.SrcFPS), "dupSkips": st.DupSkips,
 			"encPool": st.EncPool, "encPoolGrows": st.EncPoolGrows,
 			"mtxTimeouts": st.MtxTimeouts, "capStaleMs": fmt.Sprintf("%.0f", st.CapStaleMs),
@@ -694,7 +701,8 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		Restarts: st.Restarts, LatP50Ms: st.LatP50Ms, LatP99Ms: st.LatP99Ms,
 		QueueDepth: st.QueueDepth, ChildCPUPct: st.ChildCPUPct,
 		ZeroCopy: st.ZeroCopy, CapFPS: st.CapFPS, CapSkips: st.CapSkips,
-		DupSkips: st.DupSkips, SrcFPS: st.SrcFPS, EncPool: st.PoolDepth, EncPoolGrows: st.PoolGrows,
+		DupSkips: st.DupSkips, SrcFPS: st.SrcFPS, FrameDetect: st.Detector, TickFPS: st.TickFPS,
+		EncPool: st.PoolDepth, EncPoolGrows: st.PoolGrows,
 		MtxTimeouts: st.MtxTimeouts, SrcErrors: st.SrcErrors, CapStaleMs: st.CapStaleMs,
 		CapSync:      capSyncLabel(st.CapFlags),
 		AdapterMoved: st.AdapterMoved,

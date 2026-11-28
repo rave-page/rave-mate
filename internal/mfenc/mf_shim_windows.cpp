@@ -1087,6 +1087,20 @@ void* mf_testtex_create(int64_t adapterLuid, int w, int h, unsigned int fmt, int
     return t;
 }
 
+int mf_testtex_poke(void* h, int x, int y, unsigned int texel) {
+    mftex* t = (mftex*)h;
+    if (!t || !t->tex || x < 0 || y < 0) return 0;
+    if (t->km && FAILED(t->km->AcquireSync(0, 100))) return 0;
+    D3D11_BOX b = {(UINT)x, (UINT)y, 0, (UINT)x + 1, (UINT)y + 1, 1};
+    t->ctx->UpdateSubresource(t->tex, 0, &b, &texel, 4, 0);
+    if (t->km) {
+        t->km->ReleaseSync(0);
+    } else {
+        t->ctx->Flush(); // a foreign device sees the write only once it is submitted
+    }
+    return 1;
+}
+
 void mf_testtex_release(void* h) {
     mftex* t = (mftex*)h;
     if (!t) return;

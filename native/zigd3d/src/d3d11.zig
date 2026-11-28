@@ -167,6 +167,18 @@ pub const D3D11_VIDEO_PROCESSOR_STREAM = extern struct {
     ppFutureSurfacesRight: ?*anyopaque = null,
 };
 
+pub const VIEWPORT = extern struct { TopLeftX: f32, TopLeftY: f32, Width: f32, Height: f32, MinDepth: f32, MaxDepth: f32 };
+
+/// D3D11_QUERY_DESC + the query kinds used here.
+pub const QUERY_DESC = extern struct { Query: u32, MiscFlags: u32 = 0 };
+pub const QUERY_OCCLUSION: u32 = 1; // u64 = samples that passed (here: changed pixels)
+pub const QUERY_TIMESTAMP: u32 = 2;
+pub const QUERY_TIMESTAMP_DISJOINT: u32 = 3;
+pub const QUERY_TIMESTAMP_DISJOINT_DATA = extern struct { Frequency: u64, Disjoint: i32 };
+/// D3D11_ASYNC_GETDATA_DONOTFLUSH: poll only, never submit the command buffer from GetData.
+pub const GETDATA_DONOTFLUSH: u32 = 1;
+pub const PRIMITIVE_TOPOLOGY_TRIANGLELIST: u32 = 4;
+
 pub const VPIV_DESC = extern struct { FourCC: u32, ViewDimension: u32, MipSlice: u32, ArraySlice: u32 };
 pub const VPOV_DESC = extern struct { ViewDimension: u32, a: u32, b: u32, c: u32 };
 /// D3D11_VIDEO_PROCESSOR_COLOR_SPACE bitfield word: bit2 = YCbCr_Matrix (1 = BT.709).
@@ -197,9 +209,17 @@ pub const ID3D11Device = extern struct {
         _iunk: [3]VOP,
         _p3: [2]VOP, // CreateBuffer CreateTexture1D
         CreateTexture2D: *const fn (*anyopaque, *const D3D11_TEXTURE2D_DESC, ?*const anyopaque, *?*anyopaque) callconv(.winapi) HRESULT,
-        _p6: [3]VOP, // CreateTexture3D CreateShaderResourceView CreateUnorderedAccessView
+        _p6: [1]VOP, // CreateTexture3D
+        CreateShaderResourceView: *const fn (*anyopaque, *anyopaque, ?*const anyopaque, *?*anyopaque) callconv(.winapi) HRESULT, // 7
+        _p8: [1]VOP, // CreateUnorderedAccessView
         CreateRenderTargetView: *const fn (*anyopaque, *anyopaque, ?*const anyopaque, *?*anyopaque) callconv(.winapi) HRESULT, // 9
-        _p10: [18]VOP, // CreateDepthStencilView(10) .. CreateDeferredContext(27)
+        _p10: [2]VOP, // CreateDepthStencilView CreateInputLayout
+        CreateVertexShader: *const fn (*anyopaque, [*]const u8, usize, ?*anyopaque, *?*anyopaque) callconv(.winapi) HRESULT, // 12
+        _p13: [2]VOP, // CreateGeometryShader CreateGeometryShaderWithStreamOutput
+        CreatePixelShader: *const fn (*anyopaque, [*]const u8, usize, ?*anyopaque, *?*anyopaque) callconv(.winapi) HRESULT, // 15
+        _p16: [8]VOP, // CreateHullShader .. CreateSamplerState(23)
+        CreateQuery: *const fn (*anyopaque, *const QUERY_DESC, *?*anyopaque) callconv(.winapi) HRESULT, // 24
+        _p25: [3]VOP, // CreatePredicate CreateCounter CreateDeferredContext
         OpenSharedResource: *const fn (*anyopaque, *anyopaque, *const GUID, *?*anyopaque) callconv(.winapi) HRESULT,
     },
 };
@@ -252,10 +272,29 @@ pub const ID3D11DeviceContext = extern struct {
     v: *const extern struct {
         _iunk: [3]VOP,
         _child: [4]VOP, // GetDevice GetPrivateData SetPrivateData SetPrivateDataInterface
-        _p7: [7]VOP, // VSSetConstantBuffers(7) .. Draw(13)
+        _p7: [1]VOP, // VSSetConstantBuffers
+        PSSetShaderResources: *const fn (*anyopaque, u32, u32, [*]const ?*anyopaque) callconv(.winapi) void, // 8
+        PSSetShader: *const fn (*anyopaque, ?*anyopaque, ?[*]const ?*anyopaque, u32) callconv(.winapi) void, // 9
+        _p10: [1]VOP, // PSSetSamplers
+        VSSetShader: *const fn (*anyopaque, ?*anyopaque, ?[*]const ?*anyopaque, u32) callconv(.winapi) void, // 11
+        _p12: [1]VOP, // DrawIndexed
+        Draw: *const fn (*anyopaque, u32, u32) callconv(.winapi) void, // 13
         Map: *const fn (*anyopaque, *anyopaque, u32, u32, u32, *MAPPED_SUBRESOURCE) callconv(.winapi) HRESULT,
         Unmap: *const fn (*anyopaque, *anyopaque, u32) callconv(.winapi) void,
-        _p16: [30]VOP, // PSSetConstantBuffers(16) .. CopyStructureCount-1, i.e. up to 45
+        _p16: [1]VOP, // PSSetConstantBuffers
+        IASetInputLayout: *const fn (*anyopaque, ?*anyopaque) callconv(.winapi) void, // 17
+        _p18: [6]VOP, // IASetVertexBuffers IASetIndexBuffer DrawIndexedInstanced DrawInstanced GSSetConstantBuffers GSSetShader
+        IASetPrimitiveTopology: *const fn (*anyopaque, u32) callconv(.winapi) void, // 24
+        _p25: [2]VOP, // VSSetShaderResources VSSetSamplers
+        Begin: *const fn (*anyopaque, *anyopaque) callconv(.winapi) void, // 27
+        End: *const fn (*anyopaque, *anyopaque) callconv(.winapi) void, // 28
+        GetData: *const fn (*anyopaque, *anyopaque, ?*anyopaque, u32, u32) callconv(.winapi) HRESULT, // 29
+        _p30: [3]VOP, // SetPredication GSSetShaderResources GSSetSamplers
+        OMSetRenderTargets: *const fn (*anyopaque, u32, ?[*]const ?*anyopaque, ?*anyopaque) callconv(.winapi) void, // 33
+        _p34: [9]VOP, // OMSetRenderTargetsAndUnorderedAccessViews .. DispatchIndirect(42)
+        RSSetState: *const fn (*anyopaque, ?*anyopaque) callconv(.winapi) void, // 43
+        RSSetViewports: *const fn (*anyopaque, u32, [*]const VIEWPORT) callconv(.winapi) void, // 44
+        _p45: [1]VOP, // RSSetScissorRects
         CopySubresourceRegion: *const fn (*anyopaque, *anyopaque, u32, u32, u32, u32, *anyopaque, u32, ?*const BOX) callconv(.winapi) void, // 46
         CopyResource: *const fn (*anyopaque, *anyopaque, *anyopaque) callconv(.winapi) void, // 47
         UpdateSubresource: *const fn (*anyopaque, *anyopaque, u32, ?*const BOX, *const anyopaque, u32, u32) callconv(.winapi) void, // 48
@@ -273,7 +312,10 @@ pub const ID3D11DeviceContext = extern struct {
 pub const ID3D10Multithread = extern struct {
     v: *const extern struct {
         _iunk: [3]VOP,
-        _p: [2]VOP, // Enter Leave
+        // Enter/Leave hold the device's own lock across a multi-call sequence (state + draw) that
+        // other threads sharing the context must not interleave with.
+        Enter: *const fn (*anyopaque) callconv(.winapi) void,
+        Leave: *const fn (*anyopaque) callconv(.winapi) void,
         SetMultithreadProtected: *const fn (*anyopaque, i32) callconv(.winapi) i32,
     },
 };
@@ -346,8 +388,26 @@ test "vtable pads keep the audited slot numbers" {
     try std.testing.expectEqual(@as(usize, 48), @offsetOf(ctxv, "UpdateSubresource") / @sizeOf(VOP));
     try std.testing.expectEqual(@as(usize, 50), @offsetOf(ctxv, "ClearRenderTargetView") / @sizeOf(VOP));
     try std.testing.expectEqual(@as(usize, 111), @offsetOf(ctxv, "Flush") / @sizeOf(VOP));
+    try std.testing.expectEqual(@as(usize, 8), @offsetOf(ctxv, "PSSetShaderResources") / @sizeOf(VOP));
+    try std.testing.expectEqual(@as(usize, 9), @offsetOf(ctxv, "PSSetShader") / @sizeOf(VOP));
+    try std.testing.expectEqual(@as(usize, 11), @offsetOf(ctxv, "VSSetShader") / @sizeOf(VOP));
+    try std.testing.expectEqual(@as(usize, 13), @offsetOf(ctxv, "Draw") / @sizeOf(VOP));
+    try std.testing.expectEqual(@as(usize, 17), @offsetOf(ctxv, "IASetInputLayout") / @sizeOf(VOP));
+    try std.testing.expectEqual(@as(usize, 24), @offsetOf(ctxv, "IASetPrimitiveTopology") / @sizeOf(VOP));
+    try std.testing.expectEqual(@as(usize, 27), @offsetOf(ctxv, "Begin") / @sizeOf(VOP));
+    try std.testing.expectEqual(@as(usize, 29), @offsetOf(ctxv, "GetData") / @sizeOf(VOP));
+    try std.testing.expectEqual(@as(usize, 33), @offsetOf(ctxv, "OMSetRenderTargets") / @sizeOf(VOP));
+    try std.testing.expectEqual(@as(usize, 43), @offsetOf(ctxv, "RSSetState") / @sizeOf(VOP));
+    try std.testing.expectEqual(@as(usize, 44), @offsetOf(ctxv, "RSSetViewports") / @sizeOf(VOP));
     const devv = @typeInfo(@TypeOf(@as(ID3D11Device, undefined).v)).pointer.child;
     try std.testing.expectEqual(@as(usize, 5), @offsetOf(devv, "CreateTexture2D") / @sizeOf(VOP));
+    try std.testing.expectEqual(@as(usize, 7), @offsetOf(devv, "CreateShaderResourceView") / @sizeOf(VOP));
+    try std.testing.expectEqual(@as(usize, 12), @offsetOf(devv, "CreateVertexShader") / @sizeOf(VOP));
+    try std.testing.expectEqual(@as(usize, 15), @offsetOf(devv, "CreatePixelShader") / @sizeOf(VOP));
+    try std.testing.expectEqual(@as(usize, 24), @offsetOf(devv, "CreateQuery") / @sizeOf(VOP));
+    const mtv = @typeInfo(@TypeOf(@as(ID3D10Multithread, undefined).v)).pointer.child;
+    try std.testing.expectEqual(@as(usize, 3), @offsetOf(mtv, "Enter") / @sizeOf(VOP));
+    try std.testing.expectEqual(@as(usize, 5), @offsetOf(mtv, "SetMultithreadProtected") / @sizeOf(VOP));
     try std.testing.expectEqual(@as(usize, 9), @offsetOf(devv, "CreateRenderTargetView") / @sizeOf(VOP));
     try std.testing.expectEqual(@as(usize, 28), @offsetOf(devv, "OpenSharedResource") / @sizeOf(VOP));
     const dev1v = @typeInfo(@TypeOf(@as(ID3D11Device1, undefined).v)).pointer.child;

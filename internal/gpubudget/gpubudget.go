@@ -175,8 +175,10 @@ func EstimateCostMB(op Op, g Geom) float64 {
 		// The VP NV12 input pool + one RGBA staging + device overhead. pool = zigenc NVPOOL_INIT: the
 		// child starts there and grows (max 8) only when the encoder holds every slot - visible as
 		// encPoolGrows in route encode telemetry, the signal that this charge is low for a driver.
+		// RGBA x2: a zero-copy session whose sender has no Spout frame counter (the default) keeps a
+		// second copy texture for the GPU new-frame compare (zigenc cap.FrameCmp).
 		pool := 4.0
-		return encDeviceMB + (px*bppNV12*pool)/mib + (px*bppRGBA)/mib
+		return encDeviceMB + (px*bppNV12*pool)/mib + 2*(px*bppRGBA)/mib
 	default:
 		return (px * bppRGBA) / mib
 	}

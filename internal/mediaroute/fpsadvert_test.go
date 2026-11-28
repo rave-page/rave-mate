@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/medialink"
 )
 
 // TestScanAdvertisesMeasuredFPS: a sender publishing a Spout frame counter is advertised at the
@@ -62,5 +63,58 @@ func TestScanAdvertisesMeasuredFPS(t *testing.T) {
 	fps, _, _ := capped.advertFPS("OBS", fr.sources["spout:OBS"], false)
 	if fps != 24 {
 		t.Fatalf("fps cap ignored: %v", fps)
+	}
+}
+
+// TestScanAdvertisesCompareFPS: a counter-less sender is advertised at the rate the encoder child's
+// GPU frame compare measures on a live route (no Spout setting needed); a static picture keeps it; a
+// route saturated at a lower tick resets to the assumed ceiling instead of pinning the advert there.
+func TestScanAdvertisesCompareFPS(t *testing.T) {
+	fr := newFakeRouter()
+	m := testManager(fr, config.MediaLinkFeature{ShareVideo: true}, []string{"Res"})
+	clock := time.Unix(1000, 0)
+	m.now = func() time.Time { return clock }
+	m.senderFrame = func(string) (int64, bool) { return 0, false }
+	adv := func() float64 {
+		fr.mu.Lock()
+		defer fr.mu.Unlock()
+		return fr.sources["spout:Res"].FPS
+	}
+	route := func(src, tick float64) {
+		fr.mu.Lock()
+		fr.stats = []medialink.RouteStat{{Session: "s1", Direction: "send", Source: "spout:Res",
+			Pipe: &medialink.PipelineStats{FrameDetect: "gpu-compare", SrcFPS: src, TickFPS: tick}}}
+		fr.mu.Unlock()
+	}
+	step := func() {
+		clock = clock.Add(scanEvery)
+		m.scan()
+	}
+	m.scan()
+	if got := adv(); got != 60 {
+		t.Fatalf("initial advert %v, want assumed 60", got)
+	}
+	route(30.2, 60)
+	step()
+	if got := adv(); got != 30 {
+		t.Fatalf("compare-measured advert %v, want 30", got)
+	}
+	route(0, 60) // static picture: no evidence of a slower source
+	step()
+	if got := adv(); got != 30 {
+		t.Fatalf("static spell changed the advert to %v", got)
+	}
+	route(30, 30) // route ticking at 30 saw no duplicates: producer may be faster
+	step()
+	if got := adv(); got != 60 {
+		t.Fatalf("saturated route pinned the advert at %v, want the 60 ceiling back", got)
+	}
+	fr.mu.Lock()
+	fr.stats = []medialink.RouteStat{{Session: "s2", Direction: "send", Source: "spout:Other",
+		Pipe: &medialink.PipelineStats{FrameDetect: "gpu-compare", SrcFPS: 20, TickFPS: 60}}}
+	fr.mu.Unlock()
+	step()
+	if got := adv(); got != 60 {
+		t.Fatalf("another sender's route changed the advert to %v", got)
 	}
 }

@@ -77,6 +77,10 @@ void mf_swizzle_rgba_bgra(uint8_t* dst, const uint8_t* src, int npx);
 void* mf_testtex_create(int64_t adapterLuid, int w, int h, unsigned int fmt, int keyed,
                         const uint8_t* pixels, unsigned long long* share, char* errbuf, int errcap);
 
+// mf_testtex_poke writes ONE 4-byte texel at (x,y) (under the keyed mutex when there is one, else
+// flushed): the producer of the GPU frame-compare gate. 1 = written.
+int mf_testtex_poke(void* t, int x, int y, unsigned int texel);
+
 // mf_testtex_release frees the texture, its keyed mutex and the device that owns them.
 void mf_testtex_release(void* t);
 
