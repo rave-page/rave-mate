@@ -1,5 +1,7 @@
 package mfenc
 
+import "fmt"
+
 // New-frame detector names (ProcStats.Detector, route telemetry "detect").
 const (
 	DetectCounter        = "counter"     // sender's Spout frame counter: copy + CSC + encode skipped
@@ -83,4 +85,29 @@ type ProcStats struct {
 	// every session means the cost model under-charges this rig's driver.
 	PoolDepth uint32
 	PoolGrows uint32
+	// Rate control engaged by the child (native/zigenc mf.zig RcMode): RateControl names the rung
+	// ("cbr", "lowdelay-vbr+qp-floor", ... ; "" = child reports none), RateCapKbps is the LIVE cap
+	// (moves with SetBitrate), RateQP the quality-mode QP floor (0 = fixed mode).
+	RateControl string
+	RateCapKbps int
+	RateQP      int
+}
+
+// rcLabels mirrors mf.zig RcMode.label by code (wire contract, pinned by tests on both sides).
+var rcLabels = [...]string{"", "cbr", "cbr+qp-floor", "lowdelay-vbr+qp-floor", "peak-vbr+qp-floor",
+	"cbr(quality refused)"}
+
+// RCLabel names a child rate-control code ("" for none/unknown).
+func RCLabel(code uint32) string {
+	if int(code) < len(rcLabels) {
+		return rcLabels[code]
+	}
+	return fmt.Sprintf("rc%d", code)
+}
+
+// setRC decodes the shm rate-control words (mode | qp<<8 | quality<<16, cap kbps).
+func (st *ProcStats) setRC(w0, capKbps uint32) {
+	st.RateControl = RCLabel(w0 & 0xff)
+	st.RateQP = int(w0 >> 8 & 0xff)
+	st.RateCapKbps = int(capKbps)
 }

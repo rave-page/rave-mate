@@ -59,6 +59,13 @@ const CODECAPI_AVEncMPVGOPSize = g(0x95f31b26, 0x95a4, 0x41aa, .{ 0x93, 0x03, 0x
 const CODECAPI_AVEncCommonLowLatency = g(0x9d3ecd55, 0x89e8, 0x490a, .{ 0x97, 0x0a, 0x0c, 0x95, 0x48, 0xd5, 0xa5, 0x6e });
 const CODECAPI_AVEncMPVDefaultBPictureCount = g(0x8d390aac, 0xdc5c, 0x4200, .{ 0xb5, 0x7f, 0x81, 0x4d, 0x04, 0xba, 0xba, 0xb2 });
 const CODECAPI_AVEncVideoForceKeyFrame = g(0x398c1b98, 0x8353, 0x475a, .{ 0x9e, 0xf2, 0x8f, 0x26, 0x5d, 0x26, 0x03, 0x45 });
+// Rate-control knobs for quality mode (values from the 10.0.26100 SDK codecapi.h).
+const CODECAPI_AVEncCommonQuality = g(0xfcbf57a3, 0x7ea5, 0x4b0c, .{ 0x96, 0x44, 0x69, 0xb4, 0x0c, 0x39, 0xc3, 0x91 });
+const CODECAPI_AVEncCommonMaxBitRate = g(0x9651eae4, 0x39b9, 0x4ebf, .{ 0x85, 0xef, 0xd7, 0xf4, 0x44, 0xec, 0x74, 0x65 });
+const CODECAPI_AVEncCommonBufferSize = g(0x0db96574, 0xb6a4, 0x4c8b, .{ 0x81, 0x06, 0x37, 0x73, 0xde, 0x03, 0x10, 0xcd });
+const CODECAPI_AVEncVideoEncodeQP = g(0x2cb5696b, 0x23fb, 0x4ce1, .{ 0xa0, 0xf9, 0xef, 0x5b, 0x90, 0xfd, 0x55, 0xca });
+const CODECAPI_AVEncVideoMinQP = g(0x0ee22c6a, 0xa37c, 0x4568, .{ 0xb5, 0xf1, 0x9d, 0x4c, 0x2b, 0x3a, 0xb8, 0x86 });
+const CODECAPI_AVEncVideoMaxQP = g(0x3daf6f66, 0xa6a7, 0x45e0, .{ 0xa8, 0xe5, 0xf2, 0x74, 0x3f, 0x46, 0xa3, 0xa2 });
 const IID_ICodecAPI = g(0x901db4c7, 0x31ce, 0x41a2, .{ 0x85, 0xdc, 0x8f, 0xa0, 0xbf, 0x41, 0xb8, 0xda });
 // NOTE last byte 0x7d: the hand-rolled 0x7b variant silently forces sync drive (E_NOINTERFACE).
 const IID_IMFMediaEventGenerator = g(0x2cd0bd52, 0xbcd5, 0x4b89, .{ 0xb6, 0x2c, 0xea, 0xdc, 0x0c, 0x03, 0x1e, 0x7d });
@@ -122,6 +129,7 @@ pub const MAP_READ = d3d.MAP_READ;
 const DXGI_ADAPTER_FLAG_SOFTWARE = d3d.DXGI_ADAPTER_FLAG_SOFTWARE;
 const VT_UI4: u16 = 19;
 const VT_BOOL: u16 = 11;
+const VT_UI8: u16 = 21;
 
 // ── structs (MS x64 layout; shared - see native/zigd3d/src/d3d11.zig) ──
 pub const LUID = d3d.LUID;
@@ -300,7 +308,12 @@ pub const swdec = struct {
 pub const ICodecAPI = extern struct {
     v: *const extern struct {
         _iunk: [3]VOP,
-        _p: [6]VOP, // IsSupported IsModifiable GetParameterRange GetParameterValues GetDefaultValue GetValue
+        IsSupported: *const fn (*anyopaque, *const GUID) callconv(.winapi) HRESULT,
+        IsModifiable: *const fn (*anyopaque, *const GUID) callconv(.winapi) HRESULT,
+        GetParameterRange: *const fn (*anyopaque, *const GUID, *VARIANT, *VARIANT, *VARIANT) callconv(.winapi) HRESULT,
+        GetParameterValues: *const fn (*anyopaque, *const GUID, *?[*]VARIANT, *u32) callconv(.winapi) HRESULT,
+        GetDefaultValue: *const fn (*anyopaque, *const GUID, *VARIANT) callconv(.winapi) HRESULT,
+        GetValue: *const fn (*anyopaque, *const GUID, *VARIANT) callconv(.winapi) HRESULT,
         SetValue: *const fn (*anyopaque, *const GUID, *const VARIANT) callconv(.winapi) HRESULT,
     },
 };
@@ -750,6 +763,335 @@ pub fn lastOpenErr() []const u8 {
     return open_err_buf[0..open_err_len];
 }
 
+// ── rate control ──
+//
+// Two session modes, chosen by the parent (mediaLink.bitrateMode):
+//   fixed   (qp == 0): the legacy program (post-type, see rc_legacy_fixed) - unchanged behaviour.
+//   quality (qp > 0):  constant QUALITY, cap_kbps is only the CEILING. Same contract as the Linux VA
+//                      path (internal/pwcapture vaenc.c): encode at the target QP; QP only RISES
+//                      above it when the cap binds. Realised as a rate-controlled mode at the cap PLUS
+//                      a QP floor (AVEncVideoMinQP = target QP): simple content cannot spend below
+//                      the floor's QP so it undershoots; complex content is held at the cap.
+// Rung order, first accepted wins. Ranked by (1) cap enforced, (2) cap movable LIVE by the "bitrate"
+// op (receiver rate governor), (3) latency; every rung keeps 0 B-frames, no lookahead/multipass.
+//   1 CBR + MinQP                - cap = CBR target; NVIDIA retargets it live (fixed mode's history
+//                                  + ratectl gate). NVENC adds no filler, so the floor wins.
+//   2 LowDelayVBR + MinQP        - peak-bounded via MaxBitRate + VBV, low-latency VBR. Ranked below
+//                                  CBR: NVIDIA ignores LIVE Mean/MaxBitRate changes in VBR modes
+//                                  (measured: 3000->1500 kbps cut, output unchanged); AMD/Intel unknown.
+//   3 PeakConstrainedVBR + MinQP - same caveat, generic VBV; no added frame delay.
+//   4 CBR fallback               - every quality rung refused: the legacy fixed program at the cap.
+// Excluded: Quality (3) + MaxBitRate - NVIDIA ignores MaxBitRate in Quality mode (measured 9.3 Mbps
+// on a 3 Mbps cap) and no API proves another vendor honours it, so it is an UNCAPPED mode;
+// UnconstrainedVBR (no peak); GlobalVBR/GlobalLowDelayVBR (two-pass/lookahead = frame delay).
+// The ICodecAPI 0..100 AVEncCommonQuality knob therefore goes unused: quality is expressed only as
+// the QP floor, the same QP the Linux path holds (medialink.QualityToQP).
+// Acceptance = SetValue S_OK on the mode AND every companion knob the rung needs. GetValue is no
+// oracle: NVIDIA's MFT reads RateControlMode back as 0 whatever was set (rcprobe, RTX 3060).
+
+/// RcMode is the engaged rate-control rung (shm header telemetry code, mirrored in Go procstats).
+pub const RcMode = enum(u8) {
+    none = 0, // no ICodecAPI / old child
+    cbr = 1, // fixed mode
+    cbr_qp = 2,
+    lowdelay_vbr_qp = 3,
+    peak_vbr_qp = 4,
+    cbr_fallback = 5, // quality requested, encoder refused every quality rung
+
+    pub fn label(m: RcMode) []const u8 {
+        return switch (m) {
+            .none => "none",
+            .cbr => "cbr",
+            .cbr_qp => "cbr+qp-floor",
+            .lowdelay_vbr_qp => "lowdelay-vbr+qp-floor",
+            .peak_vbr_qp => "peak-vbr+qp-floor",
+            .cbr_fallback => "cbr(quality refused)",
+        };
+    }
+};
+
+// eAVEncCommonRateControlMode (codecapi.h). rc_legacy_fixed: fixed mode has always written 3
+// (= _Quality in codecapi.h, commented "CBR" since the C++ shim) AFTER the media types. On NVIDIA
+// that post-type write is ignored and the MFT runs CBR from MF_MT_AVG_BITRATE (measured: target
+// hit on easy and hard content). Kept as-is so fixed mode does not change; AMD/Intel/software MFTs
+// that DO honour a post-type 3 run Quality there today - see .devnotes/ADAPTIVE_BUDGET.md.
+const rc_legacy_fixed: u32 = 3;
+const rc_cbr: u32 = 0;
+const rc_peak_vbr: u32 = 1;
+const rc_lowdelay_vbr: u32 = 4;
+
+/// RcReq is one session's rate-control request. qp == 0 = fixed mode.
+pub const RcReq = struct {
+    cap_kbps: u32 = 8000,
+    qp: u8 = 0, // target QP = QP floor (medialink.QualityToQP for H.264)
+    quality: u8 = 0, // model quality 1..100 it came from (telemetry only)
+};
+
+/// RcCaps is what selection reads from the encoder (IsSupported per knob; listed = the
+/// GetParameterValues mode bitmask, null when the MFT does not enumerate - then SetValue decides).
+/// enc_qp/quality are diagnostics only (open trace): no rung uses them.
+pub const RcCaps = struct {
+    mode: bool = false,
+    mean: bool = false,
+    max: bool = false,
+    buffer: bool = false,
+    min_qp: bool = false,
+    enc_qp: bool = false,
+    quality: bool = false,
+    listed: ?u8 = null,
+
+    fn lists(c: RcCaps, m: u32) bool {
+        const l = c.listed orelse return true;
+        return l & (@as(u8, 1) << @intCast(m)) != 0;
+    }
+};
+
+/// rcLadder lists the rungs worth trying for req on an encoder with caps, best first.
+pub fn rcLadder(caps: RcCaps, req: RcReq, out: *[4]RcMode) []RcMode {
+    var n: usize = 0;
+    if (req.qp == 0) {
+        out[0] = .cbr;
+        return out[0..1];
+    }
+    if (caps.mode and caps.min_qp) {
+        if (caps.lists(rc_cbr) and caps.mean) {
+            out[n] = .cbr_qp;
+            n += 1;
+        }
+        if (caps.lists(rc_lowdelay_vbr) and caps.max) {
+            out[n] = .lowdelay_vbr_qp;
+            n += 1;
+        }
+        if (caps.lists(rc_peak_vbr) and caps.max) {
+            out[n] = .peak_vbr_qp;
+            n += 1;
+        }
+    }
+    out[n] = .cbr_fallback;
+    n += 1;
+    return out[0..n];
+}
+
+fn vU4(x: u64) VARIANT {
+    return .{ .vt = VT_UI4, .val = x };
+}
+
+/// applyRung programs one rung through ra (any type with `fn set(*const GUID, VARIANT) bool`).
+/// false = the encoder refused a knob the rung NEEDS; the caller tries the next rung.
+pub fn applyRung(ra: anytype, caps: RcCaps, m: RcMode, req: RcReq) bool {
+    const bps: u64 = @as(u64, req.cap_kbps) * 1000;
+    switch (m) {
+        .none => return false,
+        .cbr, .cbr_fallback => {
+            // Programmed by the legacy post-type block (configureEncoder); here only undo a refused
+            // rung's QP floor so the fallback really is today's CBR.
+            if (caps.min_qp) _ = ra.set(&CODECAPI_AVEncVideoMinQP, vU4(0));
+            return true;
+        },
+        .cbr_qp, .lowdelay_vbr_qp, .peak_vbr_qp => {
+            const mode: u32 = switch (m) {
+                .lowdelay_vbr_qp => rc_lowdelay_vbr,
+                .peak_vbr_qp => rc_peak_vbr,
+                else => rc_cbr,
+            };
+            if (!ra.set(&CODECAPI_AVEncCommonRateControlMode, vU4(mode))) return false;
+            const mean_ok = caps.mean and ra.set(&CODECAPI_AVEncCommonMeanBitRate, vU4(bps));
+            if (m == .cbr_qp and !mean_ok) return false; // CBR's target IS the cap
+            if (m != .cbr_qp and !ra.set(&CODECAPI_AVEncCommonMaxBitRate, vU4(bps))) return false;
+            // VBV = 1 s at the cap (BufferSize is in BYTES: bits here exceed the level CPB and NVENC
+            // fails SetOutputType with MF_E_UNSUPPORTED_D3D_TYPE). Bounds a keyframe burst.
+            if (caps.buffer) _ = ra.set(&CODECAPI_AVEncCommonBufferSize, vU4(bps / 8));
+            return ra.set(&CODECAPI_AVEncVideoMinQP, vU4(req.qp));
+        },
+    }
+}
+
+/// retargetRung moves the cap of an ENGAGED rung live (the "bitrate" op): the CBR target (fixed
+/// mode, CBR+floor), or mean + peak (VBR rungs). Mode and QP floor are untouched.
+pub fn retargetRung(ra: anytype, caps: RcCaps, m: RcMode, kbps: u32) bool {
+    const bps: u64 = @as(u64, kbps) * 1000;
+    return switch (m) {
+        .none => false,
+        .cbr, .cbr_fallback => ra.set(&CODECAPI_AVEncCommonMeanBitRate, vU4(bps)),
+        .cbr_qp, .lowdelay_vbr_qp, .peak_vbr_qp => blk: {
+            var ok = ra.set(&CODECAPI_AVEncCommonMeanBitRate, vU4(bps));
+            if (m != .cbr_qp) ok = ra.set(&CODECAPI_AVEncCommonMaxBitRate, vU4(bps)) and ok;
+            if (caps.buffer) _ = ra.set(&CODECAPI_AVEncCommonBufferSize, vU4(bps / 8));
+            break :blk ok;
+        },
+    };
+}
+
+/// pickRung walks the ladder (or [force, fallback]) and returns the first rung ra accepts. The CBR
+/// fallback always "accepts": the legacy post-type program cannot be refused, only ignored.
+pub fn pickRung(ra: anytype, caps: RcCaps, req: RcReq, force: ?RcMode) RcMode {
+    var buf: [4]RcMode = undefined;
+    var ladder = rcLadder(caps, req, &buf);
+    if (force) |f| if (req.qp > 0) {
+        const one = f == .cbr_fallback or f == .cbr or f == .none;
+        buf[0] = if (one) .cbr_fallback else f;
+        buf[1] = .cbr_fallback;
+        ladder = buf[0..if (one) 1 else 2];
+    };
+    for (ladder) |m| {
+        if (applyRung(ra, caps, m, req)) return m;
+        trace("rate control: {s} refused", .{m.label()});
+    }
+    return .cbr_fallback; // unreachable: the ladder always ends in the fallback
+}
+
+// FakeRc is a scripted encoder for the selection tests: AMD/Intel MFTs are not on the dev rig, so
+// their plausible capability tables are exercised here. refuse_mode = RateControlMode values whose
+// SetValue fails; the log records every accepted (key, value) in order.
+const FakeRc = struct {
+    refuse_mode: u8 = 0,
+    refuse_max: bool = false,
+    refuse_mean: bool = false,
+    refuse_minqp: bool = false,
+    n: usize = 0,
+    keys: [16]*const GUID = undefined,
+    vals: [16]u64 = undefined,
+
+    fn set(f: *FakeRc, key: *const GUID, v: VARIANT) bool {
+        if (key == &CODECAPI_AVEncCommonRateControlMode and f.refuse_mode & (@as(u8, 1) << @intCast(v.val)) != 0) return false;
+        if (key == &CODECAPI_AVEncCommonMaxBitRate and f.refuse_max) return false;
+        if (key == &CODECAPI_AVEncCommonMeanBitRate and f.refuse_mean) return false;
+        if (key == &CODECAPI_AVEncVideoMinQP and f.refuse_minqp) return false;
+        f.keys[f.n] = key;
+        f.vals[f.n] = v.val;
+        f.n += 1;
+        return true;
+    }
+    // last returns the value most recently accepted for key (null = never set).
+    fn last(f: *const FakeRc, key: *const GUID) ?u64 {
+        var i = f.n;
+        while (i > 0) : (i -= 1) if (f.keys[i - 1] == key) return f.vals[i - 1];
+        return null;
+    }
+};
+
+const caps_all = RcCaps{ .mode = true, .mean = true, .max = true, .buffer = true, .min_qp = true, .enc_qp = true, .quality = true };
+const req_q = RcReq{ .cap_kbps = 3000, .qp = 23, .quality = 70 };
+
+test "rc: fixed mode never leaves the legacy program" {
+    var buf: [4]RcMode = undefined;
+    try std.testing.expectEqualSlices(RcMode, &.{.cbr}, rcLadder(caps_all, .{ .cap_kbps = 8000 }, &buf));
+}
+
+test "rc: NVIDIA-shaped caps (all knobs, no mode list) engage CBR + QP floor at the cap" {
+    var f = FakeRc{};
+    try std.testing.expectEqual(RcMode.cbr_qp, pickRung(&f, caps_all, req_q, null));
+    try std.testing.expectEqual(@as(?u64, rc_cbr), f.last(&CODECAPI_AVEncCommonRateControlMode));
+    try std.testing.expectEqual(@as(?u64, 3_000_000), f.last(&CODECAPI_AVEncCommonMeanBitRate));
+    try std.testing.expectEqual(@as(?u64, 375_000), f.last(&CODECAPI_AVEncCommonBufferSize)); // bytes
+    try std.testing.expectEqual(@as(?u64, 23), f.last(&CODECAPI_AVEncVideoMinQP));
+    try std.testing.expectEqual(@as(?u64, null), f.last(&CODECAPI_AVEncCommonMaxBitRate));
+}
+
+test "rc: an MFT that lists only VBR modes gets low-delay VBR with a peak" {
+    var c = caps_all;
+    c.listed = (1 << rc_peak_vbr) | (1 << rc_lowdelay_vbr);
+    var buf: [4]RcMode = undefined;
+    try std.testing.expectEqualSlices(RcMode, &.{ .lowdelay_vbr_qp, .peak_vbr_qp, .cbr_fallback }, rcLadder(c, req_q, &buf));
+    var f = FakeRc{};
+    try std.testing.expectEqual(RcMode.lowdelay_vbr_qp, pickRung(&f, c, req_q, null));
+    try std.testing.expectEqual(@as(?u64, 3_000_000), f.last(&CODECAPI_AVEncCommonMaxBitRate));
+    try std.testing.expectEqual(@as(?u64, 23), f.last(&CODECAPI_AVEncVideoMinQP));
+}
+
+test "rc: SetValue refusals walk the ladder in order" {
+    var f = FakeRc{ .refuse_mode = (1 << rc_cbr) | (1 << rc_lowdelay_vbr) };
+    try std.testing.expectEqual(RcMode.peak_vbr_qp, pickRung(&f, caps_all, req_q, null));
+    try std.testing.expectEqual(@as(?u64, rc_peak_vbr), f.last(&CODECAPI_AVEncCommonRateControlMode));
+    // CBR accepted but its target (MeanBitRate) refused: CBR+floor has no cap, so VBR wins.
+    var f2 = FakeRc{ .refuse_mean = true };
+    try std.testing.expectEqual(RcMode.lowdelay_vbr_qp, pickRung(&f2, caps_all, req_q, null));
+}
+
+test "rc: no QP floor or no peak = CBR fallback, never an uncapped mode" {
+    var c = caps_all;
+    c.min_qp = false; // Intel-shaped: no AVEncVideoMinQP
+    var buf: [4]RcMode = undefined;
+    try std.testing.expectEqualSlices(RcMode, &.{.cbr_fallback}, rcLadder(c, req_q, &buf));
+    var f = FakeRc{};
+    try std.testing.expectEqual(RcMode.cbr_fallback, pickRung(&f, c, req_q, null));
+    try std.testing.expectEqual(@as(?u64, null), f.last(&CODECAPI_AVEncCommonRateControlMode)); // legacy block programs it
+    // Every quality rung refused late (MinQP): the fallback undoes the floor a refused rung left.
+    var f2 = FakeRc{ .refuse_mode = 1 << rc_cbr, .refuse_max = true };
+    try std.testing.expectEqual(RcMode.cbr_fallback, pickRung(&f2, caps_all, req_q, null));
+    try std.testing.expectEqual(@as(?u64, 0), f2.last(&CODECAPI_AVEncVideoMinQP));
+    var f3 = FakeRc{};
+    try std.testing.expectEqual(RcMode.cbr_fallback, pickRung(&f3, .{}, req_q, null)); // no ICodecAPI knobs at all
+}
+
+test "rc: live retarget moves the cap the engaged rung enforces" {
+    var f = FakeRc{};
+    try std.testing.expect(retargetRung(&f, caps_all, .cbr_qp, 1500));
+    try std.testing.expectEqual(@as(?u64, 1_500_000), f.last(&CODECAPI_AVEncCommonMeanBitRate));
+    try std.testing.expectEqual(@as(?u64, null), f.last(&CODECAPI_AVEncCommonMaxBitRate));
+    var f2 = FakeRc{};
+    try std.testing.expect(retargetRung(&f2, caps_all, .lowdelay_vbr_qp, 1500));
+    try std.testing.expectEqual(@as(?u64, 1_500_000), f2.last(&CODECAPI_AVEncCommonMaxBitRate));
+    var f3 = FakeRc{};
+    try std.testing.expect(retargetRung(&f3, caps_all, .cbr, 1500)); // fixed: legacy MeanBitRate only
+    try std.testing.expectEqual(@as(usize, 1), f3.n);
+}
+
+test "rc: forced rung (test hook) tries only that rung, then the fallback" {
+    var f = FakeRc{ .refuse_mode = 1 << rc_peak_vbr };
+    try std.testing.expectEqual(RcMode.cbr_fallback, pickRung(&f, caps_all, req_q, .peak_vbr_qp));
+    var f2 = FakeRc{};
+    try std.testing.expectEqual(RcMode.peak_vbr_qp, pickRung(&f2, caps_all, req_q, .peak_vbr_qp));
+}
+
+test "rc: telemetry codes are the wire contract (mirrored in internal/mfenc procstats.go rcLabels)" {
+    try std.testing.expectEqual(@as(u8, 1), @intFromEnum(RcMode.cbr));
+    try std.testing.expectEqual(@as(u8, 2), @intFromEnum(RcMode.cbr_qp));
+    try std.testing.expectEqual(@as(u8, 5), @intFromEnum(RcMode.cbr_fallback));
+    try std.testing.expectEqualStrings("cbr+qp-floor", RcMode.cbr_qp.label());
+}
+
+/// rc_force (RAVE_MATE_MFENC_RC test hook): try ONLY this rung for quality sessions (then the CBR
+/// fallback), so a test can pin a rung or prove the fallback on silicon that accepts everything.
+pub var rc_force: ?RcMode = null;
+
+// CapiRc adapts a live ICodecAPI to applyRung/retargetRung.
+const CapiRc = struct {
+    c: *ICodecAPI,
+    fn set(a: CapiRc, key: *const GUID, v: VARIANT) bool {
+        return !failed(a.c.v.SetValue(@ptrCast(a.c), key, &v));
+    }
+};
+
+fn probeRcCaps(c: *ICodecAPI) RcCaps {
+    const sup = struct {
+        fn f(cc: *ICodecAPI, key: *const GUID) bool {
+            return cc.v.IsSupported(@ptrCast(cc), key) == 0; // S_OK only (S_FALSE = no)
+        }
+    }.f;
+    var caps = RcCaps{
+        .mode = sup(c, &CODECAPI_AVEncCommonRateControlMode),
+        .mean = sup(c, &CODECAPI_AVEncCommonMeanBitRate),
+        .max = sup(c, &CODECAPI_AVEncCommonMaxBitRate),
+        .buffer = sup(c, &CODECAPI_AVEncCommonBufferSize),
+        .min_qp = sup(c, &CODECAPI_AVEncVideoMinQP),
+        .enc_qp = sup(c, &CODECAPI_AVEncVideoEncodeQP),
+        .quality = sup(c, &CODECAPI_AVEncCommonQuality),
+    };
+    var vals: ?[*]VARIANT = null;
+    var nv: u32 = 0;
+    if (!failed(c.v.GetParameterValues(@ptrCast(c), &CODECAPI_AVEncCommonRateControlMode, &vals, &nv)) and vals != null) {
+        var mask: u8 = 0;
+        for (vals.?[0..nv]) |v| { // VT_UI4 entries: no VariantClear needed
+            const m: u32 = @truncate(v.val);
+            if (m < 8) mask |= @as(u8, 1) << @intCast(m);
+        }
+        CoTaskMemFree(@ptrCast(vals));
+        caps.listed = mask;
+    }
+    return caps;
+}
+
 /// Enc is one hardware encode pipeline (one session). All calls from ONE thread.
 pub const Enc = struct {
     gpa: std.mem.Allocator,
@@ -798,6 +1140,13 @@ pub const Enc = struct {
     // the configured rate; allow_sw/force_sw pin the tier the rebuild uses (software stays software).
     kbps_cfg: i32 = 0,
     gop_cfg: i32 = 0,
+    // Rate control: the request (cap follows the live "bitrate" op, so a rebuild keeps the current
+    // cap), the probed caps and the rung engaged. rc_sink = shm header 248 (mode|qp<<8|quality<<16)
+    // + 252 (cap kbps), null without a session shm.
+    rc_req: RcReq = .{},
+    rc_caps: RcCaps = .{},
+    rc_mode: RcMode = .none,
+    rc_sink: ?*volatile [2]u32 = null,
     allow_sw_cfg: bool = false,
     force_sw_cfg: bool = false,
     has_enc: bool = false, // e.enc holds a bound MFT: guards releaseEncoder/close after a teardown
@@ -1248,6 +1597,20 @@ pub const Enc = struct {
         // output type: H.264 CBR Main + EXPLICIT level (4K60 = 5.2)
         const out_mt = mtVideo(&MFVideoFormat_H264, out_w, out_h, fps_n, e.fps_d) orelse return e.setErr("mtVideo(out)", E_FAIL);
         const kbps: u32 = if (kbps_in > 0) @intCast(kbps_in) else 8000;
+        e.rc_req.cap_kbps = kbps;
+        e.rc_mode = .none;
+        // Quality mode programs its rate control BEFORE the output type: NVIDIA's MFT fixes its rate
+        // control at SetOutputType and ignores later mode/MinQP/BufferSize (measured, RTX 3060: the
+        // same rung applied after the types gave output bit-identical to fixed mode). Fixed mode keeps
+        // the legacy post-type block below byte for byte.
+        if (e.rc_req.qp > 0) {
+            e.st(.codec_api);
+            var craw: ?*anyopaque = null;
+            if (!failed(qi(e.enc, &IID_ICodecAPI, &craw)) and craw != null) {
+                e.capi = @ptrCast(@alignCast(craw.?));
+                e.applyRc(e.capi.?);
+            }
+        }
         attrSetU32(out_mt, &MF_MT_AVG_BITRATE, kbps * 1000);
         attrSetU32(out_mt, &MF_MT_MPEG2_PROFILE, 77); // Main
         attrSetU32(out_mt, &MF_MT_MPEG2_LEVEL, h264LevelFor(out_w, out_h, fps_n, e.fps_d));
@@ -1284,14 +1647,26 @@ pub const Enc = struct {
         // rate control / GOP / latency knobs (best-effort)
         e.st(.codec_api);
         trace("ICodecAPI knobs", .{});
-        var craw: ?*anyopaque = null;
-        if (!failed(qi(e.enc, &IID_ICodecAPI, &craw)) and craw != null) {
-            e.capi = @ptrCast(@alignCast(craw.?));
-            const c = e.capi.?;
-            var v = VARIANT{ .vt = VT_UI4, .val = 3 }; // CBR
-            _ = c.v.SetValue(@ptrCast(c), &CODECAPI_AVEncCommonRateControlMode, &v);
-            v.val = @as(u64, kbps) * 1000;
-            _ = c.v.SetValue(@ptrCast(c), &CODECAPI_AVEncCommonMeanBitRate, &v);
+        if (e.capi == null) {
+            var craw: ?*anyopaque = null;
+            if (!failed(qi(e.enc, &IID_ICodecAPI, &craw)) and craw != null) e.capi = @ptrCast(@alignCast(craw.?));
+        }
+        if (e.capi) |c| {
+            var v = VARIANT{ .vt = VT_UI4, .val = 0 };
+            if (e.rc_mode == .none or e.rc_mode == .cbr or e.rc_mode == .cbr_fallback) { // fixed / quality refused: legacy
+                const fresh = e.rc_mode == .none; // not already traced by applyRc
+                if (fresh) e.rc_mode = if (e.rc_req.qp > 0) .cbr_fallback else .cbr;
+                v.val = rc_legacy_fixed;
+                _ = c.v.SetValue(@ptrCast(c), &CODECAPI_AVEncCommonRateControlMode, &v);
+                v.val = @as(u64, kbps) * 1000;
+                _ = c.v.SetValue(@ptrCast(c), &CODECAPI_AVEncCommonMeanBitRate, &v);
+                if (fresh) trace("rate control: engaged {s} cap={d} kbps", .{ e.rc_mode.label(), kbps });
+                e.publishRc();
+            } else {
+                // Re-assert the engaged rung after the types for MFTs that only latch post-type
+                // (AMD/Intel unverified). Failure here is ignored: the pre-type program stands.
+                _ = applyRung(CapiRc{ .c = c }, e.rc_caps, e.rc_mode, e.rc_req);
+            }
             v.val = if (gop > 0) @intCast(gop) else @intCast(@divTrunc(2 * fps_n, e.fps_d));
             _ = c.v.SetValue(@ptrCast(c), &CODECAPI_AVEncMPVGOPSize, &v);
             v.val = 0;
@@ -1378,7 +1753,8 @@ pub const Enc = struct {
     /// sw_req = the PARENT asked for the software tier on this session (its per-(adapter,encoder)
     /// failure ledger poisoned the hardware MFT here). Per-session, unlike the env policy: one
     /// poisoned adapter must not force software onto every other route in the child.
-    pub fn open(gpa: std.mem.Allocator, adapter_luid: i64, in_w: i32, in_h: i32, out_w: i32, out_h: i32, fps_n: i32, fps_d: i32, kbps_in: i32, gop: i32, zerocopy: bool, sw_req: bool) OpenErr!*Enc {
+    /// rc: rate-control request (qp 0 = fixed CBR at kbps_in; else quality mode with kbps_in as cap).
+    pub fn open(gpa: std.mem.Allocator, adapter_luid: i64, in_w: i32, in_h: i32, out_w: i32, out_h: i32, fps_n: i32, fps_d: i32, kbps_in: i32, gop: i32, zerocopy: bool, sw_req: bool, rc: RcReq) OpenErr!*Enc {
         const e = gpa.create(Enc) catch return error.OpenFailed;
         e.* = .{
             .gpa = gpa,
@@ -1390,6 +1766,7 @@ pub const Enc = struct {
             .fps_d = @max(fps_d, 1),
             .dur100 = @intFromFloat(10_000_000.0 * @as(f64, @floatFromInt(@max(fps_d, 1))) / @as(f64, @floatFromInt(fps_n))),
             .zero_copy = zerocopy,
+            .rc_req = rc,
         };
         errdefer gpa.destroy(e);
         if (in_w <= 0 or in_h <= 0 or out_w <= 0 or out_h <= 0 or fps_n <= 0) return e.setErr("args", E_FAIL);
@@ -1919,12 +2296,47 @@ pub const Enc = struct {
         e.force_idr = true;
     }
 
-    /// setBitrate live-retargets CBR mean bitrate (no reopen).
+    // applyRc probes the MFT's rate-control knobs and engages the first rung it accepts (see the
+    // rate-control block above). One trace line names the rung - the open-time verdict per session.
+    fn applyRc(e: *Enc, c: *ICodecAPI) void {
+        e.rc_caps = probeRcCaps(c);
+        e.rc_mode = pickRung(CapiRc{ .c = c }, e.rc_caps, e.rc_req, rc_force);
+        const cp = e.rc_caps;
+        trace("rate control: engaged {s} cap={d} kbps qp={d} q={d} (caps mode={} mean={} max={} buf={} minqp={} encqp={} quality={} listed=0x{x})", .{
+            e.rc_mode.label(), e.rc_req.cap_kbps, e.rc_req.qp, e.rc_req.quality, cp.mode, cp.mean, cp.max, cp.buffer, cp.min_qp, cp.enc_qp, cp.quality, cp.listed orelse 0xff,
+        });
+        e.publishRc();
+    }
+
+    // publishRc mirrors the engaged rung + cap into the session shm (parent ProcStats).
+    fn publishRc(e: *Enc) void {
+        const p = e.rc_sink orelse return;
+        const w0: u32 = @as(u32, @intFromEnum(e.rc_mode)) | (@as(u32, e.rc_req.qp) << 8) | (@as(u32, e.rc_req.quality) << 16);
+        @atomicStore(u32, @volatileCast(&p[1]), e.rc_req.cap_kbps, .release);
+        @atomicStore(u32, @volatileCast(&p[0]), w0, .release);
+    }
+
+    /// bindRc points rate-control telemetry at the parent-mapped shm words and publishes once.
+    pub fn bindRc(e: *Enc, p: *volatile [2]u32) void {
+        e.rc_sink = p;
+        e.publishRc();
+    }
+
+    /// rcMode is the engaged rate-control rung.
+    pub fn rcMode(e: *const Enc) RcMode {
+        return e.rc_mode;
+    }
+
+    /// setBitrate live-moves the cap (no reopen): CBR target in fixed mode, the peak in quality mode.
+    /// The new cap is kept for a reconfigureOutput rebuild (which used to revert to the open value).
     pub fn setBitrate(e: *Enc, kbps: u32) bool {
         const c = e.capi orelse return false;
         e.st(.set_bitrate);
-        const v = VARIANT{ .vt = VT_UI4, .val = @as(u64, kbps) * 1000 };
-        return !failed(c.v.SetValue(@ptrCast(c), &CODECAPI_AVEncCommonMeanBitRate, &v));
+        e.rc_req.cap_kbps = kbps;
+        e.kbps_cfg = @intCast(@min(kbps, std.math.maxInt(i32)));
+        const ok = retargetRung(CapiRc{ .c = c }, e.rc_caps, e.rc_mode, kbps);
+        e.publishRc();
+        return ok;
     }
 
     // rebuildAt re-creates the encoder MFT + NV12 pool at (ow, oh) on the SAME device + video
@@ -2203,3 +2615,199 @@ pub const api = struct {
     pub const VP_SUPPORT_INPUT = D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT;
     pub const feed_wait_ms = FEED_WAIT_MS;
 };
+
+// ── rate-control capability probe (test-only, opt-in: RAVE_MATE_MFENC_RCPROBE=1) ──
+// Prints what each hardware H.264/HEVC encoder MFT on the default adapter reports for the
+// quality-mode knobs, after the media types are set (vendor MFTs answer differently before).
+extern "kernel32" fn GetEnvironmentVariableA([*:0]const u8, ?[*]u8, u32) callconv(.winapi) u32;
+
+fn variantText(v: VARIANT, buf: []u8) []const u8 {
+    return switch (v.vt) {
+        VT_UI4 => std.fmt.bufPrint(buf, "{d}", .{@as(u32, @truncate(v.val))}) catch "?",
+        VT_UI8 => std.fmt.bufPrint(buf, "{d}", .{v.val}) catch "?",
+        VT_BOOL => if (@as(u16, @truncate(v.val)) != 0) "true" else "false",
+        0 => "-",
+        else => std.fmt.bufPrint(buf, "vt{d}:{d}", .{ v.vt, v.val }) catch "?",
+    };
+}
+
+fn probeOne(c: *ICodecAPI, label: []const u8, key: *const GUID) void {
+    const sup = c.v.IsSupported(@ptrCast(c), key);
+    const mdf = c.v.IsModifiable(@ptrCast(c), key);
+    var dv = VARIANT{ .vt = 0 };
+    var cv = VARIANT{ .vt = 0 };
+    var lo = VARIANT{ .vt = 0 };
+    var hi = VARIANT{ .vt = 0 };
+    var step = VARIANT{ .vt = 0 };
+    _ = c.v.GetDefaultValue(@ptrCast(c), key, &dv);
+    _ = c.v.GetValue(@ptrCast(c), key, &cv);
+    const rhr = c.v.GetParameterRange(@ptrCast(c), key, &lo, &hi, &step);
+    var b1: [32]u8 = undefined;
+    var b2: [32]u8 = undefined;
+    var b3: [32]u8 = undefined;
+    var b4: [32]u8 = undefined;
+    var b5: [32]u8 = undefined;
+    std.debug.print("  {s:<18} supported={s:<3} modifiable={s:<3} default={s:<10} value={s:<10} range={s}..{s} step {s} (hr=0x{x:0>8})\n", .{
+        label,                if (sup == 0) "yes" else "no", if (mdf == 0) "yes" else "no",
+        variantText(dv, &b1), variantText(cv, &b2),          variantText(lo, &b3),
+        variantText(hi, &b4), variantText(step, &b5),        @as(u32, @bitCast(rhr)),
+    });
+}
+
+fn probeCodec(dm: *IMFDXGIDeviceManager, sub: *const GUID, cname: []const u8) void {
+    const ti = MFT_REGISTER_TYPE_INFO{ .major = MFMediaType_Video, .sub = MFVideoFormat_NV12 };
+    const to = MFT_REGISTER_TYPE_INFO{ .major = MFMediaType_Video, .sub = sub.* };
+    var acts: ?[*]*IMFActivate = null;
+    var n: u32 = 0;
+    if (failed(MFTEnumEx(MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SORTANDFILTER, &ti, &to, &acts, &n)) or n == 0) {
+        std.debug.print("{s}: no hardware encoder MFT\n", .{cname});
+        return;
+    }
+    defer CoTaskMemFree(@ptrCast(acts));
+    for (acts.?[0..n]) |a| {
+        defer release(a);
+        var nb: [128]u8 = @splat(0);
+        const nm = Enc.activateName(a, &nb);
+        var raw: ?*anyopaque = null;
+        if (failed(a.v.ActivateObject(@ptrCast(a), &IID_IMFTransform, &raw)) or raw == null) continue;
+        const t: *IMFTransform = @ptrCast(@alignCast(raw.?));
+        defer {
+            release(t);
+            _ = a.v.ShutdownObject(@ptrCast(a));
+        }
+        var attrs: ?*IMFAttributes = null;
+        if (!failed(t.v.GetAttributes(@ptrCast(t), &attrs)) and attrs != null) {
+            attrSetU32(attrs.?, &MF_TRANSFORM_ASYNC_UNLOCK, 1);
+            attrSetU32(attrs.?, &MF_LOW_LATENCY, 1);
+            release(attrs.?);
+        }
+        const dmr = t.v.ProcessMessage(@ptrCast(t), MFT_MESSAGE_SET_D3D_MANAGER, @intFromPtr(dm));
+        const om = mtVideo(sub, 1920, 1080, 60, 1) orelse continue;
+        attrSetU32(om, &MF_MT_AVG_BITRATE, 20_000_000);
+        const hevc = guidEq(sub.*, MFVideoFormat_HEVC);
+        attrSetU32(om, &MF_MT_MPEG2_PROFILE, if (hevc) 1 else 77);
+        attrSetU32(om, &MF_MT_MPEG2_LEVEL, if (hevc) 123 else 42);
+        const ohr = t.v.SetOutputType(@ptrCast(t), 0, om, 0);
+        release(om);
+        const im = mtVideo(&MFVideoFormat_NV12, 1920, 1080, 60, 1) orelse continue;
+        const ihr = t.v.SetInputType(@ptrCast(t), 0, im, 0);
+        release(im);
+        std.debug.print("{s}: {s} (d3d=0x{x:0>8} out=0x{x:0>8} in=0x{x:0>8})\n", .{ cname, nm, @as(u32, @bitCast(dmr)), @as(u32, @bitCast(ohr)), @as(u32, @bitCast(ihr)) });
+        var craw: ?*anyopaque = null;
+        if (failed(qi(t, &IID_ICodecAPI, &craw)) or craw == null) {
+            std.debug.print("  no ICodecAPI\n", .{});
+            continue;
+        }
+        const c: *ICodecAPI = @ptrCast(@alignCast(craw.?));
+        defer release(c);
+        probeOne(c, "RateControlMode", &CODECAPI_AVEncCommonRateControlMode);
+        var vals: ?[*]VARIANT = null;
+        var nv: u32 = 0;
+        if (!failed(c.v.GetParameterValues(@ptrCast(c), &CODECAPI_AVEncCommonRateControlMode, &vals, &nv)) and vals != null) {
+            std.debug.print("    RateControlMode values:", .{});
+            for (vals.?[0..nv]) |v| std.debug.print(" {d}", .{@as(u32, @truncate(v.val))});
+            std.debug.print("\n", .{});
+            CoTaskMemFree(@ptrCast(vals));
+        }
+        var m: u32 = 0;
+        while (m <= 6) : (m += 1) {
+            const sv = VARIANT{ .vt = VT_UI4, .val = m };
+            const shr = c.v.SetValue(@ptrCast(c), &CODECAPI_AVEncCommonRateControlMode, &sv);
+            var rb = VARIANT{ .vt = 0 };
+            _ = c.v.GetValue(@ptrCast(c), &CODECAPI_AVEncCommonRateControlMode, &rb);
+            std.debug.print("    set RateControlMode={d}: hr=0x{x:0>8} readback={d}\n", .{ m, @as(u32, @bitCast(shr)), @as(u32, @truncate(rb.val)) });
+        }
+        probeOne(c, "MeanBitRate", &CODECAPI_AVEncCommonMeanBitRate);
+        probeOne(c, "MaxBitRate", &CODECAPI_AVEncCommonMaxBitRate);
+        probeOne(c, "BufferSize", &CODECAPI_AVEncCommonBufferSize);
+        probeOne(c, "Quality", &CODECAPI_AVEncCommonQuality);
+        probeOne(c, "VideoEncodeQP", &CODECAPI_AVEncVideoEncodeQP);
+        probeOne(c, "VideoMinQP", &CODECAPI_AVEncVideoMinQP);
+        probeOne(c, "VideoMaxQP", &CODECAPI_AVEncVideoMaxQP);
+        probeOne(c, "LowLatency", &CODECAPI_AVEncCommonLowLatency);
+        probeOne(c, "BPictureCount", &CODECAPI_AVEncMPVDefaultBPictureCount);
+        probeOne(c, "GOPSize", &CODECAPI_AVEncMPVGOPSize);
+    }
+}
+
+// probePreType: which knob, SET BEFORE SetOutputType, does the H.264 MFT reject at type time?
+fn probePreType(dm: *IMFDXGIDeviceManager) void {
+    const K = struct { l: []const u8, k: *const GUID, v: VARIANT };
+    const ks = [_]K{
+        .{ .l = "none", .k = &CODECAPI_AVEncMPVGOPSize, .v = vU4(120) },
+        .{ .l = "mode=0", .k = &CODECAPI_AVEncCommonRateControlMode, .v = vU4(0) },
+        .{ .l = "mode=1", .k = &CODECAPI_AVEncCommonRateControlMode, .v = vU4(1) },
+        .{ .l = "mode=3", .k = &CODECAPI_AVEncCommonRateControlMode, .v = vU4(3) },
+        .{ .l = "mode=4", .k = &CODECAPI_AVEncCommonRateControlMode, .v = vU4(4) },
+        .{ .l = "mean=6M", .k = &CODECAPI_AVEncCommonMeanBitRate, .v = vU4(6_000_000) },
+        .{ .l = "max=6M", .k = &CODECAPI_AVEncCommonMaxBitRate, .v = vU4(6_000_000) },
+        .{ .l = "max=12M", .k = &CODECAPI_AVEncCommonMaxBitRate, .v = vU4(12_000_000) },
+        .{ .l = "buffer=6M", .k = &CODECAPI_AVEncCommonBufferSize, .v = vU4(6_000_000) },
+        .{ .l = "minqp=23", .k = &CODECAPI_AVEncVideoMinQP, .v = vU4(23) },
+        .{ .l = "encqp=23", .k = &CODECAPI_AVEncVideoEncodeQP, .v = .{ .vt = VT_UI8, .val = 23 } },
+        .{ .l = "quality=55", .k = &CODECAPI_AVEncCommonQuality, .v = vU4(55) },
+    };
+    for (ks) |kk| {
+        const ti = MFT_REGISTER_TYPE_INFO{ .major = MFMediaType_Video, .sub = MFVideoFormat_NV12 };
+        const to = MFT_REGISTER_TYPE_INFO{ .major = MFMediaType_Video, .sub = MFVideoFormat_H264 };
+        var acts: ?[*]*IMFActivate = null;
+        var n: u32 = 0;
+        if (failed(MFTEnumEx(MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SORTANDFILTER, &ti, &to, &acts, &n)) or n == 0) return;
+        const a = acts.?[0];
+        var raw: ?*anyopaque = null;
+        if (!failed(a.v.ActivateObject(@ptrCast(a), &IID_IMFTransform, &raw)) and raw != null) {
+            const t: *IMFTransform = @ptrCast(@alignCast(raw.?));
+            _ = t.v.ProcessMessage(@ptrCast(t), MFT_MESSAGE_SET_D3D_MANAGER, @intFromPtr(dm));
+            var craw: ?*anyopaque = null;
+            var shr: HRESULT = -1;
+            if (!failed(qi(t, &IID_ICodecAPI, &craw)) and craw != null) {
+                const c: *ICodecAPI = @ptrCast(@alignCast(craw.?));
+                if (!std.mem.eql(u8, kk.l, "none")) shr = c.v.SetValue(@ptrCast(c), kk.k, &kk.v);
+                release(c);
+            }
+            const om = mtVideo(&MFVideoFormat_H264, 1280, 720, 60, 1).?;
+            attrSetU32(om, &MF_MT_AVG_BITRATE, 6_000_000);
+            attrSetU32(om, &MF_MT_MPEG2_PROFILE, 77);
+            attrSetU32(om, &MF_MT_MPEG2_LEVEL, 32);
+            const ohr = t.v.SetOutputType(@ptrCast(t), 0, om, 0);
+            release(om);
+            std.debug.print("pre-type {s:<12} set=0x{x:0>8} SetOutputType=0x{x:0>8}\n", .{ kk.l, @as(u32, @bitCast(shr)), @as(u32, @bitCast(ohr)) });
+            release(t);
+            _ = a.v.ShutdownObject(@ptrCast(a));
+        }
+        for (acts.?[0..n]) |x| release(x);
+        CoTaskMemFree(@ptrCast(acts));
+    }
+}
+
+test "rate-control capability probe (opt-in, needs a GPU)" {
+    var envb: [8]u8 = undefined;
+    if (GetEnvironmentVariableA("RAVE_MATE_MFENC_RCPROBE", &envb, envb.len) == 0) return error.SkipZigTest;
+    coInitMTA();
+    if (failed(MFStartup(MF_VERSION, MFSTARTUP_LITE))) return error.SkipZigTest;
+    var vendor: u32 = 0;
+    const ad = Enc.pickDefaultAdapter(&vendor) orelse return error.SkipZigTest;
+    defer release(ad);
+    var dev: ?*ID3D11Device = null;
+    var dctx: ?*ID3D11DeviceContext = null;
+    if (failed(D3D11CreateDevice(@ptrCast(ad), D3D_DRIVER_TYPE_UNKNOWN, null, D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT, null, 0, D3D11_SDK_VERSION, &dev, null, &dctx))) return error.SkipZigTest;
+    defer {
+        release(dctx.?);
+        release(dev.?);
+    }
+    var mtraw: ?*anyopaque = null;
+    if (!failed(qi(dev.?, &IID_ID3D10Multithread, &mtraw)) and mtraw != null) {
+        const mt10: *ID3D10Multithread = @ptrCast(@alignCast(mtraw.?));
+        _ = mt10.v.SetMultithreadProtected(@ptrCast(mt10), 1);
+        release(mt10);
+    }
+    var token: u32 = 0;
+    var dm: ?*IMFDXGIDeviceManager = null;
+    if (failed(MFCreateDXGIDeviceManager(&token, &dm)) or dm == null) return error.SkipZigTest;
+    defer release(dm.?);
+    _ = dm.?.v.ResetDevice(@ptrCast(dm.?), @ptrCast(dev.?), token);
+    std.debug.print("\nadapter vendor 0x{x}\n", .{vendor});
+    probePreType(dm.?);
+    probeCodec(dm.?, &MFVideoFormat_H264, "H.264");
+    probeCodec(dm.?, &MFVideoFormat_HEVC, "HEVC");
+}

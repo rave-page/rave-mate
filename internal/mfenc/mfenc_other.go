@@ -70,6 +70,7 @@ type ProcOpts struct {
 	InW, InH, OutW, OutH int
 	FPS                  float64
 	Kbps, Gop            int
+	Quality, QP          int
 	Spout                *SpoutSource
 	ZeroCopyAdapters     []int64
 }

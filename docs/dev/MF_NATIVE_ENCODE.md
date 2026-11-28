@@ -110,7 +110,10 @@ RGBA []byte ── UpdateSubresource ──> D3D11 texture (R8G8B8A8, or B8G8R8A
 - Encoder MFT runs **async** (IMFMediaEventGenerator: NeedInput credits, ONE
   ProcessOutput per HaveOutput event - more = E_UNEXPECTED); sync MFTs are also
   handled (drain-on-NOTACCEPTING) for vendor variance.
-- ICodecAPI: CBR, mean bitrate, ~2 s GOP, no B-frames, low-latency;
+- ICodecAPI: fixed mode = legacy CBR program at the mean bitrate; quality mode (bitrateMode auto)
+  = CBR + QP floor (`AVEncVideoMinQP` = `QualityToQP`) programmed BEFORE the media types, VBR
+  rungs / CBR fallback per MFT (`mf.zig` rate-control block, `.devnotes/ADAPTIVE_BUDGET.md`);
+  ~2 s GOP, no B-frames, low-latency;
   `AVEncVideoForceKeyFrame` = **live forced IDR** (KeyframeSource without the ffmpeg
   child's respawn + stream hole).
 - COM/MF affinity: one LockOSThread goroutine per encoder owns every call (MTA).

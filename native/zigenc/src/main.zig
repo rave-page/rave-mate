@@ -5,7 +5,8 @@
 //!
 //! Control plane (newline JSON): stdin ops
 //!   {"op":"open","sid":1,"shm":"Local\\rvmfenc-P-S","in_w":..,"in_h":..,"out_w":..,
-//!    "out_h":..,"fps_n":..,"fps_d":..,"kbps":..,"gop":..,
+//!    "out_h":..,"fps_n":..,"fps_d":..,"kbps":..,"gop":..,"q":..,"qp":.., (q/qp absent = fixed CBR;
+//!    qp > 0 = quality mode, kbps is the peak cap, "bitrate" moves the cap)
 //!    "src":"shm"|"spout","sh":<u64 share handle>,"sfmt":<DXGI fmt>,"sname":"<sender>",
 //!    "cap_n":..,"cap_d":..,"ring_kb":..,"pts0":<ns>}
 //!    "dir":"enc"|"dec","codec":"h264"|"hevc","dsh":<u64 dest share handle>,
@@ -236,8 +237,12 @@ const off_pool_depth = 240;
 const off_pool_grows = 244;
 // GPU compare (capFlags bit 5): verdicts not ready inside the budget (encoded anyway, never a miss),
 // and the EWMA issue->verdict latency in us (copy + compare GPU time + queueing).
-const off_cmp_timeouts = 248;
-const off_cmp_lat_us = 252;
+const off_cmp_timeouts = 152;
+const off_cmp_lat_us = 156;
+// 152..159 aliases the dir:"dec" block, which an ENCODE session's header never uses (one shm per
+// session; capture is encode-only). 248..255 is rate control; the header stays 256 B.
+// Rate control (every encode session, 248..255): mode | qp<<8 | quality<<16, then the live cap kbps.
+const off_rc = 248;
 
 // fault_after_frames > 0: crash the process after N encoded frames (test hook - proves
 // route continuity across an encoder-child death; parent injects on first spawn only).
@@ -261,6 +266,7 @@ const Session = struct {
     fps_d: i32,
     kbps: i32,
     gop: i32,
+    rc: mf.RcReq = .{}, // qp 0 = fixed CBR; else quality mode with kbps as the peak cap
     shm_name: []u8,
     // sw_req: the parent's failure ledger poisoned the hardware MFT on this adapter, so this
     // session takes the SOFTWARE tier rather than no video at all.
@@ -545,11 +551,12 @@ fn sessionMain(s: *Session) void {
         decSessionMain(s);
         return;
     }
-    const enc = mf.Enc.open(s.gpa, s.luid, s.in_w, s.in_h, s.out_w, s.out_h, s.fps_n, s.fps_d, s.kbps, s.gop, s.src_spout, s.sw_req) catch {
+    const enc = mf.Enc.open(s.gpa, s.luid, s.in_w, s.in_h, s.out_w, s.out_h, s.fps_n, s.fps_d, s.kbps, s.gop, s.src_spout, s.sw_req, s.rc) catch {
         emit(OpenedEv{ .sid = s.sid, .ok = false, .err = mf.lastOpenErr() });
         return;
     };
     enc.bindStage(s.hdr.stageSlot()); // crash attribution from here on
+    enc.bindRc(@ptrCast(@alignCast(s.hdr.base + off_rc)));
     const sink = mf.AuSink{ .ctx = @ptrCast(s), .put = &sinkPut };
     const drive: []const u8 = if (enc.isAsync()) "async" else "sync";
 
@@ -1127,6 +1134,8 @@ const Cmd = struct {
     fps_d: i32 = 1,
     kbps: i32 = 0,
     gop: i32 = 0,
+    q: i32 = 0, // quality mode: model quality 1..100 (telemetry)
+    qp: i32 = 0, // quality mode: target QP; 0 = fixed CBR
     // src:"spout" zero-copy fields (all optional; absent = today's SHM frame ring).
     src: []const u8 = "shm",
     sh: u64 = 0,
@@ -1235,6 +1244,9 @@ pub fn main(init: std.process.Init) !void {
     if (init.environ_map.get("RAVE_MATE_MFENC_FRAMECMP")) |v| {
         cap.framecmp_enabled = !std.mem.eql(u8, v, "0");
     }
+    if (init.environ_map.get("RAVE_MATE_MFENC_RC")) |v| { // test hook: pin the quality-mode rung
+        mf.rc_force = std.meta.stringToEnum(mf.RcMode, v);
+    }
     if (init.environ_map.get("RAVE_MATE_MFDEC_PROBE_BANDS")) |v| {
         probe_bands = std.mem.eql(u8, v, "1");
     }
@@ -1328,6 +1340,11 @@ pub fn main(init: std.process.Init) !void {
                 .fps_d = cmd.fps_d,
                 .kbps = cmd.kbps,
                 .gop = cmd.gop,
+                .rc = .{
+                    .cap_kbps = if (cmd.kbps > 0) @intCast(cmd.kbps) else 8000,
+                    .qp = @intCast(std.math.clamp(cmd.qp, 0, 51)),
+                    .quality = @intCast(std.math.clamp(cmd.q, 0, 100)),
+                },
                 .shm_name = try gpa.dupe(u8, cmd.shm),
                 .sw_req = cmd.sw,
                 .src_spout = spout,
@@ -1441,6 +1458,20 @@ test "crash-attribution header slots stay in their gap" {
     try std.testing.expectEqual(@as(usize, 120), off_feed_fails);
     try std.testing.expect(off_stage >= 112 and off_feed_fails + 4 <= off_in_write);
     try std.testing.expect(off_feed_fails + 4 <= hdr_size);
+}
+
+test "rate-control header words sit after the pool block, inside the header" {
+    try std.testing.expect(off_rc >= off_pool_grows + 4 and off_rc + 8 <= hdr_size);
+}
+
+test "open op carries the quality-mode fields (q/qp absent = fixed CBR)" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const q = try std.json.parseFromSliceLeaky(Cmd, arena.allocator(), "{\"op\":\"open\",\"kbps\":3000,\"q\":70,\"qp\":23}", .{ .ignore_unknown_fields = true });
+    try std.testing.expectEqual(@as(i32, 23), q.qp);
+    try std.testing.expectEqual(@as(i32, 70), q.q);
+    const f = try std.json.parseFromSliceLeaky(Cmd, arena.allocator(), "{\"op\":\"open\",\"kbps\":3000}", .{ .ignore_unknown_fields = true });
+    try std.testing.expectEqual(@as(i32, 0), f.qp);
 }
 
 test "capheight control op decodes to the Cmd fields (proto v4 wire contract)" {

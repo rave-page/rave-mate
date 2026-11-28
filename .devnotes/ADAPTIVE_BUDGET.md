@@ -157,3 +157,37 @@ mode=auto (quality q70, ...) ceil=<kbps>` and, once the VA engine reports it, `e
 LIMITED]`. Default config (bitrateKbps 50000, no mode) → auto, target ~35 Mbps H.264 / ~22 HEVC at
 4K60 (below the 50 ceiling), dropping on simple content. Set `bitrateMode: fixed` → the exact 50000
 as today. A VRAM/network MaxHeight cap lowers the bitrate; a restore raises it back toward the model.
+
+## Windows MF/Zig quality mode (2026-11-28, branch perf/mfquality)
+
+Closes the deferred "Windows MF/Zig quality mode". Plumbing: `mf_bridge` sets `ProcOpts.Quality` +
+`QP = QualityToQP(H.264, q)` when `spec.QualityTarget > 0` -> open op `"q"`,`"qp"` (omitempty: fixed
+open byte-identical; old child ignores = CBR) -> `mf.RcReq`. Live cap = existing `"bitrate"` op.
+Telemetry: shm header 248 (`mode | qp<<8 | q<<16`) + 252 (live cap kbps) -> `ProcStats.RateControl/
+RateCapKbps/RateQP` -> `PipelineStats.RateControl/RateCapKbps`, "route encode telemetry" `rc`/
+`capKbps`, `ctl routes` budget line `rc=.. cap=..`.
+
+RTX 3060 capability probe (`RAVE_MATE_MFENC_RCPROBE=1 zig build test`, NVIDIA H.264 + HEVC MFT
+identical): RateControlMode/Mean/Max/BufferSize/Quality/EncodeQP/MinQP/MaxQP/GOP IsSupported=yes;
+LowLatency + BPictureCount IsSupported=no; IsModifiable=no for all; GetParameterRange only for
+Min/MaxQP (0..51); GetParameterValues(RateControlMode)=E_NOTIMPL; SetValue(mode 0..6)=S_OK but
+GetValue reads 0 every time (no readback oracle).
+
+Measured facts that shaped the design (720p60, 3 Mbps cap, QP 23):
+- NVIDIA latches rate control at SetOutputType: quality knobs go BEFORE the types. Post-type writes
+  are ignored, which is why fixed mode's historical `RateControlMode=3` (= Quality in codecapi.h,
+  commented "CBR") behaves as CBR from `MF_MT_AVG_BITRATE` on NVIDIA. Fixed mode kept byte-for-byte
+  (A/B vs the HEAD child: identical rates). AMD/Intel/software MFTs that honour a post-type 3 run
+  Quality in fixed mode today - unverified, not changed here.
+- `AVEncCommonBufferSize` is BYTES; bits (1 s at cap) exceed the level CPB and NVENC fails
+  SetOutputType with MF_E_UNSUPPORTED_D3D_TYPE.
+- Quality(3)+MaxBitRate: cap ignored (9.3 Mbps on 3 Mbps) -> excluded as uncapped.
+- LowDelayVBR / PeakConstrainedVBR + MinQP: correct at open, but LIVE Mean/Max changes ignored.
+- CBR + MinQP floor: same open-time result as the VBR rungs AND live cap works (3000->1500: 2831 ->
+  1386 kbps). NVENC adds no filler, so the floor makes simple content undershoot.
+
+Ladder (`mf.zig` rcLadder): CBR+MinQP, LowDelayVBR+MinQP, PeakConstrainedVBR+MinQP, legacy CBR
+fallback. Quality mapping: QP floor = `QualityToQP` (same QP as the Linux VA path); the 0..100
+`AVEncCommonQuality` knob is unused (only its uncapped mode needs it). Selection covered for
+AMD/Intel-shaped tables by fake-table Zig tests ("rc: ..."); real AMD/Intel silicon untested.
+`RAVE_MATE_MFENC_RC=<rung>` pins a rung (test hook).

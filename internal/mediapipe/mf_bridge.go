@@ -136,6 +136,12 @@ func newMFBridge(ctx context.Context, log *logbus.Bus, spec medialink.EncodeSpec
 	}
 	opts := mfenc.ProcOpts{LUID: luid, InW: spec.Width, InH: spec.Height, OutW: outW, OutH: outH,
 		FPS: fps, Kbps: kbps, Gop: gopFrames(fps)}
+	// Adaptive budget "auto": constant quality at the same QP the Linux VA path holds for this target,
+	// kbps becomes the peak cap. The child picks the rate-control rung its MFT accepts (or CBR).
+	if spec.QualityTarget > 0 {
+		opts.Quality = spec.QualityTarget
+		opts.QP = medialink.QualityToQP(medialink.CodecH264, spec.QualityTarget)
+	}
 	// Zero-copy request (zigmedia inc 1) needs ALL of: the flag, a source that really exposes a
 	// shared texture, a handle that matches the negotiated geometry, and a sender not already
 	// pinned to the readback path. Anything missing = the readback frame path, byte for byte.
@@ -182,6 +188,7 @@ func newMFBridge(ctx context.Context, log *logbus.Bus, spec medialink.EncodeSpec
 		"device":  spec.DeviceLUID,
 		"adapter": fmt.Sprintf("%#x %s", uint64(enc.Stats().AdapterLUID), b.adapterName),
 		"capture": captureLabel(zc), "drive": enc.Drive(), "tier": tierLabel(enc.IsSoftware()),
+		"rc": enc.Stats().RateControl, "qp": opts.QP,
 		"degraded": enc.DegradeReason()})
 	// A zero-copy session's pixels never pass through here: no feed goroutine, so the source's
 	// capture is never attached and no readback is ever performed (mediaroute attaches lazily).
@@ -330,6 +337,8 @@ func (b *mfBridge) routeTelemetry(ctx context.Context) {
 			// The content oracle: a live picture cannot be a few hundred bytes per frame.
 			"aus": dN, "bytesPerFrame": perFrame, "kbps": fmt.Sprintf("%.0f", kbps),
 			"fps": fmt.Sprintf("%.1f", st.OutFPS),
+			// Rate control actually engaged by the MFT + the live cap (quality mode: the peak).
+			"rc": st.RateControl, "capKbps": st.RateCapKbps,
 			// Saturation is SEPARATE from failure is SEPARATE from deliberate rate limiting -
 			// three different incidents, three different responses, three numbers. "dropped"
 			// stays the TOTAL; rateCapped is the fps-cap share of it, lost is the remainder.
@@ -737,5 +746,6 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		LedgerFails:     st.LedgerFails,
 		// Adaptive budget (explainability). Feedback (QP/rate-limited) stays Present=false until the
 		// MF/Zig child reports a quality signal - a documented follow-up.
-		QualityTarget: b.spec.QualityTarget, BudgetKbps: b.spec.BitrateKbps}
+		QualityTarget: b.spec.QualityTarget, BudgetKbps: b.spec.BitrateKbps,
+		RateControl: st.RateControl, RateCapKbps: st.RateCapKbps}
 }

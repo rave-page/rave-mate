@@ -114,9 +114,15 @@ const (
 	offPoolDepth = 240
 	offPoolGrows = 244
 	// GPU compare telemetry (mirrors zigenc off_cmp_timeouts/off_cmp_lat_us): u32 verdicts not ready
-	// in budget, u32 EWMA issue->verdict latency in us.
-	offCmpTimeouts = 248
-	offCmpLatUs    = 252
+	// in budget, u32 EWMA issue->verdict latency in us. Lives at 152..159: the dir:"dec" block is unused
+	// in an ENCODE session's header (one shm per session, capture is encode-only) and 248..255 belongs
+	// to rate control below. Header stays 256 B.
+	offCmpTimeouts = 152
+	offCmpLatUs    = 156
+	// Rate control (every encode session; mirrors zigenc off_rc): mode | qp<<8 | quality<<16, then
+	// the live cap kbps. 0 = a pre-quality-mode child (nothing reported).
+	offRC    = 248
+	offRCCap = 252
 
 	// AU ring for a zero-copy session: half a second of bitstream, floor 4 MiB, ceiling
 	// 16 MiB - GEOMETRY-INDEPENDENT, so a sender resize costs zero SHM realloc.
@@ -909,6 +915,10 @@ type openCmd struct {
 	FpsD int    `json:"fps_d"`
 	Kbps int    `json:"kbps"`
 	Gop  int    `json:"gop"`
+	// Quality mode (adaptive budget): QP > 0 = constant quality at QP, Kbps is the peak cap; Q is the
+	// model quality 1..100 (telemetry). Absent = fixed CBR (an older child ignores both = CBR).
+	Q  int `json:"q,omitempty"`
+	QP int `json:"qp,omitempty"`
 	// Zero-copy source (omitted entirely on a readback session: absent = v1 behaviour).
 	Src    string `json:"src,omitempty"`
 	Sh     uint64 `json:"sh,omitempty"`
@@ -948,7 +958,8 @@ func (c *procChild) openSession(s *ProcSession) (openedEv, error) {
 	c.mu.Unlock()
 	fpsN, fpsD := fpsRational(s.fps)
 	cmd := openCmd{Op: "open", SID: s.sid, Shm: s.shm.name, InW: s.inW, InH: s.inH,
-		OutW: s.outW, OutH: s.outH, FpsN: fpsN, FpsD: fpsD, Kbps: s.kbps, Gop: s.gop, SW: s.swTier}
+		OutW: s.outW, OutH: s.outH, FpsN: fpsN, FpsD: fpsD, Kbps: s.kbps, Gop: s.gop, SW: s.swTier,
+		Q: s.quality, QP: s.qp}
 	if s.zeroCopy {
 		// Re-read the handle on every (re)open, including the post-crash re-place: a sender that
 		// restarted while the child was down must not be re-issued its dead texture (R1).
@@ -1050,6 +1061,7 @@ type ProcSession struct {
 	inW, inH, outW, outH int
 	fps                  float64
 	kbps, gop            int
+	quality, qp          int // quality mode request (qp 0 = fixed CBR)
 	frameBytes           int
 	ringSize             uint64
 	ringOff              uintptr
@@ -1149,7 +1161,10 @@ type ProcOpts struct {
 	InW, InH, OutW, OutH int
 	FPS                  float64
 	Kbps, Gop            int
-	Spout                *SpoutSource
+	// Quality mode (adaptive budget "auto"): QP > 0 asks the child for constant quality at QP with
+	// Kbps as the PEAK cap; Quality is the model target 1..100 it came from. 0 = fixed CBR at Kbps.
+	Quality, QP int
+	Spout       *SpoutSource
 	// ZeroCopyAdapters lists adapter LUIDs this session MAY be re-placed on when LUID cannot open
 	// the sender's shared texture (cross-adapter sender, risk R7 - reproduced on the dev rig).
 	// EMPTY = never move, which is the default and what an explicitly pinned encode device gets:
@@ -1260,6 +1275,7 @@ func openProcSessionOn(o ProcOpts) (*ProcSession, error) {
 		s := &ProcSession{
 			child: child, sid: sid, shm: shm,
 			inW: inW, inH: inH, outW: outW, outH: outH, fps: fps, kbps: kbps, gop: gop,
+			quality: o.Quality, qp: o.QP,
 			frameBytes: frameBytes, ringSize: uint64(ringSize),
 			ringOff:  uintptr(shmHdrSize + frameBytes),
 			out:      make(chan AU, 8),
@@ -1681,7 +1697,8 @@ func (s *ProcSession) ForceKeyframe() {
 	_ = s.child.send(map[string]any{"op": "idr", "sid": s.sid})
 }
 
-// SetBitrate live-retargets CBR bitrate (Phase-2 degrade ladder).
+// SetBitrate live-moves the encoder's rate: the CBR target in fixed mode, the PEAK cap in quality
+// mode (Phase-2 degrade ladder, receiver rate governor).
 func (s *ProcSession) SetBitrate(kbps int) {
 	if kbps > 0 {
 		_ = s.child.send(map[string]any{"op": "bitrate", "sid": s.sid, "kbps": kbps})
@@ -1973,6 +1990,8 @@ func (s *ProcSession) Stats() ProcStats {
 	if !s.shmGone {
 		st.PoolDepth = atomic.LoadUint32((*uint32)(unsafe.Add(s.shm.base, offPoolDepth)))
 		st.PoolGrows = atomic.LoadUint32((*uint32)(unsafe.Add(s.shm.base, offPoolGrows)))
+		capKbps := atomic.LoadUint32((*uint32)(unsafe.Add(s.shm.base, offRCCap)))
+		st.setRC(atomic.LoadUint32((*uint32)(unsafe.Add(s.shm.base, offRC))), capKbps)
 	}
 	if s.zeroCopy && !s.shmGone {
 		st.ZeroCopy = true
