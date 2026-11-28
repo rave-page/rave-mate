@@ -35,6 +35,7 @@ import (
 	"rave.page/mate/internal/serato"
 	"rave.page/mate/internal/service"
 	"rave.page/mate/internal/session/sources/rekordboxsrc"
+	"rave.page/mate/internal/shared/selfupdate"
 	"rave.page/mate/internal/sysexec"
 	"rave.page/mate/internal/traktormap"
 	"rave.page/mate/internal/traktorqml"
@@ -98,10 +99,28 @@ func main() {
 	svc := flag.Bool("service", false, "alias of --headless")
 	flag.Parse()
 
-	if err := app.Run(*headless || *svc); err != nil {
+	err := app.Run(*headless || *svc)
+	if exe := app.ReexecTarget(); exe != "" {
+		reexec(exe)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "rave-mate:", err)
 		os.Exit(1)
 	}
+}
+
+// reexec replaces this process with the swapped (or rolled-back) binary after the app shut down
+// cleanly. If exec itself fails, the new build is unusable: restore .prev, pin it bad, exec that.
+func reexec(exe string) {
+	err := selfupdate.Reexec(exe) // returns only on failure
+	fmt.Fprintln(os.Stderr, "rave-mate: re-exec", exe, "failed:", err)
+	if rerr := selfupdate.NewGuard(exe).RollbackNow(); rerr != nil {
+		fmt.Fprintln(os.Stderr, "rave-mate: rollback:", rerr)
+		os.Exit(1)
+	}
+	err = selfupdate.Reexec(exe)
+	fmt.Fprintln(os.Stderr, "rave-mate: re-exec of restored build failed:", err)
+	os.Exit(1)
 }
 
 // runRepairCollection repairs older rave-mate write damage in a Traktor collection.nml:
@@ -1227,6 +1246,9 @@ func runServiceCmd(cmd string) int {
 			return 1
 		}
 		fmt.Println("rave-mate service:", st)
+		if line, err := app.Send("STATUS"); err == nil { // running daemon: build + update state
+			fmt.Println(line)
+		}
 	}
 	return 0
 }
