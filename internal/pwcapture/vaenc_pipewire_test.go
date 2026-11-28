@@ -93,6 +93,11 @@ func TestDMABufEncodeAPI(t *testing.T) {
 	// then reflects the post-hint window to prove it took effect within ~1s.
 	hintKbps, _ := strconv.Atoi(os.Getenv("RPW_RATEHINT_KBPS"))
 	hintAt := warm + n/2
+	// Optional live fps cap (RPW_RATEHINT_FPS): applied at the midpoint on the RUNNING session; the AU
+	// rate measured from 1 s after the hint must sit at the cap (no re-padding by cadence repeats).
+	hintFPS, _ := strconv.Atoi(os.Getenv("RPW_RATEHINT_FPS"))
+	var capT0 time.Time
+	capAUs := 0
 	// Optional live MaxHeight (RPW_MAXH): apply at warm+n/3, restore (0) at warm+2n/3, to prove the
 	// coded size changes and restores on the native path (nominal geometry unchanged).
 	maxh2, _ := strconv.Atoi(os.Getenv("RPW_MAXH2"))
@@ -112,6 +117,18 @@ func TestDMABufEncodeAPI(t *testing.T) {
 		if hintKbps > 0 && i == hintAt {
 			if rc, ok := esrc.(medialink.RateControlSource); ok {
 				rc.SetRateHint(medialink.RateHint{MaxBitrateKbps: hintKbps})
+			}
+		}
+		if hintFPS > 0 && i == hintAt {
+			if rc, ok := esrc.(medialink.RateControlSource); ok {
+				rc.SetRateHint(medialink.RateHint{MaxFPS: hintFPS})
+			}
+		}
+		if hintFPS > 0 && i > hintAt {
+			if capT0.IsZero() && i >= hintAt+hintFPS { // ~1 s settle at the capped rate
+				capT0 = time.Now()
+			} else if !capT0.IsZero() {
+				capAUs++
 			}
 		}
 		if hintQ > 0 && i == hintAt { // live quality-level change (no reopen)
@@ -207,6 +224,14 @@ func TestDMABufEncodeAPI(t *testing.T) {
 	}
 	if !pliKeyframeAfter {
 		t.Error("RequestKeyframe (PLI) did not produce a keyframe")
+	}
+	if hintFPS > 0 {
+		post := float64(capAUs) / time.Since(capT0).Seconds()
+		t.Logf("FPSCAP hint=%d post-hint AU rate=%.1f fps over %d AUs (fixed: within 10%% of the cap)", hintFPS, post, capAUs)
+		if post > float64(hintFPS)*1.1 || post < float64(hintFPS)*0.9 {
+			t.Errorf("live fps cap %d not held: %.1f fps after the hint", hintFPS, post)
+		}
+		return // overall fps mixes both rates
 	}
 	if fps < 30 {
 		t.Errorf("encode fps too low: %.1f", fps)
