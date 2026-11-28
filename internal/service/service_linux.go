@@ -33,6 +33,11 @@ func Install() error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
+	// Self-update: the unattended updater swaps exe in place and re-execs (same PID), so it needs
+	// no Restart= - but the rollback guard counts boots of a crashing new build, which only happen
+	// when systemd restarts it: keep Restart=on-failure. ExecStart is the resolved exe; its dir
+	// must be writable by this user for updates (a user install always is). TimeoutStopSec covers
+	// the app's 15 s graceful-quit backstop.
 	unit := fmt.Sprintf(`[Unit]
 Description=%s
 After=network-online.target
@@ -41,6 +46,7 @@ After=network-online.target
 ExecStart=%s --service
 Restart=on-failure
 RestartSec=5
+TimeoutStopSec=30
 
 [Install]
 WantedBy=default.target

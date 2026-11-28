@@ -197,32 +197,13 @@ jobs:
             dist/openvr_api.dll
             dist/rave-mate-vfx.exe
 
+  # Same recipe as nightly.yml build-linux: pinned box, pipewire + zig tags, updater-armed.
   build-linux:
     runs-on: ubuntu-latest
     needs: build-windows # for channel/version outputs only
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Linux GL/X11 deps (Fyne)
-        run: |
-          sudo apt-get update || sudo apt-get update || true # third-party repo flake (packages.microsoft.com) must not fail the job; ubuntu archive lists still land
-          sudo apt-get install -y --no-install-recommends gcc pkg-config libgl1-mesa-dev xorg-dev libasound2-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libegl1-mesa-dev libx11-xcb-dev libxcursor-dev libxfixes-dev
-      - name: Install Zig (pinned, checksum-verified)
-        run: |
-          NAME="zig-x86_64-linux-${ZIG_VERSION}"
-          curl -fsSLo zig-dl.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/${NAME}.tar.xz"
-          echo "${ZIG_SHA256_LINUX}  zig-dl.tar.xz" | sha256sum -c -
-          mkdir -p "$HOME/zig-toolchain"
-          tar -xJf zig-dl.tar.xz -C "$HOME/zig-toolchain"
-          rm -f zig-dl.tar.xz
-          echo "$HOME/zig-toolchain/$NAME" >> "$GITHUB_PATH"
-      - name: Build Zig libs
-        run: |
-          zig version
-          bash scripts/build-zig.sh
-      - name: Build rave-mate-linux
+      - name: Build rave-mate-linux (pinned box; tags pipewire zigdsp zigui zigvr; updater-armed)
         env:
           UPDATE_SIGNING_KEY_PEM: ${{ secrets.UPDATE_SIGNING_KEY_PEM }}
           VERSION: ${{ needs.build-windows.outputs.version }}
@@ -233,14 +214,14 @@ jobs:
           # doesn't (fork/unsigned builds keep the sha256 + same-origin fallback).
           EXTRA_LDFLAGS=""
           [ -n "${UPDATE_SIGNING_KEY_PEM:-}" ] || EXTRA_LDFLAGS="-X rave.page/mate/internal/version.UpdatePubKey="
-          LDFLAGS="-s -w \
-            -X rave.page/mate/internal/version.Version=${VERSION} \
-            -X rave.page/mate/internal/version.Commit=${GITHUB_SHA::7} \
-            -X rave.page/mate/internal/version.Build=${GITHUB_RUN_NUMBER} \
-            -X rave.page/mate/internal/version.Channel=${CHANNEL} \
-            -X rave.page/mate/internal/version.FeedURL=${FEED} \
-            ${EXTRA_LDFLAGS}"
-          go build -tags "zigdsp zigui zigvr" -ldflags "$LDFLAGS" -o dist/rave-mate-linux ./cmd/rave-mate
+          docker build -t rave-mate-linux-build contrib/linux-build
+          mkdir -p dist/linux
+          docker run --rm -v "$PWD:/src:ro" -v "$PWD/dist/linux:/out" \
+            -e RM_SHA="${GITHUB_SHA::7}" -e RM_BUILD="${GITHUB_RUN_NUMBER}" \
+            -e RM_VERSION="${VERSION}" -e RM_CHANNEL="${CHANNEL}" -e RM_FEEDURL="${FEED}" \
+            -e RM_EXTRA_LDFLAGS="${EXTRA_LDFLAGS}" -e RM_TAGS="pipewire zigdsp zigui zigvr" \
+            rave-mate-linux-build
+          cp dist/linux/rave-mate dist/rave-mate-linux
       - uses: actions/upload-artifact@v4
         with:
           name: linux

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"slices"
 	"sort"
@@ -109,6 +110,7 @@ import (
 	"rave.page/mate/internal/transcode"
 	"rave.page/mate/internal/twitch"
 	"rave.page/mate/internal/ui"
+	"rave.page/mate/internal/updater"
 	"rave.page/mate/internal/version"
 	"rave.page/mate/internal/videoshare"
 	"rave.page/mate/internal/vrbind"
@@ -181,6 +183,10 @@ func run(parent context.Context, serviceMode bool) error {
 		}
 	}
 	defer inst.close()
+	if exe := updateBootGuard(); exe != "" { // swapped build crash-looped: hand main the restored binary
+		reexecExe.Store(&exe)
+		return nil
+	}
 
 	cfg, cfgErr := config.Load()
 	i18n.SetLocale(cfg.Features.UI.Language)       // webui i18n: persisted pref → OS locale → en
@@ -1935,7 +1941,11 @@ func run(parent context.Context, serviceMode bool) error {
 		remotectl.RegisterPprof(remoteCtl, ctl)       // peer-driven pprof capture (remote-pprof-cpu/-heap, remote-goroutines)
 		remotectl.RegisterUpdater(remoteCtl, ctl)     // peer-driven self-update+relaunch (remote VR-PC update)
 		ctl.startDJSyncScheduler()
+		if ctl.autoUpdOff = autoUpdateOffReason(true); ctl.autoUpdOff == "" && runtime.GOOS == "linux" {
+			ctl.autoUpd = startAutoUpdate(ctx, log, cancel, func() string { return updateBusy(mediaCtl, pub) })
+		}
 		debuglog.Go(log, "ctl", func() { inst.serve(ctl, log) })
+		debuglog.Go(log, "update-health", func() { confirmUpdateHealth(ctx, log) })
 		if deepLink != "" {
 			authMgr.HandleDeepLink(deepLink)
 		}
@@ -2093,6 +2103,8 @@ func run(parent context.Context, serviceMode bool) error {
 		debuglog.Go(log, "auto-reconcile", func() { ar.Start(ctx) })
 	}
 	ctl = &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, ui: u, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, disc: disc, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, mediaCtl: mediaCtl, mediaCaps: mediaCapsPlan, mediaRoutes: mediaRoutesCtl, vram: vramBudget.Budget, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, workers: workers, quit: cancel}
+	ctl.autoUpdOff = autoUpdateOffReason(false)
+	debuglog.Go(log, "update-health", func() { confirmUpdateHealth(ctx, log) })
 	remotectl.RegisterScreenshot(remoteCtl, ctl)  // peer-driven app-window + VR-View screenshot
 	remotectl.RegisterVRDiag(remoteCtl, ctl)      // peer-driven VR input/binding diagnostics
 	remotectl.RegisterPerf(remoteCtl, ctl)        // peer-driven perf diagnosis (remote-perf)
@@ -2742,6 +2754,8 @@ type appControl struct {
 	surfProd    surfaceProducer               // the P3 native-surface producer child's lifecycle + last counters
 	quit        context.CancelFunc
 	updating    atomic.Bool    // guards a self-update in flight (ctl SELF-UPDATE is fire-and-forget)
+	autoUpd     *updater.Auto  // unattended updater (headless Linux); nil when not running
+	autoUpdOff  string         // why the unattended updater is off ("" = running or n/a)
 	libSync     libSyncState   // in-flight/last library metadata sync (ctl SYNC-LIBRARY is async)
 	mediaSync   mediaSyncState // in-flight/last media sync (ctl SYNC-MEDIA is async)
 	plSync      plSyncState    // in-flight/last playlist sync (ctl SYNC-PLAYLISTS is async)
@@ -2797,6 +2811,9 @@ func (c *appControl) Quit() {
 		}
 		if c.guardDisarm != nil {
 			c.guardDisarm()
+		}
+		if exe := ReexecTarget(); exe != "" { // swapped build pending: exec it, never exit 0 into a dead unit
+			_ = selfupdate.Reexec(exe)
 		}
 		os.Exit(0)
 	}()
@@ -3005,6 +3022,12 @@ func (c *appControl) SelfUpdate() string {
 			return
 		}
 		if !avail {
+			return
+		}
+		if runtime.GOOS != "windows" {
+			// Linux: probe + rollback guard + re-exec (a detached Relaunch dies with a systemd
+			// unit's cgroup). Operator-initiated: no busy gate.
+			c.applyAndReexec(rel, u)
 			return
 		}
 		// Apply gets NO deadline: a total-time cap killed slow-but-flowing downloads;
@@ -3358,9 +3381,13 @@ func (c *appControl) Status() string {
 	if c.ui == nil {
 		mode = "service"
 	}
-	return fmt.Sprintf("rave-mate %s | api=%s | signed_in=%v | features=[%s] | running=[traktor=%v studio=%v]",
+	s := fmt.Sprintf("rave-mate %s | api=%s | signed_in=%v | features=[%s] | running=[traktor=%v studio=%v]",
 		mode, c.cfg.APIBaseURL, c.auth != nil && c.auth.SignedIn(), strings.Join(enabled, ","),
 		c.mods.IsRunning("traktor"), c.mods.IsRunning("studio"))
+	if u := c.updateStatusToken(); u != "" { // appended last: STATUS consumers match the prefix
+		s += " | build=" + version.Build + " | update=" + u
+	}
+	return s
 }
 
 // LaunchAppGroup launches every not-running app in the group (crash recovery). Returns a status

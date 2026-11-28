@@ -11,6 +11,9 @@ param(
     [string]$Out = "dist/linux",
     [string]$Tags = "",          # extra go build tags (default: plain build, pure-Go stubs, no zig)
     [string]$Image = "rave-mate-linux-build:trixie",
+    [string]$FeedURL = "",       # updater arming (CI-equivalent): feed the binary polls; "" = updater off
+    [string]$Channel = "",       # e.g. nightly; stamped with -FeedURL
+    [string]$BuildNum = "",      # override the stamped build number (must exceed the feed's to stay put)
     [switch]$NoCache             # force a clean image rebuild
 )
 # NOT "Stop": docker writes build progress to stderr, and under Stop PS 5.1 turns a native
@@ -31,6 +34,7 @@ $dirty = ""
 if ($LASTEXITCODE -ne 0) { $dirty = "-dirty" }
 # Monotonic-ish build number: commits on HEAD. Stable + strictly increasing per push.
 $build = (git rev-list --count HEAD).Trim()
+if ($BuildNum -ne "") { $build = $BuildNum }
 Pop-Location
 
 Write-Host "== docker build $Image =="
@@ -49,6 +53,8 @@ $runArgs = @(
     "-e", "RM_DIRTY=$dirty",
     "-e", "RM_BUILD=$build",
     "-e", "RM_TAGS=$Tags",
+    "-e", "RM_FEEDURL=$FeedURL",
+    "-e", "RM_CHANNEL=$Channel",
     $Image
 )
 & docker @runArgs

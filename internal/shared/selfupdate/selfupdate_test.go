@@ -33,7 +33,8 @@ func serveFeed(t *testing.T, downloadURL string) *httptest.Server {
 			u = srv.URL + "/rave-app.exe"
 		}
 		fmt.Fprintf(w, `{"version":"development-abc1234","build":4242,"commit":"abc1234",`+
-			`"url":%q,"sha256":%q,"released":"2026-06-04T18:30:00Z","notes":"fix things"}`, u, testSHA)
+			`"url":%q,"sha256":%q,"linux_url":%q,"linux_sha256":%q,"released":"2026-06-04T18:30:00Z","notes":"fix things"}`,
+			u, testSHA, u, testSHA)
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -245,11 +246,11 @@ func TestDownloadRefusesCrossOriginRedirect(t *testing.T) {
 	}
 }
 
-// TestDownloadStagesWithoutTouchingExe: Download verifies + stages to .new only; Install swaps;
-// Discard cleans. Windows-only (the swap dance targets the running exe semantics).
+// TestDownloadStagesWithoutTouchingExe: Download verifies + stages this OS's target to .new beside
+// the REAL running test binary only; Install swaps; Discard cleans. (Windows + Linux targets.)
 func TestDownloadStagesWithoutTouchingExe(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("Download/Install are Windows-only")
+	if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
+		t.Skip("no updater target for " + runtime.GOOS)
 	}
 	payload := []byte("rave-mate-binary-v2")
 	sum := sha256.Sum256(payload)
@@ -263,7 +264,8 @@ func TestDownloadStagesWithoutTouchingExe(t *testing.T) {
 		t.Fatal(err)
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
-	rel := &Release{Version: "v2", Build: 2, URL: srv.URL + "/rave-mate.exe", SHA256: hex.EncodeToString(sum[:])}
+	sha := hex.EncodeToString(sum[:])
+	rel := &Release{Version: "v2", Build: 2, URL: srv.URL + "/rave-mate.exe", SHA256: sha, LinuxURL: srv.URL + "/rave-mate-linux", LinuxSHA256: sha}
 
 	st, err := New(srv.URL, 1, "").Download(context.Background(), rel, nil)
 	if err != nil {
@@ -316,7 +318,8 @@ func TestSignatureEnforced(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	manifest = fmt.Appendf(nil, `{"build":7,"url":%q,"sha256":%q}`, srv.URL+"/rave-app.exe", testSHA)
+	manifest = fmt.Appendf(nil, `{"build":7,"url":%q,"sha256":%q,"linux_url":%q,"linux_sha256":%q}`,
+		srv.URL+"/rave-app.exe", testSHA, srv.URL+"/rave-app-linux", testSHA)
 
 	sig = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, manifest))
 	if _, err := New(srv.URL, 1, pubB64).Latest(context.Background()); err != nil {
