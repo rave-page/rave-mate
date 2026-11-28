@@ -495,6 +495,10 @@ func formatRoutes(stats []medialink.RouteStat) string {
 			}
 			b.WriteString(line + "\n")
 		}
+		// Per-source user caps (receiving side; ctl route-cap / Peers tab).
+		if s.CapKbps > 0 || s.CapFPS > 0 {
+			fmt.Fprintf(&b, "    caps (per-source) maxKbps=%s maxFps=%s\n", fmtCap(s.CapKbps, ""), fmtCap(s.CapFPS, ""))
+		}
 		// Adaptive budget, encoder (sender) view: mode + ceiling + quality feedback (best value per system).
 		if s.Pipe != nil && (s.Pipe.BudgetKbps > 0 || s.Pipe.QualityTarget > 0) {
 			mode := "fixed"

@@ -63,6 +63,7 @@ type Control interface {
 	MediaPerf() string                                     // media-plane Go GC/scheduler pause distributions (STEP-0 hang evidence)
 	RouteStart(peer, source string) string                 // receiving side: request peer's source (same path as the UI)
 	RouteStop(peer, source string) string                  // receiving side: stop a route by source name, or "all"
+	RouteCap(peer, arg string) string                      // receiving side: show/set a received source's per-source caps
 	RemoteScreenshot(nodeID, path string, vr bool) string  // screenshot a paired peer's app window (vr=VR-View) to a local PNG; status line
 	VRInputDiag() string                                   // this instance's SteamVR Input action/binding diagnostic
 	RemoteVRInputDiag(nodeID string) string                // a paired peer's VR input/binding diagnostic (nodeID "" = first connected)
@@ -460,6 +461,13 @@ func handleConn(conn net.Conn, ctrl Control) {
 			return
 		}
 		fmt.Fprintln(conn, ctrl.RouteStart(peer, source))
+	case strings.HasPrefix(cmd, "ROUTE-CAP "):
+		peer, arg := cutFirstField(strings.TrimSpace(cmd[len("ROUTE-CAP "):]))
+		if peer == "" || arg == "" {
+			fmt.Fprintln(conn, "usage: ROUTE-CAP <peer> <source> [--kbps N|none] [--fps N|none]")
+			return
+		}
+		fmt.Fprintln(conn, ctrl.RouteCap(peer, arg))
 	case strings.HasPrefix(cmd, "ROUTE-STOP "):
 		peer, source := cutFirstField(strings.TrimSpace(cmd[len("ROUTE-STOP "):]))
 		if peer == "" || source == "" {
